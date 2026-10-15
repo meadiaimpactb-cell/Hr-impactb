@@ -1,0 +1,68 @@
+<template>
+  <div class="page-h">
+    <div><h1>{{ t('البريد الداخلي') }}</h1><p>مراسلات داخلية بين المستخدمين بمرفقات وحالة قراءة</p></div>
+    <div class="acts"><button v-if="auth.emp?.manager?.user_id" class="btn sec sm" @click="openNew(auth.emp.manager)"><Icon name="send" :size="16" /> مراسلة مديري المباشر</button><button class="btn pri sm" @click="openNew()"><Icon name="mail" :size="16" /> رسالة جديدة</button></div>
+  </div>
+  <div class="grid mail-grid">
+    <div class="card mail-list">
+      <div v-if="!threads.length" class="empty">لا رسائل</div>
+      <div v-for="th in threads" :key="th.id" class="thread" :class="{ on: cur?.id === th.id, unread: th.unread }" @click="open(th.id)">
+        <div class="row" style="justify-content:space-between"><b>{{ th.subject }}</b><span class="tiny muted">{{ fmtDT(th.last_at) }}</span></div>
+        <div class="small muted">{{ th.others }} · {{ th.count }}</div><div class="tiny muted">{{ th.preview }}</div>
+      </div>
+    </div>
+    <div class="card" style="margin:0">
+      <div v-if="!cur" class="empty">اختر محادثة</div>
+      <template v-else>
+        <h3>{{ cur.subject }} <span class="sub">{{ cur.participants.map((p) => p.name).join('، ') }}</span></h3>
+        <div style="max-height:50vh;overflow:auto">
+          <div v-for="m in cur.messages" :key="m.id" class="msg" :class="{ mine: m.mine }"><div class="tiny muted">{{ m.from?.name }} · {{ fmtDT(m.at) }}</div><div style="white-space:pre-wrap">{{ m.body }}</div><a v-if="m.file" class="btn ghost xs" href="#" @click.prevent="fileUrl(m.file)"><Icon name="download" :size="13" /> مرفق</a></div>
+        </div>
+        <div class="row mt" style="align-items:flex-end"><textarea v-model="reply" class="in" rows="2" placeholder="اكتب ردًا…" style="flex:1" /><input type="file" style="max-width:180px" @change="file = $event.target.files[0]" /><button class="btn pri" :class="{ loading: busy }" @click="send"><Icon name="send" :size="15" flip-rtl /></button></div>
+      </template>
+    </div>
+  </div>
+
+  <Modal v-if="nf" title="رسالة جديدة" @close="nf = null">
+    <div class="fg"><label>إلى *</label><SearchSelect :model-value="null" :options="users.filter((u) => !nf.to.includes(u.id)).map((u) => ({ value: u.id, label: u.name, sub: u.role }))" placeholder="ابحث عن مستلم…" @update:model-value="(v) => v && nf.to.push(v)" /><div v-if="nf.to.length" class="row" style="gap:6px;margin-top:6px"><span v-for="id in nf.to" :key="id" class="pill info">{{ users.find((u) => u.id === id)?.name || id }} <a style="cursor:pointer" @click="nf.to = nf.to.filter((x) => x !== id)">×</a></span></div><span class="tiny muted">تصل الرسالة داخل المنصة، ونسخة منها إلى البريد الإلكتروني الرسمي للمستلم.</span></div>
+    <div class="fg"><label>الموضوع *</label><input v-model="nf.subject" class="in" /></div>
+    <div class="fg"><label>الرسالة *</label><textarea v-model="nf.body" class="in" rows="5" /></div>
+    <div class="fg"><label>مرفق</label><input type="file" class="in" @change="file = $event.target.files[0]" /></div>
+    <template #foot><button class="btn sec" @click="nf = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="create">إرسال</button></template>
+  </Modal>
+</template>
+
+<script setup>
+import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import api, { fileUrl } from '../api'
+import Modal from '../components/Modal.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import { useAuth } from '../stores/auth'
+import { useUi } from '../stores/ui'
+import { fmtDT } from '../utils'
+
+const { t } = useI18n()
+const auth = useAuth(); const ui = useUi()
+const threads = ref([]); const cur = ref(null); const reply = ref(''); const file = ref(null); const busy = ref(false); const nf = ref(null); const users = ref([])
+async function load() { threads.value = await api.get('/mail') }
+async function open(id) { cur.value = await api.get(`/mail/${id}`); const th = threads.value.find((x) => x.id === id); if (th) th.unread = false }
+function fd(obj) { const x = new FormData(); Object.entries(obj).forEach(([k, v]) => { if (Array.isArray(v)) v.forEach((i) => x.append(k + '[]', i)); else if (v !== null && v !== '') x.append(k, v) }); if (file.value) x.append('attachment', file.value); return x }
+async function send() { if (!reply.value.trim()) return; busy.value = true; try { cur.value = await api.post(`/mail/${cur.value.id}/reply`, fd({ body: reply.value })); reply.value = ''; file.value = null; load() } finally { busy.value = false } }
+async function openNew(manager) { nf.value = { to: manager?.user_id ? [manager.user_id] : [], subject: '', body: '' }; if (!users.value.length) users.value = (await api.get('/users/options')).filter((u) => u.id !== auth.user.id) }
+async function create() {
+  if (!nf.value.to.length || !nf.value.subject.trim() || !nf.value.body.trim()) return ui.toast('المستلم والموضوع والرسالة إلزامية', 'warn')
+  busy.value = true
+  try { const r = await api.post('/mail', fd(nf.value)); nf.value = null; file.value = null; await load(); open(r.id) } finally { busy.value = false }
+}
+onMounted(load)
+</script>
+
+<style scoped>
+.thread{padding:10px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}.thread:hover{background:var(--soft)}.thread.on{background:var(--infobg)}.thread.unread b{color:var(--navy)}.thread.unread::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--navy);margin-inline-end:6px}
+.msg{padding:10px 12px;border-radius:12px;background:var(--soft);margin-bottom:8px;max-width:80%}.msg.mine{background:var(--infobg);margin-inline-start:auto}
+.mail-grid{grid-template-columns:minmax(0,1fr);gap:14px}
+.mail-list{margin:0;max-height:40dvh;overflow:auto;overscroll-behavior:contain}
+@media(min-width:768px){.mail-grid{grid-template-columns:minmax(260px,340px) minmax(0,1fr)}.mail-list{max-height:70dvh}}
+@media(max-width:767px){.msg{max-width:92%}}
+</style>

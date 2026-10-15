@@ -1,0 +1,22 @@
+/* SweetAlert2 dressed in the HC identity — follows light/dark tokens from styles.css */
+.swal2-container { z-index: var(--z-alert, 1065) !important; backdrop-filter: blur(2px); }
+.swal2-container.swal2-backdrop-show { background: rgba(15, 20, 48, .45) !important; }
+.hc-swal.swal2-popup { direction: inherit; font-family: 'Cairo', system-ui, 'Segoe UI', Tahoma, sans-serif; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 18px; padding: 26px 24px 20px; width: min(440px, calc(100vw - 32px)); box-shadow: 0 24px 60px rgba(15, 20, 48, .28); }
+.hc-swal .hc-swal-title { color: var(--ink); font-size: 19px; font-weight: 800; padding: 4px 8px 0; }
+.hc-swal .hc-swal-text { color: var(--muted); font-size: 14.5px; line-height: 1.9; margin: 8px 8px 0; }
+.hc-swal .swal2-icon { transform: scale(.78); margin: 4px auto 0; }
+.hc-swal .hc-swal-actions { gap: 10px; margin-top: 20px; width: 100%; flex-direction: row; }
+.hc-swal .hc-swal-actions .btn { min-width: 116px; padding: 9px 18px; font-size: 14px; }
+.hc-swal .hc-swal-input { width: calc(100% - 16px); margin: 14px 8px 0; min-height: 90px; font-size: 14px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; box-shadow: none; }
+.hc-swal input.hc-swal-input { min-height: 0; height: 42px; }
+.hc-swal .hc-swal-input:focus { border-color: var(--deep); box-shadow: 0 0 0 3px rgba(27, 130, 195, .15); }
+.hc-swal .hc-swal-err { background: var(--badbg); color: var(--bad); font-size: 13px; margin: 10px 8px 0; border-radius: 8px; }
+.hc-swal .hc-swal-err::before { display: none; }
+@keyframes hcSwalIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes hcSwalOut { to { opacity: 0; transform: scale(.98); } }
+.hc-swal-in { animation: hcSwalIn .18s ease-out; }
+.hc-swal-out { animation: hcSwalOut .12s ease-in forwards; }
+@media (prefers-reduced-motion: reduce) { .hc-swal-in, .hc-swal-out { animation: none; } }
+
+/* multi-line alert messages (e.g. import results) */
+.swal2-html-container.swal-pre { white-space: pre-line; text-align: start; max-height: 50vh; overflow: auto; }

@@ -1,0 +1,43 @@
+# Backend
+backend/vendor/
+backend/node_modules/
+backend/.env
+backend/storage/*.key
+backend/storage/app/public/
+backend/storage/framework/cache/data/
+backend/storage/framework/sessions/
+backend/storage/framework/testing/
+backend/storage/framework/views/
+backend/storage/logs/
+backend/bootstrap/cache/*.php
+!backend/bootstrap/cache/.gitkeep
+
+# Frontend (built into backend/public/app)
+frontend/node_modules/
+frontend/dist/
+backend/public/static/
+backend/public/downloads/
+# Deployment packages
+deploy/build/
+deploy/*.zip
+# Mobile
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+# OS / editors
+.DS_Store
+Thumbs.db
+*.log
+/HC-mobile-release.apk
+# Flutter platform folders are committed; only build products are ignored
+mobile/android/.gradle/
+mobile/android/app/.cxx/
+mobile/android/local.properties
+mobile/ios/Pods/
+mobile/ios/Flutter/ephemeral/deploy/backups/
+deploy/payroll-import.json
+doc/
+deploy/report-templates.json
+backend/.env.hostinger
