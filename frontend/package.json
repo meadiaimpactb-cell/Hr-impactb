@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/gen-brand.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -22,7 +23,7 @@
     "vue": "^3.5.42",
     "vue-i18n": "^10.0.8",
     "vue-router": "^4.6.4",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "xlsx": "^0.18.5",
     "zod": "^3.25.76"
   },
   "devDependencies": {

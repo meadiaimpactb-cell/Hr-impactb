@@ -41,3 +41,9 @@ deploy/payroll-import.json
 doc/
 deploy/report-templates.json
 backend/.env.hostinger
+
+# Brand PNGs are generated from frontend/brand/*.b64 by `npm run prebuild`
+/frontend/public/favicon.png
+/frontend/public/logo-full.png
+/frontend/public/logo-mark.png
+/frontend/public/logo-topbar.png
