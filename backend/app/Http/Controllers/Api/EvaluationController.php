@@ -23,7 +23,7 @@ class EvaluationController extends Controller
 
     public function saveTemplate(Request $request, ?EvalTemplate $template = null)
     {
-        abort_unless($request->user()->hasRole('super'), 403, 'الأوزان صلاحية المدير العام');
+        abort_unless($request->user()->hasRole('super'), 403, 'الأوزان صلاحية الرئيس التنفيذي للمجموعة');
         $d = $request->validate(['name' => 'required|string|max:120', 'scope' => 'required|in:group,company,job', 'scope_id' => 'nullable|integer', 'pass_score' => 'required|integer|min:0|max:100',
             'weights' => 'required|array', 'weights.achieve' => 'required|numeric|min:0', 'weights.attend' => 'required|numeric|min:0', 'weights.dev' => 'required|numeric|min:0', 'weights.disc' => 'required|numeric|min:0',
             'sub' => 'required|array', 'grades' => 'required|array|min:1', 'grades.*' => 'array|size:3', 'active' => 'boolean', 'reason' => 'required|string|max:300']);

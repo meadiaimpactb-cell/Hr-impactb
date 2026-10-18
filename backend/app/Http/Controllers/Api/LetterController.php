@@ -113,7 +113,7 @@ class LetterController extends Controller
         abort_unless($letter->employee_id === $u->employee_id || Access::for()->canSeeEmployee($letter->employee), 403);
         $letter->load('employee.company', 'employee.jobTitle', 'company', 'issuer:id,name', 'signedDoc.signer:id,name');
 
-        return $this->row($letter) + ['employee' => $letter->employee->only('id', 'name', 'emp_no', 'nationality', 'national_id'), 'company' => $letter->company->only('id', 'name', 'name_en', 'legal_no'),
+        return $this->row($letter) + ['employee' => $letter->employee->only('id', 'name', 'emp_no', 'nationality', 'national_id'), 'company' => $letter->company->only('id', 'name', 'name_en', 'legal_no', 'logo_url', 'color'),
             'job' => $letter->employee->jobTitle?->only('name', 'name_en'), 'hijri' => self::hijri($letter->issued_at), 'signature' => $letter->signedDoc?->signature, 'signer' => $letter->signedDoc?->signer?->name,
             'can_sign' => ! $letter->signed_doc_id && $u->isHr() && (bool) $u->signature];
     }

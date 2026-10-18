@@ -22,12 +22,12 @@
         <form novalidate @submit="onSubmit">
           <div class="fg">
             <label for="np">كلمة المرور</label>
-            <input id="np" v-model="password" v-bind="pAttrs" type="password" class="in" :class="{ err: errors.password }" autocomplete="new-password" autofocus />
+            <div class="pw"><input id="np" v-model="password" v-bind="pAttrs" :type="show ? 'text' : 'password'" class="in" :class="{ err: errors.password }" autocomplete="new-password" autofocus /><button type="button" class="eye" :aria-label="show ? 'إخفاء' : 'إظهار'" @click="show = !show"><Icon :name="show ? 'eye-off' : 'eye'" :size="16" /></button></div>
             <PasswordChecklist :value="password || ''" />
           </div>
           <div class="fg">
             <label for="npc">تأكيد كلمة المرور</label>
-            <input id="npc" v-model="confirm" v-bind="cAttrs" type="password" class="in" :class="{ err: errors.password_confirmation }" autocomplete="new-password" />
+            <div class="pw"><input id="npc" v-model="confirm" v-bind="cAttrs" :type="show ? 'text' : 'password'" class="in" :class="{ err: errors.password_confirmation }" autocomplete="new-password" /><button type="button" class="eye" :aria-label="show ? 'إخفاء' : 'إظهار'" @click="show = !show"><Icon :name="show ? 'eye-off' : 'eye'" :size="16" /></button></div>
             <span v-if="errors.password_confirmation" class="e">{{ errors.password_confirmation }}</span>
           </div>
           <div v-if="serverError" class="notice bad">{{ serverError }}</div>
@@ -40,6 +40,8 @@
 </template>
 
 <script setup>
+import { ref as _ref } from 'vue'
+const show = _ref(false)
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useForm } from 'vee-validate'
@@ -78,5 +80,11 @@ const onSubmit = handleSubmit(async (v) => {
   } catch (e) { serverError.value = Object.values(e.errors || {}).flat().join(' · ') || e.message || 'تعذر التفعيل' }
 })
 </script>
+
+<style scoped>
+.pw { position: relative; }
+.pw .in { padding-inline-end: 42px; }
+.eye { position: absolute; inset-inline-end: 6px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); border-radius: 8px; cursor: pointer; }
+</style>
 
 <style scoped>.block.mt { margin-top: 8px; }</style>

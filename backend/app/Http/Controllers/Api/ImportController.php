@@ -11,7 +11,7 @@ class ImportController extends Controller
 {
     private function admin(Request $r): void
     {
-        abort_unless($r->user()->hasRole('super', 'hr_mgr'), 403, 'الاستيراد صلاحية المدير العام ومدير الموارد البشرية');
+        abort_unless($r->user()->hasRole('super', 'hr_mgr'), 403, 'الاستيراد صلاحية الرئيس التنفيذي للمجموعة ومدير الموارد البشرية');
     }
 
     public function templates(Request $request)

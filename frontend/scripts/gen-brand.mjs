@@ -9,6 +9,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const brand = join(root, 'brand')
 const pub = join(root, 'public')
 
+import { existsSync } from 'node:fs'
+if (!existsSync(brand)) process.exit(0) // nothing to regenerate: the PNGs in public/ are committed as-is
 for (const f of readdirSync(brand)) {
   if (!f.endsWith('.b64')) continue
   const out = f.replace(/\.b64$/, '')

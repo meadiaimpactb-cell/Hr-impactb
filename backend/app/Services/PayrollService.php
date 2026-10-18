@@ -68,10 +68,11 @@ class PayrollService
 
     public static function minuteValue(Employee $e, string $period): float
     {
+        // §41: daily wage = monthly wage ÷ 30; minute = daily wage ÷ (daily work hours × 60)
         $gross = $e->monthlyGross($period);
-        $wd = self::workDaysInMonth($e, $period);
+        $hours = (float) Settings::get('dailyHours', $e->company_id, 8);
 
-        return $gross / ($wd * 8 * 60);
+        return ($gross / 30) / (max(1, $hours) * 60);
     }
 
     /** Late/absence deduction for the month, capped at the company's policy ceiling. */
@@ -81,8 +82,8 @@ class PayrollService
         $factor = (float) Settings::get('lateFactor', $e->company_id, 1);
         $mv = self::minuteValue($e, $period);
         $lateAmt = round(($a['late_minutes'] + $a['early_minutes']) * $mv * $factor, 2);
-        $absAmt = round($e->monthlyGross($period) / self::daysInMonth($period) * $a['absent'], 2);
-        $cap = $e->monthlyGross($period) * (float) Settings::get('maxDeductionPct', $e->company_id, 100) / 100;
+        $absAmt = round($e->monthlyGross($period) / 30 * $a['absent'], 2); // §41: a day of absence = one day of the wage (÷30)
+        $cap = $e->monthlyGross($period) * (float) Settings::get('maxDeductionPct', $e->company_id, 25) / 100;
         $total = min($cap, $lateAmt + $absAmt);
 
         return ['late_amt' => $lateAmt, 'abs_amt' => $absAmt, 'total' => round($total, 2), 'capped' => ($lateAmt + $absAmt) > $cap,
@@ -163,6 +164,23 @@ class PayrollService
         $unpaid = self::unpaidDays($e, $period);
         if ($unpaid > 0) {
             $deductions[] = ['key' => 'unpaid', 'name' => "إجازة بدون راتب ({$unpaid} يوم)", 'amount' => round($e->monthlyGross($period) / self::daysInMonth($period) * $unpaid, 2), 'auto' => true];
+        }
+        // §42: the instalment together with the other deductions may not exceed half the wage due — the instalment is reduced and the rest stays due
+        $half = round($gross / 2, 2);
+        $sumAll = round(array_sum(array_column($deductions, 'amount')), 2);
+        if ($sumAll > $half) {
+            $excess = $sumAll - $half;
+            foreach ($deductions as &$dd) {
+                if ($dd['key'] === 'advance' && $excess > 0) {
+                    $cut = min($excess, $dd['amount']);
+                    $dd['amount'] = round($dd['amount'] - $cut, 2);
+                    $dd['name'] .= ' (خُفّض القسط ليبقى مجموع الحسومات ≤ نصف الأجر — §42)';
+                    $dd['deferred'] = round($cut, 2);
+                    $excess -= $cut;
+                }
+            }
+            unset($dd);
+            $deductions = array_values(array_filter($deductions, fn ($x) => $x['amount'] > 0));
         }
         $dedTotal = round(array_sum(array_column($deductions, 'amount')), 2);
 

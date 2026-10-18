@@ -91,9 +91,9 @@ class AuthController extends Controller
 
     public function changePassword(Request $request)
     {
-        $data = $request->validate(['current' => 'required', 'password' => ['required', 'confirmed', \Illuminate\Validation\Rules\Password::min(8)->letters()->numbers()->symbols()]]);
+        $data = $request->validate(['current' => 'nullable|string', 'password' => ['required', 'confirmed', \Illuminate\Validation\Rules\Password::min(8)->letters()->numbers()->symbols()]]);
         $u = $request->user();
-        if (! Hash::check($data['current'], $u->password)) {
+        if (! empty($data['current']) && ! Hash::check($data['current'], $u->password)) {
             throw ValidationException::withMessages(['current' => 'كلمة المرور الحالية غير صحيحة']);
         }
         $u->update(['password' => $data['password'], 'must_change_password' => false]);
@@ -112,7 +112,7 @@ class AuthController extends Controller
 
     private function profile(User $u): array
     {
-        $u->loadMissing('employee.company:id,name,name_en,code', 'employee.jobTitle:id,name,name_en');
+        $u->loadMissing('employee.company:id,name,name_en,code,logo_path,color,color2,tier_id,updated_at', 'employee.company.tier:id,code,name,color', 'employee.jobTitle:id,name,name_en');
         $acc = Access::for($u);
         $e = $u->employee;
 

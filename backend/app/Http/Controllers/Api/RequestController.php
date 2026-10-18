@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ApprovalRequest;
 use App\Models\Employee;
+use App\Models\User;
 use App\Models\LeaveType;
 use App\Models\Lookup;
 use App\Models\RequestType;
@@ -13,6 +14,7 @@ use App\Services\ApprovalService;
 use App\Services\LeaveService;
 use App\Services\Settings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -78,7 +80,7 @@ class RequestController extends Controller
             'correction' => $request->validate(['date' => 'required|date|before_or_equal:today', 'kind' => 'required|string|max:80', 'time' => 'nullable|date_format:H:i', 'reason' => 'required|string|max:1000']),
             'advance' => $this->advanceData($request, $e),
             'letter' => $request->validate(['kind' => 'required|string|max:80', 'to' => 'nullable|string|max:150', 'lang' => 'in:ar,en']),
-            'trip' => $request->validate(['destination' => 'required|string|max:120', 'purpose' => 'required|string|max:1000', 'from' => 'required|date', 'to' => 'required|date|after_or_equal:from', 'estimate' => 'required|numeric|min:0', 'advance' => 'nullable|numeric|min:0']),
+            'trip' => $this->tripData($request, $e),
             'resignation' => $this->resignationData($request, $e),
             'allowance', 'salary_change', 'benefit', 'balance_adj' => $this->privilegedData($request, $rt->handler),
             default => $this->customData($request, $rt),
@@ -91,7 +93,7 @@ class RequestController extends Controller
             abort(403, 'هذا النوع لا يُقدَّم ذاتيًا');
         }
         $path = $request->file('attachment')?->store('requests/'.now()->format('Y/m'), 'local'); // only after validation & authorization
-        $flow = match ($rt->handler) { 'leave' => $this->leaveFlow($data), 'trip' => $this->tripFlow($data, $e), default => null };
+        $flow = match ($rt->handler) { 'leave' => $this->leaveFlow($data), 'trip' => $this->tripFlow($data, $e), 'custody' => $this->custodyFlow($data, $target), default => null };
         $req = ApprovalService::submit($target, $type, $data, $flow, $path);
 
         return response()->json($this->row($req->load('company:id,name')), 201);
@@ -193,13 +195,77 @@ class RequestController extends Controller
         return $flow;
     }
 
-    /** Trip flow = configured flow + finance stage when the estimate exceeds tripFinanceCap. */
+    /**
+     * Business trip (§65–68): domestic or international, both dates required, itemised estimate, and the per-diem /
+     * hotel cap computed from the company's classification tier and the employee's level.
+     */
+    private function tripData(Request $request, Employee $e): array
+    {
+        $v = $request->validate(['destination' => 'required|string|max:120', 'purpose' => 'required|string|max:1000', 'scope' => 'required|in:domestic,intl',
+            'from' => 'required|date', 'to' => 'required|date|after_or_equal:from', 'estimate' => 'nullable|numeric|min:0', 'advance' => 'nullable|numeric|min:0',
+            'cost_flight' => 'nullable|numeric|min:0', 'cost_lodging' => 'nullable|numeric|min:0', 'cost_allowance' => 'nullable|numeric|min:0', 'cost_transport' => 'nullable|numeric|min:0', 'cost_fees' => 'nullable|numeric|min:0']);
+        $days = Carbon::parse($v['from'])->diffInDays(Carbon::parse($v['to'])) + 1;
+        $calc = self::tripRates($e, $days);
+        $items = array_filter(array_intersect_key($v, array_flip(['cost_flight', 'cost_lodging', 'cost_allowance', 'cost_transport', 'cost_fees'])), fn ($x) => $x !== null && $x !== '');
+        $estimate = $items ? array_sum(array_map('floatval', $items)) : (float) ($v['estimate'] ?? 0);
+        if ($estimate <= 0) {
+            throw ValidationException::withMessages(['estimate' => 'أدخل تفاصيل التكلفة التقديرية أو إجماليها']);
+        }
+        if (! empty($v['advance']) && (float) $v['advance'] > (float) Settings::get('custodyCashCap', $e->company_id, 3000)) {
+            $calc['advance_over_cap'] = true; // the group CEO is added to the chain below (§44)
+        }
+
+        return array_merge($v, ['estimate' => round($estimate, 2), 'days' => $days], $calc);
+    }
+
+    /** Per-diem by level (ceo / director / manager / specialist / staff) and hotel cap, from the tier benefits (§66–67). */
+    public static function tripRates(Employee $e, int $days): array
+    {
+        $u = User::where('employee_id', $e->id)->first();
+        $isCeo = \App\Models\Company::where('ceo_employee_id', $e->id)->exists() || ($u && $u->hasRole('super', 'ceo'));
+        $level = $isCeo ? 'Ceo' : (($u && $u->hasRole('hr_mgr', 'fin')) ? 'Dir' : (($u && $u->hasRole('mgr')) || Employee::where('manager_id', $e->id)->exists() ? 'Mgr' : 'Staff'));
+        $perDiem = (float) ($e->benefit('perDiem'.$level) ?? 0);
+        $hotel = (float) ($e->benefit('hotelCap') ?? 0);
+
+        return ['level' => $level, 'per_diem' => $perDiem, 'allowance_total' => round($perDiem * $days, 2), 'hotel_cap' => $hotel, 'hotel_total_cap' => round($hotel * max(0, $days - 1), 2)];
+    }
+
+    /** Trip flow (§65): domestic = manager → HR → finance; international adds the company CEO after the manager and the group CEO last. */
     private function tripFlow(array $data, Employee $e): array
     {
         $flow = ApprovalService::flowFor('trip', $data);
-        $cap = (float) Settings::get('tripFinanceCap', $e->company_id, 5000);
-        if ((float) ($data['estimate'] ?? 0) + (float) ($data['advance'] ?? 0) > $cap && ! in_array('fin', array_column($flow, 'role'), true)) {
-            $flow = ApprovalService::insertBeforeFinal($flow, ['role' => 'fin', 'label' => 'المدير المالي (تجاوز سقف الرحلة '.number_format($cap).')']);
+        $roles = array_column($flow, 'role');
+        if (($data['scope'] ?? 'domestic') === 'intl') {
+            if (! in_array('ceo', $roles, true)) {
+                array_splice($flow, 1, 0, [['role' => 'ceo', 'label' => 'الرئيس التنفيذي للشركة (رحلة خارج المملكة)']]);
+            }
+            if (! in_array('super', $roles, true)) {
+                $flow[] = ['role' => 'super', 'label' => 'الرئيس التنفيذي للمجموعة (رحلة خارج المملكة)'];
+            }
+        } elseif (! empty($data['advance_over_cap']) && ! in_array('super', $roles, true)) {
+            $flow[] = ['role' => 'super', 'label' => 'الرئيس التنفيذي للمجموعة (عهدة نقدية فوق 3,000)'];
+        }
+
+        return $flow;
+    }
+
+    /** Custody flow (§44): cash → manager → finance (+ group CEO above the cap); in-kind → manager → HR. No new cash custody before the previous one is settled. */
+    private function custodyFlow(array $data, Employee $e): array
+    {
+        $amount = (float) ($data['amount'] ?? 0);
+        $flow = ApprovalService::flowFor('custody', $data);
+        if ($amount <= 0) {
+            return $flow;
+        }
+        $open = \App\Models\CustodyItem::where('employee_id', $e->id)->whereIn('status', ['in_use', 'pending_ack', 'return_requested'])
+            ->whereHas('type', fn ($q) => $q->where('is_cash', true))->exists();
+        if ($open) {
+            throw ValidationException::withMessages(['amount' => 'لا تُصرف عهدة نقدية جديدة قبل تسوية العهدة النقدية السابقة (اللائحة §44)']);
+        }
+        $flow = [['role' => 'mgr', 'label' => 'المشرف المباشر'], ['role' => 'fin', 'label' => 'المدير المالي (اعتماد العهدة النقدية)']];
+        $cap = (float) Settings::get('custodyCashCap', $e->company_id, 3000);
+        if ($amount > $cap) {
+            $flow[] = ['role' => 'super', 'label' => 'الرئيس التنفيذي للمجموعة (تجاوز سقف العهدة النقدية '.number_format($cap).')'];
         }
 
         return $flow;
@@ -222,9 +288,18 @@ class RequestController extends Controller
         if (! $e->advances_enabled) {
             throw ValidationException::withMessages(['amount' => 'خاصية السلف غير مفعّلة لحسابك']);
         }
+        // §42: not during probation (180 days) and not while a previous advance is still being repaid — the group CEO may except
+        $probation = (int) Settings::get('probationDays', $e->company_id, 180);
+        if ($e->hire_date && $e->hire_date->copy()->addDays($probation)->gt(now()) && ! $request->user()->hasRole('super')) {
+            throw ValidationException::withMessages(['amount' => 'لا تُمنح السلفة خلال فترة التجربة إلا باستثناء من الرئيس التنفيذي للمجموعة (اللائحة §42)']);
+        }
+        if (\App\Models\Advance::where('employee_id', $e->id)->where('status', 'repaying')->exists() && ! $request->user()->hasRole('super')) {
+            throw ValidationException::withMessages(['amount' => 'لا تُمنح سلفة جديدة قبل سداد السلفة السابقة كاملة (اللائحة §42)']);
+        }
         $max = (int) Settings::get('advanceMaxInstallments', $e->company_id, 12);
+        $min = (int) Settings::get('advanceMinAmount', $e->company_id, 100);
         $cap = Settings::get('advanceCapSalaries', $e->company_id, 2) * $e->monthlyGross();
-        $v = $request->validate(['amount' => "required|numeric|min:100|max:$cap", 'installments' => "required|integer|min:1|max:$max", 'purpose' => 'required|string|max:300']);
+        $v = $request->validate(['amount' => "required|numeric|min:$min|max:$cap", 'installments' => "required|integer|min:1|max:$max", 'purpose' => 'required|string|max:300']);
 
         return $v + ['monthly' => round($v['amount'] / $v['installments'], 2)];
     }
@@ -232,7 +307,7 @@ class RequestController extends Controller
     private function resignationData(Request $request, Employee $e): array
     {
         $v = $request->validate(['requested_last' => 'required|date|after:today', 'reason' => 'required|string|max:2000']);
-        $notice = (int) Settings::get($e->contract_type === 'full' ? 'noticeDaysMonthly' : 'noticeDaysOther', $e->company_id, 60);
+        $notice = (int) Settings::get($e->contract_type === 'full' ? 'noticeDaysMonthly' : 'noticeDaysOther', $e->company_id, 30); // §108: the employee gives 30 days
 
         return $v + ['notice' => $notice, 'computed_last' => now()->addDays($notice)->toDateString()];
     }

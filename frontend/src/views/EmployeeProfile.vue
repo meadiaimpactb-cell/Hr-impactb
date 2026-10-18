@@ -42,7 +42,7 @@
         </div>
         <h3>بيانات العقد <span v-if="d.can.edit" class="sub">انقر على أي قيمة عليها قلم لتعديلها وحفظها مباشرة</span></h3>
         <InlineTable :rows="contractRows" :can="canInline" :submit="saveField" />
-        <h3 class="mt">مكوّنات الأجر <span v-if="d.can.hr" class="sub">انقر على المبلغ لتعديله. يُرفع التعديل طلبًا يعتمده المدير العام ثم يُطبَّق من التاريخ الذي تحدده</span>
+        <h3 class="mt">مكوّنات الأجر <span v-if="d.can.hr" class="sub">انقر على المبلغ لتعديله. يُرفع التعديل طلبًا يعتمده الرئيس التنفيذي للمجموعة ثم يُطبَّق من التاريخ الذي تحدده</span>
           <span v-if="d.can.hr" class="acts"><button class="btn sec xs" @click="payEdit = { id: 'new', key: 'alw' + Date.now().toString(36).slice(-5), name: '', amount: null, effective: today(), reason: '' }"><Icon name="plus" :size="14" /> إضافة بدل</button></span></h3>
         <div class="tw"><table class="info-t">
           <thead><tr><th>المكوّن</th><th>القيمة</th><th>المصدر</th><th>ساري من</th></tr></thead>
@@ -69,7 +69,7 @@
               </div></td></tr>
           </tbody>
         </table></div>
-        <p class="tiny muted mt">بيانات العقد تُحفظ فورًا. أما الأجر فيُرفع طلبًا يعتمده المدير العام، ثم يُطبَّق ويُسجَّل في المسار الوظيفي. تابع الطلب من «صندوق الموافقات».</p>
+        <p class="tiny muted mt">بيانات العقد تُحفظ فورًا. أما الأجر فيُرفع طلبًا يعتمده الرئيس التنفيذي للمجموعة، ثم يُطبَّق ويُسجَّل في المسار الوظيفي. تابع الطلب من «صندوق الموافقات».</p>
       </template>
     </div>
 
@@ -348,7 +348,7 @@ async function savePay() {
     await api.post('/requests', { type: basic ? 'salary_change' : 'allowance', employee_id: e.value.id, after: f.amount, reason: f.reason, effective: f.effective || today(), ...(basic ? {} : { component: f.key, name: f.name }) })
     payEdit.value = null
     await load()
-    ui.toast('رُفع طلب تعديل الأجر للاعتماد، ويُطبَّق بعد موافقة المدير العام', 'ok', 6000)
+    ui.toast('رُفع طلب تعديل الأجر للاعتماد، ويُطبَّق بعد موافقة الرئيس التنفيذي للمجموعة', 'ok', 6000)
   } catch { /* message already shown */ } finally { saving.value = false }
 }
 async function load() { d.value = await api.get(`/employees/${props.id}`) }

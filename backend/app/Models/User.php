@@ -11,7 +11,7 @@ class User extends Authenticatable
     use HasApiTokens, Notifiable;
 
     public const ROLES = [
-        'super' => 'المدير العام', 'hr_mgr' => 'مدير الموارد البشرية', 'hr_staff' => 'موظف موارد بشرية',
+        'super' => 'الرئيس التنفيذي للمجموعة', 'hr_mgr' => 'مدير الموارد البشرية', 'hr_staff' => 'موظف موارد بشرية',
         'ceo' => 'رئيس شركة', 'mgr' => 'مدير مباشر', 'fin' => 'المدير المالي', 'custodian' => 'مسؤول عهد/تقنية', 'emp' => 'موظف',
     ];
 

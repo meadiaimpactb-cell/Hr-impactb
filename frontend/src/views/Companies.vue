@@ -1,24 +1,28 @@
 <template>
   <div class="page-h">
-    <div><h1>{{ t('الشركات والباقات') }}</h1><p>تُضاف الشركات دون تعديل برمجي · المزايا تنزل تلقائيًا على موظفي كل باقة</p></div>
+    <div><h1>{{ t('الشركات والتصنيفات') }}</h1><p>لكل شركة هويتها (الشعار والألوان) التي يراها موظفوها · وتصنيفها (تأسيس / تمكين / أثر) الذي تنزل مزاياه تلقائيًا على موظفيها — اللائحة §47–52</p></div>
     <div class="acts"><button class="btn pri sm" @click="edit({})"><Icon name="plus" :size="16" /> شركة</button></div>
   </div>
-  <div class="tabs"><button :class="{ on: tab === 'c' }" @click="tab = 'c'">الشركات</button><button :class="{ on: tab === 't' }" @click="tab = 't'">محرر مزايا الباقات</button></div>
+  <div class="tabs"><button :class="{ on: tab === 'c' }" @click="tab = 'c'">الشركات</button><button :class="{ on: tab === 't' }" @click="tab = 't'">فئات التصنيف ومزاياها</button></div>
 
   <div v-if="tab === 'c'" class="card">
     <DataTable :rows="companies" :columns="columns" :selectable="auth.has('super')" store-key="companies" export-name="companies" search-placeholder="ابحث بالرمز أو الاسم أو الموقع…" @row-click="view = $event">
       <template #bulk="{ selected, clear }">
         <button class="btn sec xs" @click="bulkActive(selected, true, clear)"><Icon name="check-circle" :size="14" /> تفعيل</button>
         <button class="btn sec xs" @click="bulkActive(selected, false, clear)"><Icon name="ban" :size="14" /> إيقاف</button>
-        <select class="in xs" style="width:auto;min-height:28px" @change="bulkTier(selected, $event, clear)"><option value="">تغيير الباقة…</option><option v-for="tr in tiers" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select>
+        <select class="in xs" style="width:auto;min-height:28px" @change="bulkTier(selected, $event, clear)"><option value="">تغيير التصنيف…</option><option v-for="tr in tiers" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select>
       </template>
       <template #cell-code="{ row: c }"><b>{{ c.code }}</b><span v-if="c.is_holding" class="tiny muted">القابضة</span></template>
       <template #cell-name="{ row: c }">
-        {{ c.name }}<span class="tiny muted">{{ c.name_en }}</span>
+        <div class="row" style="gap:8px;flex-wrap:nowrap;align-items:center">
+          <img v-if="c.logo_url" :src="c.logo_url" :alt="c.name" class="co-thumb" />
+          <span v-else class="co-thumb co-none" :style="{ background: c.color || '#67718F' }">{{ c.code?.slice(0, 2) }}</span>
+          <div style="min-width:0">{{ c.name }}<span class="tiny muted">{{ c.name_en }}</span><span v-if="c.color" class="tiny muted" dir="ltr"><i class="sw" :style="{ background: c.color }" /><i v-if="c.color2" class="sw" :style="{ background: c.color2 }" /></span></div>
+        </div>
         <a v-if="c.website" :href="c.website" target="_blank" rel="noopener" class="site" dir="ltr" title="فتح موقع الشركة" @click.stop>{{ c.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '') }} <Icon name="external" :size="12" /></a>
       </template>
       <template #cell-ceo="{ row: c }">{{ c.ceo?.name || '—' }}</template>
-      <template #cell-tier="{ row: c }"><span v-if="c.tier" class="pill" :style="{ background: c.tier.color + '22', color: c.tier.color }">{{ c.tier.name }}</span><span v-else class="pill warn">بلا باقة</span></template>
+      <template #cell-tier="{ row: c }"><span v-if="c.tier" class="pill" :style="{ background: c.tier.color + '22', color: c.tier.color }">{{ c.tier.name }}</span><span v-else class="pill warn">بلا تصنيف</span></template>
       <template #cell-status="{ row: c }"><span class="pill" :class="c.active ? 'ok' : 'gray'">{{ c.active ? 'نشطة' : 'موقوفة' }}</span></template>
       <template #cell-actions="{ row: c }">
         <div class="row" style="gap:2px;flex-wrap:nowrap;justify-content:flex-end" @click.stop>
@@ -37,7 +41,8 @@
       <tr><th>الاسم بالإنجليزية</th><td>{{ view.name_en || '—' }}</td></tr>
       <tr><th>الموقع الإلكتروني</th><td><a v-if="view.website" :href="view.website" target="_blank" rel="noopener" dir="ltr">{{ view.website }} <Icon name="external" :size="12" /></a><span v-else>—</span></td></tr>
       <tr><th>الرئيس التنفيذي</th><td>{{ view.ceo?.name || '—' }}</td></tr>
-      <tr><th>الباقة</th><td>{{ view.tier?.name || '—' }}</td></tr>
+      <tr><th>التصنيف</th><td><span v-if="view.tier" class="pill" :style="{ background: view.tier.color + '22', color: view.tier.color }">{{ view.tier.name }}</span><span v-else>—</span></td></tr>
+      <tr><th>الهوية</th><td><div class="row" style="align-items:center;gap:10px"><img v-if="view.logo_url" :src="view.logo_url" :alt="view.name" style="height:44px;max-width:160px;object-fit:contain;background:#fff;border-radius:8px;padding:3px 6px" /><span v-else class="muted">بلا شعار</span><span v-if="view.color" dir="ltr" class="tiny"><i class="sw" :style="{ background: view.color }" /> {{ view.color }} <i v-if="view.color2" class="sw" :style="{ background: view.color2 }" /> {{ view.color2 || '' }}</span></div></td></tr>
       <tr><th>عدد الموظفين</th><td>{{ view.employees_count }}</td></tr>
       <tr><th>السجل التجاري</th><td>{{ view.legal_no || '—' }}</td></tr>
       <tr><th>الرقم الضريبي</th><td>{{ view.tax_no || '—' }}</td></tr>
@@ -53,9 +58,16 @@
   </Modal>
 
   <div v-else class="card">
-    <h3>مصفوفة المزايا <span class="sub">تعديلها صلاحية المدير العام · كل حفظ ينشئ نسخة جديدة مع السبب</span></h3>
+    <h3>فئات التصنيف ومصفوفة المزايا <span class="sub">اللائحة §47: تأسيس (أقل من 100% من الخطة) · تمكين (100%–110%) · أثر (110% فأكثر) — التعديل صلاحية الرئيس التنفيذي للمجموعة وكل حفظ ينشئ نسخة جديدة مع السبب</span></h3>
+    <div class="notice info small">التصنيف يؤثر في المزايا والحوافز فقط (§51)، ولا يغيّر الحقوق النظامية. هوية الشركة (الشعار والألوان) تُضبط من بطاقة الشركة نفسها وتظهر لموظفيها في كل الصفحات.</div>
     <div v-dt class="tw"><table>
-      <thead><tr><th>البند</th><th v-for="tr in tiers" :key="tr.id" :style="{ color: tr.color }">{{ tr.name }} <span class="tiny muted">v{{ tr.version }} · {{ tr.companies_count }} شركات</span></th></tr></thead>
+      <thead><tr><th>البند</th><th v-for="tr in tiers" :key="tr.id" :style="{ color: tr.color }">
+        <div class="row" style="gap:4px;flex-wrap:nowrap;align-items:center">
+          <input v-if="auth.has('super')" type="color" :value="tr.color || '#1B82C3'" class="cp" :title="'لون الفئة'" @change="tierColor(tr, $event.target.value)" />
+          <span style="min-width:0">{{ tr.name }} <span class="tiny muted">v{{ tr.version }} · {{ tr.companies_count }} شركات</span></span>
+          <template v-if="auth.has('super')"><button class="btn ghost xs" title="تعديل الاسم" @click="renameTier(tr)"><Icon name="edit" :size="13" /></button><button class="btn ghost xs" title="حذف الفئة" @click="removeTier(tr)"><Icon name="trash" :size="13" /></button></template>
+        </div>
+      </th></tr></thead>
       <tbody><tr v-for="k in benefitKeys" :key="k">
         <td><b>{{ BEN[k] || k }}</b><span class="tiny muted">{{ k }}</span></td>
         <td v-for="tr in tiers" :key="tr.id"><input v-model="tr.benefits[k]" class="in" style="min-height:32px;padding:3px 8px" :disabled="!auth.has('super')" /></td>
@@ -66,9 +78,17 @@
       <button class="btn pri sm" @click="saveTiers">حفظ نسخة جديدة</button>
       <span class="spacer" />
       <button class="btn sec sm" @click="newBenefit"><Icon name="plus" :size="16" /> بند مزايا جديد</button>
-      <button class="btn sec sm" @click="newTier"><Icon name="plus" :size="16" /> باقة جديدة</button>
+      <button class="btn sec sm" @click="newTier"><Icon name="plus" :size="16" /> فئة جديدة</button>
     </div>
   </div>
+
+  <Modal v-if="delTier" :title="`حذف فئة «${delTier.name}»`" @close="delTier = null">
+    <p v-if="delTier.companies_count">هذه الفئة مرتبطة بـ <b>{{ delTier.companies_count }}</b> شركة. اختر الفئة التي تنتقل إليها هذه الشركات، وستتحدث مزايا موظفيها فورًا.</p>
+    <p v-else>لا توجد شركات مرتبطة بهذه الفئة.</p>
+    <div class="fg" v-if="delTier.companies_count"><label>نقل الشركات إلى *</label><select v-model="delTarget" class="in"><option :value="null">—</option><option v-for="tr in tiers.filter((x) => x.id !== delTier.id)" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select></div>
+    <div class="fg"><label>سبب الحذف *</label><input v-model="delReason" class="in" placeholder="مثال: إلغاء الباقات القديمة بعد اعتماد اللائحة" /></div>
+    <template #foot><button class="btn sec" @click="delTier = null">إلغاء</button><button class="btn pri" :disabled="(delTier.companies_count && !delTarget) || !delReason.trim()" @click="confirmRemoveTier">حذف</button></template>
+  </Modal>
 
   <Modal v-if="form" :title="form.id ? 'تعديل شركة' : 'شركة جديدة'" @close="form = null">
     <div class="fr">
@@ -78,7 +98,7 @@
       <div class="fg"><label>السجل التجاري</label><input v-model="form.legal_no" class="in" /></div>
       <div class="fg"><label>الرقم الضريبي</label><input v-model="form.tax_no" class="in" /></div>
       <div class="fg"><label>الموقع الإلكتروني</label><input v-model="form.website" class="in" dir="ltr" type="url" placeholder="https://impactv.sa" /></div>
-      <div class="fg"><label>الباقة</label><select v-model="form.tier_id" class="in"><option v-for="tr in tiers" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select></div>
+      <div class="fg"><label>التصنيف <span class="tiny muted">(الشركة الجديدة تبدأ في الفئة الأولى — §49)</span></label><select v-model="form.tier_id" class="in"><option v-for="tr in tiers" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select></div>
       <div class="fg"><label>جدول الدوام الافتراضي <span class="tiny muted">(يُسند للموظف الجديد تلقائيًا)</span></label><select v-model="form.default_schedule_id" class="in"><option :value="null">—</option><option v-for="sc in auth.meta?.schedules || []" :key="sc.id" :value="sc.id">{{ sc.name }}</option></select></div>
       <div class="fg"><label>معرّف أودو</label><input v-model="form.odoo_id" class="in" /></div>
       <div class="fg"><label>الرئيس التنفيذي</label><SearchSelect v-model="form.ceo_employee_id" :options="empOptions" placeholder="ابحث عن موظف" /></div>
@@ -87,7 +107,24 @@
       <div class="fg"><label>قاعدة الاحتساب التناسبي</label><select v-model="form.prorate_rule" class="in"><option value="actual">أيام الشهر الفعلية</option><option value="30">قاعدة الثلاثين يومًا</option></select></div>
     </div>
     <label class="chk"><input v-model="form.active" type="checkbox" /> نشطة</label>
-    <template #foot><button class="btn sec" @click="form = null">إلغاء</button><button class="btn pri" @click="saveCompany">حفظ</button></template>
+    <h4 style="margin:14px 0 6px">هوية الشركة <span class="tiny muted">تظهر لموظفي الشركة في رأس الصفحات والخطابات الرسمية والتطبيق</span></h4>
+    <div class="fr">
+      <div class="fg"><label>اللون الأساسي</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="color" class="cp" :value="form.color || '#1A2363'" @input="form.color = $event.target.value" /><input v-model.trim="form.color" class="in" dir="ltr" placeholder="#1A2363" maxlength="7" /></div></div>
+      <div class="fg"><label>اللون الثانوي</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="color" class="cp" :value="form.color2 || '#4FCAF2'" @input="form.color2 = $event.target.value" /><input v-model.trim="form.color2" class="in" dir="ltr" placeholder="#4FCAF2" maxlength="7" /></div></div>
+      <div class="fg"><label>الشعار <span class="tiny muted">PNG/SVG بخلفية شفافة · حتى 2MB</span></label>
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:nowrap">
+          <img v-if="logoPreview || form.logo_url" :src="logoPreview || form.logo_url" alt="" style="height:44px;max-width:150px;object-fit:contain;background:#fff;border-radius:8px;padding:3px 6px;border:1px solid var(--line)" />
+          <input ref="logoInput" type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style="display:none" @change="pickLogo" />
+          <button type="button" class="btn sec xs" @click="$refs.logoInput.click()"><Icon name="upload" :size="14" /> {{ form.logo_url || logoFile ? 'تغيير' : 'رفع شعار' }}</button>
+          <button v-if="form.id && form.logo_url && !logoFile" type="button" class="btn ghost xs" title="إزالة الشعار" @click="removeLogo"><Icon name="trash" :size="14" /></button>
+        </div>
+      </div>
+    </div>
+    <div class="brand-preview" :style="{ background: `linear-gradient(90deg, ${form.color || '#1A2363'}, ${form.color2 || '#4FCAF2'})` }">
+      <img v-if="logoPreview || form.logo_url" :src="logoPreview || form.logo_url" alt="" />
+      <span><b>{{ form.name || 'اسم الشركة' }}</b><small>HC — إدارة رأس المال البشري · مجموعة وادي الأثر المالية</small></span>
+    </div>
+    <template #foot><button class="btn sec" @click="form = null">إلغاء</button><button class="btn pri" :class="{ loading: saving }" :disabled="saving" @click="saveCompany">حفظ</button></template>
   </Modal>
 </template>
 
@@ -118,7 +155,7 @@ const columns = [
   { key: 'name_en', label: 'الاسم بالإنجليزية', hidden: true },
   { key: 'website', label: 'الموقع الإلكتروني', hidden: true },
   { key: 'ceo', label: 'الرئيس التنفيذي', value: (c) => c.ceo?.name },
-  { key: 'tier', label: 'الباقة', value: (c) => c.tier?.name },
+  { key: 'tier', label: 'التصنيف', value: (c) => c.tier?.name },
   { key: 'employees_count', label: 'الموظفون' },
   { key: 'legal_no', label: 'السجل التجاري' },
   { key: 'tax_no', label: 'الرقم الضريبي', hidden: true },
@@ -126,7 +163,7 @@ const columns = [
   { key: 'status', label: 'الحالة', value: (c) => (c.active ? 'نشطة' : 'موقوفة') },
   { key: 'actions', label: '', sortable: false, search: false, export: false, class: 'dt-actions' },
 ]
-const bodyOf = (c, patch = {}) => ({ code: c.code, name: c.name, name_en: c.name_en, legal_no: c.legal_no, tax_no: c.tax_no, website: c.website || null, tier_id: c.tier_id, default_schedule_id: c.default_schedule_id || null, odoo_id: c.odoo_id, prorate_rule: c.prorate_rule || 'actual', active: !!c.active, ceo_employee_id: c.ceo_employee_id || null, currency: c.currency || 'SAR', timezone: c.timezone || 'Asia/Riyadh', ...patch })
+const bodyOf = (c, patch = {}) => ({ code: c.code, name: c.name, name_en: c.name_en, legal_no: c.legal_no, tax_no: c.tax_no, website: c.website || null, tier_id: c.tier_id, color: c.color || null, color2: c.color2 || null, default_schedule_id: c.default_schedule_id || null, odoo_id: c.odoo_id, prorate_rule: c.prorate_rule || 'actual', active: !!c.active, ceo_employee_id: c.ceo_employee_id || null, currency: c.currency || 'SAR', timezone: c.timezone || 'Asia/Riyadh', ...patch })
 function menu(c) {
   return [
     { label: 'عرض البيانات', icon: 'eye', action: () => (view.value = c) },
@@ -154,25 +191,57 @@ async function bulkActive(rows, on, clear) {
 async function bulkTier(rows, ev, clear) {
   const tierId = +ev.target.value; ev.target.value = ''
   const tr = tiers.value.find((x) => x.id === tierId); if (!tr) return
-  if (!await confirmBox(`ربط ${rows.length} شركة بباقة «${tr.name}»؟ تتحدث أرصدة وبدلات موظفيها فورًا.`)) return
+  if (!await confirmBox(`تصنيف ${rows.length} شركة في «${tr.name}»؟ تتحدث أرصدة وبدلات موظفيها فورًا.`)) return
   for (const c of rows) await api.put(`/companies/${c.id}`, bodyOf(c, { tier_id: tierId }))
-  ui.toast('حُدّثت الباقات', 'ok'); clear(); load(); auth.loadMeta()
+  ui.toast('حُدّث التصنيف', 'ok'); clear(); load(); auth.loadMeta()
 }
 const BEN = computed(() => auth.meta?.benefit_labels || {})
-const benefitKeys = computed(() => Object.keys(tiers.value[0]?.benefits || {}))
+const ORDER = ['annualLeave', 'leaveUnit', 'eidExtraDays', 'bridgeDay', 'sick', 'emergency', 'maternity', 'marriage', 'bereavement', 'siblingBereavement', 'newborn', 'hajj', 'unpaidMax', 'carryOverMax',
+  'housingPct', 'transportPct', 'transportMin', 'transport', 'comm', 'commMax', 'carAllowance2', 'carAllowance4', 'carAllowanceDaily', 'weeklyHours', 'workDays', 'flexMinutes', 'remote',
+  'devBudget', 'devDays', 'programsPerMonth', 'ticketCap', 'ticketFamily', 'bonusMaxMonths', 'hotelCap', 'perDiemCeo', 'perDiemDir', 'perDiemMgr', 'perDiemSpec', 'perDiemStaff',
+  'insuranceCeo', 'insuranceLeaders', 'insuranceMgrs', 'insuranceClass', 'dependents']
+const benefitKeys = computed(() => { const ks = Object.keys(tiers.value[0]?.benefits || {}); return [...ORDER.filter((k) => ks.includes(k)), ...ks.filter((k) => !ORDER.includes(k))] })
 async function load() { [companies.value, tiers.value] = await Promise.all([api.get('/companies'), api.get('/tiers')]) }
 const empOptions = ref([])
 const edit = async (c) => {
+  logoFile.value = null; logoPreview.value = null
   if (!empOptions.value.length) empOptions.value = (await api.get('/employees/options')).map((e) => ({ value: e.id, label: e.name, sub: e.emp_no }))
   form.value = { active: true, prorate_rule: 'actual', currency: 'SAR', timezone: 'Asia/Riyadh', tier_id: tiers.value.find((x) => x.is_default)?.id || tiers.value[0]?.id, ...c }
 }
 async function newTier() {
-  const name = await promptBox('اسم الباقة الجديدة', { multiline: false, confirmText: 'إضافة' })
+  const name = await promptBox('اسم الفئة الجديدة', { multiline: false, confirmText: 'إضافة' })
   if (!name) return
   const copy = tiers.value[tiers.value.length - 1]
-  await api.post('/tiers', { name, copy_from: copy?.id, reason: 'إنشاء باقة جديدة' })
-  ui.toast(`أُنشئت الباقة بنسخ مزايا «${copy?.name}» — عدّل القيم ثم احفظ`, 'ok', 5000)
+  await api.post('/tiers', { name, copy_from: copy?.id, reason: 'إنشاء فئة تصنيف جديدة' })
+  ui.toast(`أُنشئت الفئة بنسخ مزايا «${copy?.name}» — عدّل القيم ثم احفظ`, 'ok', 5000)
   load()
+}
+async function renameTier(tr) {
+  const name = await promptBox('اسم الفئة', { value: tr.name, multiline: false, confirmText: 'حفظ' })
+  if (!name || name === tr.name) return
+  try { await api.put(`/tiers/${tr.id}`, { name, reason: `تغيير اسم الفئة من «${tr.name}»` }); ui.toast('حُفظ الاسم', 'ok'); load(); auth.loadMeta() } catch (e) { alertBox(e.message, { icon: 'error' }) }
+}
+async function tierColor(tr, color) {
+  try { await api.put(`/tiers/${tr.id}`, { color, reason: 'تغيير لون الفئة' }); tr.color = color; auth.loadMeta() } catch (e) { alertBox(e.message, { icon: 'error' }) }
+}
+const delTier = ref(null); const delTarget = ref(null); const delReason = ref('')
+function removeTier(tr) { delTier.value = tr; delTarget.value = null; delReason.value = '' }
+async function confirmRemoveTier() {
+  try {
+    const r = await api.delete(`/tiers/${delTier.value.id}`, { data: { move_to: delTarget.value, reason: delReason.value } })
+    ui.toast(r.moved ? `حُذفت الفئة ونُقلت ${r.moved} شركة` : 'حُذفت الفئة', 'ok'); delTier.value = null; load(); auth.loadMeta()
+  } catch (e) { alertBox(e.message, { icon: 'error' }) }
+}
+// logo: picked locally for preview, uploaded right after the company is saved (needs its id)
+const logoInput = ref(null); const logoFile = ref(null); const logoPreview = ref(null); const saving = ref(false)
+function pickLogo(ev) {
+  const f = ev.target.files?.[0]; if (!f) return
+  if (f.size > 2 * 1024 * 1024) { ui.toast('حجم الشعار يتجاوز 2MB', 'warn'); ev.target.value = ''; return }
+  logoFile.value = f; logoPreview.value = URL.createObjectURL(f)
+}
+async function removeLogo() {
+  if (!await confirmBox('إزالة شعار الشركة؟')) return
+  try { const c = await api.delete(`/companies/${form.value.id}/logo`); form.value.logo_url = c.logo_url; load(); auth.loadMeta() } catch (e) { alertBox(e.message, { icon: 'error' }) }
 }
 async function newBenefit() {
   // Arabic name only: the internal code is generated, and the item is saved to every package right away
@@ -194,8 +263,16 @@ async function newBenefit() {
 async function saveCompany() {
   const f = form.value
   const body = bodyOf(f)
-  if (f.id) await api.put(`/companies/${f.id}`, body); else await api.post('/companies', body)
-  ui.toast('تم الحفظ', 'ok'); form.value = null; load(); auth.loadMeta()
+  for (const k of ['color', 'color2']) if (body[k] && !/^#[0-9A-Fa-f]{6}$/.test(body[k])) return ui.toast('اللون يجب أن يكون بصيغة #RRGGBB', 'warn')
+  saving.value = true
+  try {
+    const saved = f.id ? await api.put(`/companies/${f.id}`, body) : await api.post('/companies', body)
+    if (logoFile.value) {
+      const fd = new FormData(); fd.append('logo', logoFile.value)
+      await api.post(`/companies/${saved.id}/logo`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    }
+    ui.toast('تم الحفظ', 'ok'); form.value = null; logoFile.value = null; logoPreview.value = null; load(); auth.loadMeta()
+  } catch (e) { if (e?.message) alertBox(e.message, { icon: 'error' }) } finally { saving.value = false }
 }
 async function saveTiers() {
   if (!reason.value.trim()) return ui.toast('سبب التعديل إلزامي', 'warn')
@@ -209,4 +286,11 @@ onMounted(load)
 <style scoped>
 .site { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; margin-top: 2px; }
 .site:hover { text-decoration: underline; }
+.co-thumb { height: 34px; width: 56px; object-fit: contain; background: #fff; border-radius: 8px; padding: 2px 4px; border: 1px solid var(--line); flex: 0 0 auto; }
+.co-none { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 12px; border: 0; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-inline-end: 3px; vertical-align: middle; }
+.cp { width: 34px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; flex: 0 0 auto; }
+.brand-preview { margin-top: 12px; border-radius: 10px; padding: 10px 14px; color: #fff; display: flex; align-items: center; gap: 12px; }
+.brand-preview img { height: 38px; max-width: 150px; object-fit: contain; background: #fff; border-radius: 8px; padding: 3px 6px; }
+.brand-preview small { display: block; font-size: 10.5px; opacity: .85; font-weight: 400; }
 </style>

@@ -89,7 +89,7 @@
   <Modal v-if="detail" :title="`تقييم ${fmtYM(detail.period)} — ${detail.employee.name}`" size="wide" @close="detail = null">
     <div class="grid g5 mb">
       <Kpi v-for="k in AXES" :key="k" :label="AXIS[k]" :value="detail.computed.axes[k] ?? 'معفى'" :hint="`من ${detail.computed.weights[k]}`" color="b" />
-      <Kpi label="الدرجة" :value="detail.computed.score" :hint="detail.computed.grade.label + (detail.computed.bonus ? ` · +${detail.computed.bonus} نقاط` : '')" :color="detail.computed.grade.pass ? 'g' : 'r'" />
+      <Kpi label="الدرجة" :value="detail.computed.score" :hint="detail.computed.grade.label + (detail.computed.bonus ? ` · +${detail.computed.bonus} نقاط` : '') + (detail.computed.penalty ? ` · −${detail.computed.penalty} ${detail.computed.parts?.report?.submitted ? 'تأخر التقرير الشهري' : 'لم يُرفع التقرير الشهري'} (§35)` : '')" :color="detail.computed.grade.pass ? 'g' : 'r'" />
     </div>
     <div class="grid g2">
       <div v-for="k in AXES" :key="k" class="card" style="margin:0"><b>{{ AXIS[k] }}</b>

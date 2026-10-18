@@ -47,14 +47,27 @@
     </template>
 
     <template v-else-if="handler === 'trip'">
-      <div class="fg"><label>الوجهة <span class="req">*</span></label><input v-model="f.destination" class="in" /></div>
+      <div class="notice info small">المسار (اللائحة §65): المشرف المباشر ← الموارد البشرية ← المدير المالي. الرحلة خارج المملكة تضيف الرئيس التنفيذي للشركة ثم الرئيس التنفيذي للمجموعة. يحسب النظام عدد الأيام والبدل اليومي وسقف الفندق تلقائيًا بحسب فئة الشركة.</div>
+      <div class="fr">
+        <div class="fg"><label>نوع الرحلة <span class="req">*</span></label><select v-model="f.scope" class="in"><option value="domestic">داخل المملكة</option><option value="intl">خارج المملكة</option></select></div>
+        <div class="fg"><label>الوجهة <span class="req">*</span></label><input v-model="f.destination" class="in" /></div>
+      </div>
       <div class="fg"><label>الغرض <span class="req">*</span></label><textarea v-model="f.purpose" class="in" /></div>
       <div class="fr">
-        <div class="fg"><label>من</label><DateInput v-model="f.from" /></div>
-        <div class="fg"><label>إلى</label><DateInput v-model="f.to" :min="f.from" /></div>
-        <div class="fg"><label>التكلفة التقديرية <span class="req">*</span></label><input v-model.number="f.estimate" type="number" class="in" :class="{ err: errors.estimate }" /><span class="e">{{ errors.estimate?.[0] }}</span></div>
-        <div class="fg"><label>عهدة مالية مطلوبة</label><input v-model.number="f.advance" type="number" class="in" /></div>
+        <div class="fg"><label>تاريخ البداية <span class="req">*</span></label><DateInput v-model="f.from" /><span class="e">{{ errors.from?.[0] }}</span></div>
+        <div class="fg"><label>تاريخ النهاية <span class="req">*</span></label><DateInput v-model="f.to" :min="f.from" /><span class="e">{{ errors.to?.[0] }}</span></div>
       </div>
+      <div v-if="tripDays" class="tiny muted">مدة الرحلة: <b class="num">{{ tripDays }}</b> يوم</div>
+      <h4 style="margin:10px 0 4px">التكلفة التقديرية <span class="tiny muted">(أدخل التفاصيل أو الإجمالي)</span></h4>
+      <div class="fr3">
+        <div class="fg"><label>الطيران</label><input v-model.number="f.cost_flight" type="number" min="0" class="in" /></div>
+        <div class="fg"><label>السكن</label><input v-model.number="f.cost_lodging" type="number" min="0" class="in" /></div>
+        <div class="fg"><label>البدل اليومي</label><input v-model.number="f.cost_allowance" type="number" min="0" class="in" /></div>
+        <div class="fg"><label>التنقل</label><input v-model.number="f.cost_transport" type="number" min="0" class="in" /></div>
+        <div class="fg"><label>الرسوم</label><input v-model.number="f.cost_fees" type="number" min="0" class="in" /></div>
+        <div class="fg"><label>الإجمالي <span class="req">*</span></label><input :value="tripTotal || f.estimate" type="number" class="in" :class="{ err: errors.estimate }" :readonly="!!tripTotal" @input="f.estimate = +$event.target.value" /><span class="e">{{ errors.estimate?.[0] }}</span></div>
+      </div>
+      <div class="fg"><label>عهدة نقدية مطلوبة للرحلة <span class="tiny muted">(تُسوّى خلال 10 أيام عمل من العودة — §44/§68)</span></label><input v-model.number="f.advance" type="number" min="0" class="in" /></div>
     </template>
 
     <template v-else-if="handler === 'resignation'">
@@ -89,6 +102,8 @@
 </template>
 
 <script setup>
+import { computed as _computed } from 'vue'
+
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../api'
@@ -112,7 +127,7 @@ const letterKinds = computed(() => auth.meta?.lookups?.letter_kinds || [])
 const type = ref(null)
 const def = computed(() => defs.value.find((d) => d.code === type.value))
 const handler = computed(() => def.value?.handler)
-const f = reactive({ leave_type: 'annual', delegate: false, kind: '', lang: 'ar', installments: 6 })
+const f = reactive({ leave_type: 'annual', delegate: false, kind: '', lang: 'ar', installments: 6, scope: 'domestic' })
 const file = ref(null)
 const errors = ref({})
 const busy = ref(false)
@@ -165,4 +180,6 @@ async function submit() {
     busy.value = false
   }
 }
+const tripDays = _computed(() => (f.from && f.to && f.to >= f.from) ? Math.round((new Date(f.to) - new Date(f.from)) / 864e5) + 1 : 0)
+const tripTotal = _computed(() => ['cost_flight', 'cost_lodging', 'cost_allowance', 'cost_transport', 'cost_fees'].reduce((a, k) => a + (Number(f[k]) || 0), 0))
 </script>

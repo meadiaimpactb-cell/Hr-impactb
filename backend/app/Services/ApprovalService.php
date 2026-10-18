@@ -23,7 +23,7 @@ class ApprovalService
 {
     public const ROLES = [
         'mgr' => 'المدير المباشر', 'hr' => 'الموارد البشرية', 'hr_staff' => 'موظف الموارد البشرية', 'hr_mgr' => 'مدير الموارد البشرية',
-        'ceo' => 'رئيس الشركة', 'fin' => 'المدير المالي', 'super' => 'المدير العام',
+        'ceo' => 'الرئيس التنفيذي للشركة', 'fin' => 'المدير المالي', 'super' => 'الرئيس التنفيذي للمجموعة',
     ];
 
     private static ?array $types = null;
@@ -119,7 +119,7 @@ class ApprovalService
         while ($r->stage < count($r->flow) && ($r->flow[$r->stage]['role'] ?? null) === 'ceo') {
             $ceoEmp = Company::find($r->company_id)?->ceo_employee_id;
             $ceoUser = $ceoEmp ? User::where('employee_id', $ceoEmp)->where('active', true)->first() : null;
-            $why = ! $ceoUser ? 'لا يوجد مدير تنفيذي للشركة' : ($ceoEmp === $r->employee_id ? 'مقدم الطلب هو المدير التنفيذي للشركة' : ($ceoUser->hasRole('super') ? 'المدير التنفيذي للشركة هو المدير التنفيذي للمجموعة (يعتمد في المرحلة الأخيرة)' : null));
+            $why = ! $ceoUser ? 'لا يوجد رئيس تنفيذي للشركة' : ($ceoEmp === $r->employee_id ? 'مقدم الطلب هو الرئيس التنفيذي للشركة' : ($ceoUser->hasRole('super') ? 'الرئيس التنفيذي للشركة هو الرئيس التنفيذي للمجموعة (يعتمد في المرحلة الأخيرة)' : null));
             if (! $why) {
                 return;
             }

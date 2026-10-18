@@ -71,7 +71,7 @@ const adjTarget = ref(null)
 const adjAmount = ref(0)
 const adjReason = ref('')
 
-const STAGES = [['draft', 'مسودة آلية'], ['hr_review', 'مراجعة أخصائي الموارد'], ['hr_approved', 'اعتماد مدير الموارد'], ['fin_approved', 'اعتماد المدير المالي'], ['approved', 'اعتماد المدير العام']]
+const STAGES = [['draft', 'مسودة آلية'], ['hr_review', 'مراجعة أخصائي الموارد'], ['hr_approved', 'اعتماد مدير الموارد'], ['fin_approved', 'اعتماد المدير المالي'], ['approved', 'اعتماد الرئيس التنفيذي للمجموعة']]
 const STAGE_ACTION_LABEL = { hr_review: 'مراجعة أخصائي الموارد', hr_approved: 'اعتماد مدير الموارد', fin_approved: 'اعتماد المدير المالي', approved: 'اعتماد نهائي وقفل المسير' }
 const curIdx = computed(() => STAGES.findIndex((s) => s[0] === d.value?.run?.status))
 const stepCls = (i) => (i < curIdx.value ? 'done' : i === curIdx.value ? 'cur' : '')

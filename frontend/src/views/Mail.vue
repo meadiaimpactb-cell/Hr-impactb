@@ -3,10 +3,20 @@
     <div><h1>{{ t('البريد الداخلي') }}</h1><p>مراسلات داخلية بين المستخدمين بمرفقات وحالة قراءة</p></div>
     <div class="acts"><button v-if="auth.emp?.manager?.user_id" class="btn sec sm" @click="openNew(auth.emp.manager)"><Icon name="send" :size="16" /> مراسلة مديري المباشر</button><button class="btn pri sm" @click="openNew()"><Icon name="mail" :size="16" /> رسالة جديدة</button></div>
   </div>
-  <div class="grid mail-grid">
+  <div v-if="auth.has('super', 'hr_mgr')" class="tabs"><button :class="{ on: tab === 'mine' }" @click="tab = 'mine'">بريدي</button><button :class="{ on: tab === 'all' }" @click="tab = 'all'; loadAll()">كل المراسلات (حوكمة)</button></div>
+  <div v-if="tab === 'all'" class="card">
+    <div class="notice info small">اطلاع الحوكمة (اللائحة §115): يُسجَّل كل اطلاع في سجل التدقيق ولا يُشعَر به المتراسلون.</div>
+    <div class="row" style="gap:8px"><input v-model.trim="gq" class="in" style="max-width:280px" placeholder="بحث بالموضوع أو اسم المتراسل…" @keyup.enter="loadAll" /><DateInput v-model="gFrom" placeholder="من تاريخ" /><DateInput v-model="gTo" placeholder="إلى تاريخ" /><button class="btn sec sm" @click="loadAll"><Icon name="search" :size="14" /> بحث</button></div>
+    <div v-if="!gov.length" class="empty">لا نتائج</div>
+    <details v-for="g in gov" :key="g.id" class="gov"><summary><b>{{ g.subject }}</b> <span class="tiny muted">{{ g.participants.join('، ') }} · {{ fmtDT(g.last_at) }} · {{ g.messages.length }}</span></summary>
+      <div v-for="(m, i) in g.messages" :key="i" class="msg"><div class="tiny muted">{{ m.from }} · {{ fmtDT(m.at) }}</div><div style="white-space:pre-wrap">{{ m.body }}</div></div>
+    </details>
+  </div>
+  <div v-else class="grid mail-grid">
     <div class="card mail-list">
-      <div v-if="!threads.length" class="empty">لا رسائل</div>
-      <div v-for="th in threads" :key="th.id" class="thread" :class="{ on: cur?.id === th.id, unread: th.unread }" @click="open(th.id)">
+      <div class="row" style="gap:6px;margin-bottom:8px;flex-wrap:nowrap"><input v-model.trim="q" class="in" placeholder="بحث بالموضوع أو المرسل…" style="min-width:0" /><label class="chk tiny" style="white-space:nowrap"><input v-model="onlyUnread" type="checkbox" /> غير المقروء</label></div>
+      <div v-if="!shown.length" class="empty">لا رسائل</div>
+      <div v-for="th in shown" :key="th.id" class="thread" :class="{ on: cur?.id === th.id, unread: th.unread }" @click="open(th.id)">
         <div class="row" style="justify-content:space-between"><b>{{ th.subject }}</b><span class="tiny muted">{{ fmtDT(th.last_at) }}</span></div>
         <div class="small muted">{{ th.others }} · {{ th.count }}</div><div class="tiny muted">{{ th.preview }}</div>
       </div>
@@ -24,7 +34,8 @@
   </div>
 
   <Modal v-if="nf" title="رسالة جديدة" @close="nf = null">
-    <div class="fg"><label>إلى *</label><SearchSelect :model-value="null" :options="users.filter((u) => !nf.to.includes(u.id)).map((u) => ({ value: u.id, label: u.name, sub: u.role }))" placeholder="ابحث عن مستلم…" @update:model-value="(v) => v && nf.to.push(v)" /><div v-if="nf.to.length" class="row" style="gap:6px;margin-top:6px"><span v-for="id in nf.to" :key="id" class="pill info">{{ users.find((u) => u.id === id)?.name || id }} <a style="cursor:pointer" @click="nf.to = nf.to.filter((x) => x !== id)">×</a></span></div><span class="tiny muted">تصل الرسالة داخل المنصة، ونسخة منها إلى البريد الإلكتروني الرسمي للمستلم.</span></div>
+    <div v-if="companies.length > 1" class="fg"><label>الشركة</label><select v-model="coFilter" class="in"><option value="">كل الشركات المتاحة لك</option><option v-for="c in companies" :key="c" :value="c">{{ c }}</option></select></div>
+    <div class="fg"><label>إلى * <span class="tiny muted">(يمكن اختيار أكثر من مستلم)</span></label><SearchSelect :model-value="null" :options="users.filter((u) => !nf.to.includes(u.id) && (!coFilter || u.company === coFilter)).map((u) => ({ value: u.id, label: u.name, sub: [u.role, u.company].filter(Boolean).join(' · ') }))" placeholder="ابحث عن مستلم…" @update:model-value="(v) => v && nf.to.push(v)" /><div v-if="nf.to.length" class="row" style="gap:6px;margin-top:6px"><span v-for="id in nf.to" :key="id" class="pill info">{{ users.find((u) => u.id === id)?.name || id }} <a style="cursor:pointer" @click="nf.to = nf.to.filter((x) => x !== id)">×</a></span></div><span class="tiny muted">تصل الرسالة داخل المنصة، ونسخة منها إلى البريد الإلكتروني الرسمي للمستلم.</span></div>
     <div class="fg"><label>الموضوع *</label><input v-model="nf.subject" class="in" /></div>
     <div class="fg"><label>الرسالة *</label><textarea v-model="nf.body" class="in" rows="5" /></div>
     <div class="fg"><label>مرفق</label><input type="file" class="in" @change="file = $event.target.files[0]" /></div>
@@ -33,7 +44,8 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import DateInput from '../components/DateInput.vue'
 import { useI18n } from 'vue-i18n'
 import api, { fileUrl } from '../api'
 import Modal from '../components/Modal.vue'
@@ -45,11 +57,20 @@ import { fmtDT } from '../utils'
 const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
 const threads = ref([]); const cur = ref(null); const reply = ref(''); const file = ref(null); const busy = ref(false); const nf = ref(null); const users = ref([])
+const tab = ref('mine'); const q = ref(''); const onlyUnread = ref(false); const coFilter = ref('')
+const gov = ref([]); const gq = ref(''); const gFrom = ref(''); const gTo = ref('')
+const companies = computed(() => [...new Set(users.value.map((u) => u.company).filter(Boolean))])
+const shown = computed(() => threads.value.filter((t) => (!onlyUnread.value || t.unread) && (!q.value || `${t.subject} ${t.others || ''} ${t.preview || ''}`.toLowerCase().includes(q.value.toLowerCase()))))
 async function load() { threads.value = await api.get('/mail') }
-async function open(id) { cur.value = await api.get(`/mail/${id}`); const th = threads.value.find((x) => x.id === id); if (th) th.unread = false }
+async function loadAll() { gov.value = await api.get('/mail/all', { params: { q: gq.value || undefined, from: gFrom.value || undefined, to: gTo.value || undefined } }) }
+async function open(id) {
+  cur.value = await api.get(`/mail/${id}`)
+  const th = threads.value.find((x) => x.id === id)
+  if (th?.unread) { th.unread = false; window.dispatchEvent(new CustomEvent('hc:mail-read')) } // the header counter drops right away
+}
 function fd(obj) { const x = new FormData(); Object.entries(obj).forEach(([k, v]) => { if (Array.isArray(v)) v.forEach((i) => x.append(k + '[]', i)); else if (v !== null && v !== '') x.append(k, v) }); if (file.value) x.append('attachment', file.value); return x }
 async function send() { if (!reply.value.trim()) return; busy.value = true; try { cur.value = await api.post(`/mail/${cur.value.id}/reply`, fd({ body: reply.value })); reply.value = ''; file.value = null; load() } finally { busy.value = false } }
-async function openNew(manager) { nf.value = { to: manager?.user_id ? [manager.user_id] : [], subject: '', body: '' }; if (!users.value.length) users.value = (await api.get('/users/options')).filter((u) => u.id !== auth.user.id) }
+async function openNew(manager) { nf.value = { to: manager?.user_id ? [manager.user_id] : [], subject: '', body: '' }; if (!users.value.length) users.value = await api.get('/mail/recipients') }
 async function create() {
   if (!nf.value.to.length || !nf.value.subject.trim() || !nf.value.body.trim()) return ui.toast('المستلم والموضوع والرسالة إلزامية', 'warn')
   busy.value = true
@@ -62,6 +83,7 @@ onMounted(load)
 .thread{padding:10px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}.thread:hover{background:var(--soft)}.thread.on{background:var(--infobg)}.thread.unread b{color:var(--navy)}.thread.unread::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--navy);margin-inline-end:6px}
 .msg{padding:10px 12px;border-radius:12px;background:var(--soft);margin-bottom:8px;max-width:80%}.msg.mine{background:var(--infobg);margin-inline-start:auto}
 .mail-grid{grid-template-columns:minmax(0,1fr);gap:14px}
+.gov{border-bottom:1px solid var(--line);padding:8px 0}.gov summary{cursor:pointer}
 .mail-list{margin:0;max-height:40dvh;overflow:auto;overscroll-behavior:contain}
 @media(min-width:768px){.mail-grid{grid-template-columns:minmax(260px,340px) minmax(0,1fr)}.mail-list{max-height:70dvh}}
 @media(max-width:767px){.msg{max-width:92%}}

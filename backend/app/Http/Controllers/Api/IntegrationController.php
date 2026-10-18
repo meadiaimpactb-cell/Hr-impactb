@@ -16,7 +16,7 @@ class IntegrationController extends Controller
 {
     private function admin(Request $r): void
     {
-        abort_unless($r->user()->hasRole('super', 'hr_mgr'), 403, 'التكامل صلاحية المدير العام ومدير الموارد البشرية');
+        abort_unless($r->user()->hasRole('super', 'hr_mgr'), 403, 'التكامل صلاحية الرئيس التنفيذي للمجموعة ومدير الموارد البشرية');
     }
 
     public function status(Request $request)

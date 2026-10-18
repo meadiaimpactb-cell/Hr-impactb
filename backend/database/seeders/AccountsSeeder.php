@@ -29,7 +29,7 @@ class AccountsSeeder extends Seeder
         $schedule = Schedule::first() ?? Schedule::create(['name' => 'الدوام القياسي 9–5 (أحد–خميس)', 'week_days' => [0, 1, 2, 3, 4], 'flex' => true, 'week_pattern' => '5',
             'hours' => ['0' => ['09:00', '17:00'], '1' => ['09:00', '17:00'], '2' => ['09:00', '17:00'], '3' => ['09:00', '17:00'], '4' => ['09:00', '15:00']]]);
         $jobs = [
-            'GGM' => ['المدير العام للمجموعة', 'Group General Manager', 'قيادة'],
+            'GGM' => ['الرئيس التنفيذي للمجموعة', 'Group General Manager', 'قيادة'],
             'HRM' => ['مدير الموارد البشرية', 'HR Manager', 'موارد بشرية'],
             'CFO' => ['المدير المالي', 'Chief Financial Officer', 'مالية'],
         ];

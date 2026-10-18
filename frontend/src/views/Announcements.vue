@@ -1,6 +1,6 @@
 <template>
   <div class="page-h">
-    <div><h1>{{ t('الإعلانات') }}</h1><p>إعلانات موجّهة (المجموعة، شركات، وظائف، نوع تعاقد، أشخاص) مع إيصالات قراءة وإقرار وتذكير — المدير العام والموارد البشرية للمجموعة، الرؤساء لشركاتهم، والمديرون لفرقهم</p></div>
+    <div><h1>{{ t('الإعلانات') }}</h1><p>إعلانات موجّهة (المجموعة، شركات، وظائف، نوع تعاقد، أشخاص) مع إيصالات قراءة وإقرار وتذكير — الرئيس التنفيذي للمجموعة والموارد البشرية للمجموعة، الرؤساء لشركاتهم، والمديرون لفرقهم</p></div>
     <div class="acts"><button v-if="auth.isApprover" class="btn pri sm" @click="openNew"><Icon name="megaphone" :size="16" /> إعلان جديد</button></div>
   </div>
   <div v-if="!rows.length" class="card"><div class="empty"><div class="ic"><Icon name="megaphone" :size="40" :stroke="1.4" /></div>لا إعلانات</div></div>

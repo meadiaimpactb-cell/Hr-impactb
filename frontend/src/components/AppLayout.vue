@@ -1,9 +1,11 @@
 <template>
   <header class="topbar">
     <button ref="hamBtn" class="tbtn icon ham" aria-label="القائمة" :aria-expanded="ui.sideOpen" @click="ui.sideOpen = !ui.sideOpen"><Icon name="menu" /></button>
-    <div class="brand">
-      <img src="/logo-mark.png" alt="" />
-      <div><div>HC — {{ t('إدارة رأس المال البشري') }}</div><small>{{ t('مجموعة وادي الأثر المالية') }}</small></div>
+    <div class="brand" :title="brandCo ? brandCo.name : ''">
+      <img v-if="brandCo?.logo_url" class="co-logo" :src="brandCo.logo_url" :alt="brandCo.name" />
+      <img v-else src="/logo-mark.png" alt="" />
+      <div v-if="brandCo"><div>{{ ui.lang === 'en' && brandCo.name_en ? brandCo.name_en : brandCo.name }}</div><small>HC — {{ t('إدارة رأس المال البشري') }} · {{ t('مجموعة وادي الأثر المالية') }}</small></div>
+      <div v-else><div>HC — {{ t('إدارة رأس المال البشري') }}</div><small>{{ t('مجموعة وادي الأثر المالية') }}</small></div>
     </div>
     <select v-if="companies.length > 1" class="tsel hide-sm" :value="ui.company" @change="ui.setCompany($event.target.value); reload()">
       <option :value="0">{{ t('كل الشركات') }}</option>
@@ -92,6 +94,21 @@ const mailUnread = ref(0)
 const acks = ref([])
 async function ackOne() { const a = acks.value[0]; await api.post(`/announcements/${a.id}/ack`); acks.value = acks.value.slice(1) }
 const companies = computed(() => auth.meta?.companies || [])
+// Company identity (policy §47: "تظهر صفحات الموظفين بهوية شركتهم وشعارها وألوانها"): an employee always sees their own company;
+// HR/the group CEO see the identity of the company they filtered on, and the group identity when viewing all companies.
+const brandCo = computed(() => {
+  const own = auth.user?.employee?.company
+  const wide = auth.has('super') || auth.has('hr_mgr') || auth.has('hr_staff') || auth.has('fin')
+  if (wide) return ui.company ? companies.value.find((c) => c.id === ui.company) || null : null
+  return own || companies.value.find((c) => c.id === auth.user?.employee?.company_id) || null
+})
+const applyBrand = (c) => {
+  const st = document.documentElement.style
+  if (c?.color) st.setProperty('--brand', c.color); else st.removeProperty('--brand')
+  if (c?.color2) st.setProperty('--brand2', c.color2); else st.removeProperty('--brand2')
+}
+watch(brandCo, applyBrand, { immediate: true })
+onUnmounted(() => applyBrand(null))
 // drawer + "more" menu behaviour on small screens: scroll lock, Escape, outside click, close on route change, focus handling
 const moreOpen = ref(false); const moreWrap = ref(null); const sideEl = ref(null); const hamBtn = ref(null)
 const isDrawer = () => window.innerWidth < 1024
@@ -146,7 +163,7 @@ const NAV = [
   { g: 'الإدارة', items: [
     { to: '/users', ic: 'shield', label: 'المستخدمون والصلاحيات', roles: ['super', 'hr_mgr'] },
     { to: '/import', ic: 'upload', label: 'الاستيراد', roles: ['super', 'hr_mgr'] },
-    { to: '/companies', ic: 'building', label: 'الشركات والباقات', roles: ['super', 'hr_mgr'] },
+    { to: '/companies', ic: 'building', label: 'الشركات والتصنيفات', roles: ['super', 'hr_mgr'] },
     { to: '/lookups', ic: 'database', label: 'البيانات الأساسية', roles: ['super', 'hr_mgr'] },
     { to: '/flows', ic: 'workflow', label: 'أنواع الطلبات ومسارات الاعتماد', roles: ['super', 'hr_mgr'] },
     { to: '/integrations', ic: 'plug', label: 'التكامل مع أودو', roles: ['super', 'hr_mgr'] },
@@ -165,7 +182,7 @@ async function poll() {
   } catch { /* ignore */ }
 }
 let timer
-onMounted(() => { poll(); timer = setInterval(poll, 60000); document.addEventListener('keydown', onKey); document.addEventListener('click', onDocClick); window.addEventListener('resize', onResize) })
+onMounted(() => { poll(); timer = setInterval(poll, 60000); document.addEventListener('keydown', onKey); document.addEventListener('click', onDocClick); window.addEventListener('resize', onResize); window.addEventListener('hc:mail-read', poll) })
 onUnmounted(() => { clearInterval(timer); document.removeEventListener('keydown', onKey); document.removeEventListener('click', onDocClick); window.removeEventListener('resize', onResize); if (ui.sideOpen) lockScroll(false) })
 const reload = () => viewKey.value++
 async function logout() { await auth.logout(); window.location.assign('/') } // back to the public landing page (outside the SPA base)

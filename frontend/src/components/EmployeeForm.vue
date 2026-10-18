@@ -5,7 +5,11 @@
       <h4 class="muted" style="margin:0 0 6px">البيانات الشخصية</h4>
       <div class="fr3">
         <F label="الاسم بالعربية" req k="name" /><F label="الاسم بالإنجليزية" k="name_en" /><div class="fg"><label>رقم الموظف <span class="tiny muted">{{ id ? '' : '(يُولَّد تلقائيًا ويمكن تعديله)' }}</span></label><div class="row" style="gap:4px;flex-wrap:nowrap"><input v-model.trim="f.emp_no" class="in" :class="{ err: errors.emp_no }" dir="ltr" /><button v-if="!id" type="button" class="btn ghost xs" title="توليد رقم جديد" @click="nextNo"><Icon name="refresh" :size="14" /></button></div><span v-if="errors.emp_no" class="e">{{ errors.emp_no[0] }}</span></div>
-        <div class="fg"><label>رقم الهوية / الإقامة</label><input :value="f.national_id" class="in num" :class="{ err: errors.national_id }" inputmode="numeric" maxlength="20" placeholder="أرقام فقط" @input="f.national_id = $event.target.value.replace(/\D/g, '')" /><span v-if="errors.national_id" class="e">{{ errors.national_id[0] }}</span></div>
+        <div class="fg"><label>{{ f.id_type === 'passport' ? 'رقم الجواز' : f.id_type === 'iqama' ? 'رقم الإقامة' : 'رقم الهوية الوطنية' }}</label>
+          <div class="row" style="gap:4px;flex-wrap:nowrap">
+            <select v-model="f.id_type" class="in" style="max-width:120px"><option value="national">هوية وطنية</option><option value="iqama">إقامة</option><option value="passport">جواز سفر</option></select>
+            <input :value="f.national_id" class="in num" :class="{ err: errors.national_id }" :inputmode="f.id_type === 'passport' ? 'text' : 'numeric'" :maxlength="f.id_type === 'passport' ? 20 : 10" dir="ltr" :placeholder="f.id_type === 'passport' ? 'أحرف وأرقام' : '10 أرقام تبدأ بـ 1 أو 2'" @input="f.national_id = f.id_type === 'passport' ? $event.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : $event.target.value.replace(/\D/g, '')" />
+          </div><span v-if="errors.national_id" class="e">{{ errors.national_id[0] }}</span></div>
         <div class="fg"><label>الجنسية</label><SearchSelect v-model="f.nationality" :options="countries" placeholder="اختر الدولة…" /></div>
         <F label="تاريخ الميلاد" k="birth_date" type="date" />
         <div class="fg"><label>الجنس</label><select v-model="f.gender" class="in"><option value="m">ذكر</option><option value="f">أنثى</option></select></div>
@@ -136,7 +140,7 @@ const ui = useUi()
 const ready = ref(false)
 const busy = ref(false)
 const errors = ref({})
-const f = reactive({ contract_type: 'full', punch_required: true, punch_anywhere: false, geo_tolerance: 0, email_enabled: true, eosb_saudi: true, advances_enabled: true, flex_enabled: false, daily_note_required: false, week_pattern: '5', gender: 'm', create_user: true, location_ids: [], country: 'SA', nationality: 'SA', phone: '', email: '', dept: null })
+const f = reactive({ id_type: 'national', contract_type: 'full', punch_required: true, punch_anywhere: false, geo_tolerance: 0, email_enabled: true, eosb_saudi: true, advances_enabled: true, flex_enabled: false, daily_note_required: false, week_pattern: '5', gender: 'm', create_user: true, location_ids: [], country: 'SA', nationality: 'SA', phone: '', email: '', dept: null })
 const opts = reactive({ companies: [], jobs: [], emps: [], depts: [], contracts: [], schedules: [], locations: [] })
 // working hours: the schedule's hours are shown read-only; "customise" copies them into f.work_hours which then wins
 const schedules = ref([])
@@ -250,8 +254,8 @@ const empSchema = z.object({
   hire_date: requiredString('تاريخ الالتحاق'), email: optionalEmail, phone: phoneField.optional().nullable().or(z.literal('')), bank_iban: ibanField.optional().nullable().or(z.literal('')),
 }).superRefine((v, ctx) => {
   if (f.email_enabled && f.create_user && !v.email) ctx.addIssue({ code: 'custom', path: ['email'], message: 'البريد الرسمي مطلوب لإرسال دعوة الدخول — أو ألغِ تفعيل البريد' })
-  if (f.national_id && f.nationality === 'SA' && !/^1\d{9}$/.test(f.national_id)) ctx.addIssue({ code: 'custom', path: ['national_id'], message: 'الهوية الوطنية السعودية 10 أرقام وتبدأ بـ 1' })
-  else if (f.national_id && f.nationality && f.nationality !== 'SA' && !/^\d{5,20}$/.test(f.national_id)) ctx.addIssue({ code: 'custom', path: ['national_id'], message: 'رقم الإقامة أرقام فقط' })
+  if (f.national_id && f.id_type === 'passport' && !/^[A-Z0-9]{5,20}$/.test(f.national_id)) ctx.addIssue({ code: 'custom', path: ['national_id'], message: 'رقم الجواز: أحرف وأرقام (5–20)' })
+  else if (f.national_id && f.id_type !== 'passport' && !/^[12]\d{9}$/.test(f.national_id)) ctx.addIssue({ code: 'custom', path: ['national_id'], message: 'رقم الهوية أو الإقامة: 10 أرقام يبدأ بـ 1 أو 2' })
 })
 async function nextNo() {
   try { f.emp_no = (await api.get('/employees/next-number', { params: { company_id: f.company_id || undefined } })).emp_no } catch { /* keep manual */ }
@@ -267,7 +271,7 @@ async function save() {
   if (Object.keys(v).length) { errors.value = v; ui.toast('راجع الحقول المظللة بالأحمر', 'bad'); return }
   busy.value = true
   errors.value = {}
-  const keys = ['emp_no', 'name', 'name_en', 'company_id', 'job_title_id', 'manager_id', 'dept', 'hire_date', 'contract_type', 'part_ratio', 'punch_required', 'punch_anywhere', 'geo_tolerance', 'schedule_id', 'work_hours', 'week_pattern', 'country', 'nationality', 'national_id', 'birth_date', 'gender', 'phone', 'email', 'email_enabled', 'eosb_saudi', 'flex_enabled', 'daily_note_required', 'advances_enabled', 'bank_iban', 'location_ids', 'basic', 'allowances', 'create_user']
+  const keys = ['emp_no', 'name', 'name_en', 'company_id', 'job_title_id', 'manager_id', 'dept', 'hire_date', 'contract_type', 'part_ratio', 'punch_required', 'punch_anywhere', 'geo_tolerance', 'schedule_id', 'work_hours', 'week_pattern', 'country', 'nationality', 'national_id', 'id_type', 'birth_date', 'gender', 'phone', 'email', 'email_enabled', 'eosb_saudi', 'flex_enabled', 'daily_note_required', 'advances_enabled', 'bank_iban', 'location_ids', 'basic', 'allowances', 'create_user']
   const body = Object.fromEntries(keys.map((k) => [k, f[k] === '' ? null : f[k]]))
   body.allowances = (f.allowances || []).filter((a) => a.name?.trim() && Number(a.amount) > 0)
   body.work_hours = customHours.value && f.work_hours && Object.keys(f.work_hours).length ? f.work_hours : null

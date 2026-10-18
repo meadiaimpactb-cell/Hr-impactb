@@ -6,10 +6,11 @@
     </div>
     <div v-if="!d" class="center muted" style="padding:60px">جارٍ التحميل…</div>
     <div v-else class="doc-print" :dir="d.lang === 'en' ? 'ltr' : 'rtl'">
-      <div class="dh">
-        <div class="mark" />
+      <div class="dh" :style="d.company.color ? { borderBottomColor: d.company.color } : {}">
+        <div class="logos"><img v-if="d.company.logo_url" :src="d.company.logo_url" :alt="d.company.name" /><div v-else class="mark" /></div>
         <div class="title"><b>{{ d.lang === 'en' ? 'Official letter' : 'خطاب رسمي' }}</b><div class="small muted">{{ d.no }}</div></div>
-        <div class="co">{{ d.company.name }}<small>{{ d.company.name_en }}</small><small v-if="d.company.legal_no">CR {{ d.company.legal_no }}</small></div>
+        <div class="co" :style="d.company.color ? { color: d.company.color } : {}">{{ d.company.name }}<small>{{ d.company.name_en }}</small><small v-if="d.company.legal_no">CR {{ d.company.legal_no }}</small><small>{{ d.lang === 'en' ? 'Impact Valley Capital Group' : 'مجموعة وادي الأثر المالية' }}</small></div>
+        <div class="logos"><img class="grp" src="/logo-mark.png" alt="HC" /></div>
       </div>
       <div class="row" style="justify-content:space-between"><span class="small">{{ d.lang === 'en' ? 'Date' : 'التاريخ' }}: {{ d.issued_at }} <span v-if="d.lang !== 'en'">· {{ d.hijri }}</span></span><span class="small">{{ d.lang === 'en' ? 'Ref' : 'الرقم' }}: {{ d.no }}</span></div>
       <h2 style="margin:26px 0 14px">{{ d.title }}</h2>

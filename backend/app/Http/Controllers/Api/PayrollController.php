@@ -23,7 +23,7 @@ use Illuminate\Validation\ValidationException;
  */
 class PayrollController extends Controller
 {
-    private const RUN_STATUSES = ['draft' => 'مسودة آلية', 'hr_review' => 'مراجعة أخصائي الموارد', 'hr_approved' => 'اعتماد مدير الموارد', 'fin_approved' => 'اعتماد المدير المالي', 'approved' => 'معتمد من المدير العام'];
+    private const RUN_STATUSES = ['draft' => 'مسودة آلية', 'hr_review' => 'مراجعة أخصائي الموارد', 'hr_approved' => 'اعتماد مدير الموارد', 'fin_approved' => 'اعتماد المدير المالي', 'approved' => 'معتمد من الرئيس التنفيذي للمجموعة'];
 
     private const RUN_ORDER = ['draft', 'hr_review', 'hr_approved', 'fin_approved', 'approved'];
 

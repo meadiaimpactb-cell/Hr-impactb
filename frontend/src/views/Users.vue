@@ -103,6 +103,17 @@
     <template #foot><button class="btn sec" @click="form = null">إلغاء</button><button class="btn pri" @click="saveUser">حفظ</button></template>
   </Modal>
 
+  <Modal v-if="hand" title="من البديل؟ — تسليم المهام والطلبات المعلّقة" @close="hand = null">
+    <div class="notice warn">
+      <b>{{ hand.user.name }}</b> لم يعد ضمن مسار الاعتماد<span v-if="hand.info.lost_roles?.length"> (أُزيل دور: {{ hand.info.lost_roles.map((r) => meta.roles?.[r]).join('، ') }})</span>.
+      <div class="small mt">يتبعه <b>{{ hand.info.reports }}</b> موظف مباشر<span v-if="hand.info.ceo_of?.length"> · رئيس تنفيذي لـ: {{ hand.info.ceo_of.join('، ') }}</span><span v-if="hand.info.pending"> · <b>{{ hand.info.pending }}</b> طلب معلّق بانتظاره</span>.
+      اختر البديل لتنتقل إليه الطلبات المعلّقة فورًا (اللائحة §11). بدون بديل تُحال الطلبات إلى الرئيس التنفيذي للمجموعة.</div>
+    </div>
+    <div class="fg"><label>البديل *</label><SearchSelect v-model="hand.to" :options="empOptions.filter((o) => o.value !== hand.user.employee_id)" placeholder="ابحث عن الموظف البديل" /></div>
+    <div class="fg"><label>ملاحظة</label><input v-model="hand.reason" class="in" placeholder="اختياري" /></div>
+    <template #foot><button class="btn sec" @click="hand = null">لاحقًا — تُحال إلى الرئيس التنفيذي للمجموعة</button><button class="btn pri" :disabled="!hand.to" @click="doHandover">تسليم المهام</button></template>
+  </Modal>
+
   <Modal v-if="delegForm" title="تفويض مؤقت للاعتمادات" @close="delegForm = null">
     <div v-if="auth.isAdmin" class="fg"><label>المفوِّض (فارغ = أنا)</label><SearchSelect v-model="delegForm.from_user_id" :options="userOptions" /></div>
     <div class="fg"><label>المفوَّض إليه *</label><SearchSelect v-model="delegForm.to_user_id" :options="userOptions" /></div>
@@ -233,13 +244,23 @@ async function saveUser() {
   errors.value = {}
   const body = { login: f.login, email: f.email || null, employee_id: f.employee_id || null, roles: [f.role], company_id: f.role === 'ceo' ? f.company_id : null, active: !!f.active, password: f.password || undefined }
   try {
-    if (f.id) { await api.put(`/users/${f.id}`, body); ui.toast('تم الحفظ', 'ok') } else {
+    if (f.id) {
+      const r = await api.put(`/users/${f.id}`, body); ui.toast('تم الحفظ', 'ok')
+      if (r.handover?.needed) hand.value = { user: r, info: r.handover, to: null, reason: '' }
+    } else {
       const r = await api.post('/users', body)
       creds.value = { login: r.user.login, password: r.temp_password, inviteUrl: r.invite_url || '', email: r.user.email || '', emailed: !!r.emailed, title: 'بيانات الحساب الجديد' }
     }
     form.value = null
     load()
   } catch (e) { errors.value = e.errors || {} }
+}
+const hand = ref(null)
+async function doHandover() {
+  try {
+    const r = await api.post(`/users/${hand.value.user.id}/handover`, { to_employee_id: hand.value.to, reason: hand.value.reason || null })
+    ui.toast(`نُقل ${r.reports} موظف و${r.companies} شركة، و${r.requests} طلب معلّق أصبح عند البديل`, 'ok', 7000); hand.value = null; load()
+  } catch (e) { ui.toast(e.message || 'تعذر التسليم', 'bad') }
 }
 let inviting = false
 async function invite(u) {

@@ -19,6 +19,15 @@ Route::get('/', $page('landing.html'))->name('landing');
 Route::get('/setup/{token}', [SetupController::class, 'show']);
 Route::post('/setup/{token}', [SetupController::class, 'run']);
 
+// Company logos (public, cacheable): uploaded from the Companies screen to storage/app/public/brand
+Route::get('/brand/{file}', function (string $file) {
+    abort_unless(preg_match('/^[A-Za-z0-9_.-]+\.(png|jpe?g|svg|webp)$/i', $file), 404);
+    $path = storage_path('app/public/brand/'.$file);
+    abort_unless(is_file($path), 404);
+
+    return response()->file($path, ['Cache-Control' => 'public, max-age=86400']);
+})->where('file', '[A-Za-z0-9_.-]+');
+
 // Old bookmarks
 Route::redirect('/login', '/app/login');
 

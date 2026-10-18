@@ -120,6 +120,8 @@ Route::prefix('v1')->group(function () {
 
         // Internal mail
         Route::get('mail/unread', [MailController::class, 'unread']);
+        Route::get('mail/recipients', [MailController::class, 'recipients']);
+        Route::get('mail/all', [MailController::class, 'all']);
         Route::get('mail', [MailController::class, 'threads']);
         Route::post('mail', [MailController::class, 'store']);
         Route::get('mail/{thread}', [MailController::class, 'show']);
@@ -192,9 +194,12 @@ Route::prefix('v1')->group(function () {
         Route::post('companies', [AdminController::class, 'saveCompany']);
         Route::put('companies/{company}', [AdminController::class, 'saveCompany']);
         Route::delete('companies/{company}', [AdminController::class, 'deleteCompany']);
+        Route::post('companies/{company}/logo', [AdminController::class, 'uploadLogo']);
+        Route::delete('companies/{company}/logo', [AdminController::class, 'deleteLogo']);
         Route::get('tiers', [AdminController::class, 'tiers']);
         Route::put('tiers/{tier}', [AdminController::class, 'updateTier']);
         Route::post('tiers', [AdminController::class, 'storeTier']);
+        Route::delete('tiers/{tier}', [AdminController::class, 'deleteTier']);
         Route::get('audit/entities', [AdminController::class, 'auditEntities']);
         Route::get('users/options', [UserController::class, 'options']);
         Route::get('settings', [AdminController::class, 'settings']);
@@ -211,6 +216,7 @@ Route::prefix('v1')->group(function () {
         Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword']);
         Route::post('users/{user}/invite', [UserController::class, 'invite']);
         Route::put('users/{user}/perms', [UserController::class, 'updatePerms']);
+        Route::post('users/{user}/handover', [UserController::class, 'handover']);
         Route::get('delegations', [UserController::class, 'delegations']);
         Route::post('delegations', [UserController::class, 'storeDelegation']);
         Route::post('delegations/{delegation}/revoke', [UserController::class, 'revokeDelegation']);

@@ -129,7 +129,9 @@ class ReportController extends Controller
         if ($empty) {
             throw ValidationException::withMessages(['items' => "أكمل وصف الإنجاز لكل بند ($empty بند ناقص)"]);
         }
-        $due = Carbon::parse($report->period.'-01')->addMonth()->day((int) Settings::get('monthlyReportDueDay', $report->company_id, 5));
+        // §35: due on day 26 of the report month itself (HR may move the day); never past the month's last day
+        $start = Carbon::parse($report->period.'-01');
+        $due = $start->copy()->day(min((int) Settings::get('monthlyReportDueDay', $report->company_id, 26), $start->daysInMonth));
         $report->update(['status' => 'submitted', 'submitted_at' => now(), 'late' => now()->gt($due->endOfDay()), 'version' => $report->version + 1, 'return_note' => null]);
         $mgr = $report->employee->manager_id ? User::where('employee_id', $report->employee->manager_id)->value('id') : null;
         Audit::notify($mgr ?: Access::usersWithRole('hr_mgr'), 'تقرير شهري بانتظار مراجعتك', $report->employee->name.' — '.$report->period, 'approval', ['screen' => 'reports']);

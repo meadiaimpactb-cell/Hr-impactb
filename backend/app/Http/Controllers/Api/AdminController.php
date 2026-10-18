@@ -31,7 +31,7 @@ class AdminController extends Controller
         $ids = Access::for()->companyIds();
 
         return [
-            'companies' => Company::whereIn('id', $ids)->orderBy('id')->get(['id', 'code', 'name', 'name_en', 'tier_id', 'website', 'default_schedule_id']),
+            'companies' => Company::with('tier:id,code,name,color')->whereIn('id', $ids)->orderBy('id')->get(['id', 'code', 'name', 'name_en', 'tier_id', 'website', 'default_schedule_id', 'logo_path', 'color', 'color2', 'updated_at']),
             'job_titles' => JobTitle::orderBy('name')->get(['id', 'code', 'name', 'name_en']),
             'schedules' => Schedule::all(['id', 'name']),
             'locations' => Location::all(['id', 'name', 'scope', 'company_id', 'is_main', 'radius']),
@@ -59,7 +59,7 @@ class AdminController extends Controller
     /** Deletes a company that has no employees, records or settings; otherwise asks to suspend it instead. */
     public function deleteCompany(Company $company)
     {
-        abort_unless(auth()->user()->hasRole('super'), 403, 'حذف الشركات صلاحية المدير العام');
+        abort_unless(auth()->user()->hasRole('super'), 403, 'حذف الشركات صلاحية الرئيس التنفيذي للمجموعة');
         abort_if($company->is_holding, 422, 'لا يمكن حذف الشركة القابضة');
         if (\App\Models\Employee::withTrashed()->where('company_id', $company->id)->exists()) {
             abort(422, 'لا يمكن حذف شركة لها موظفون — انقلهم أولًا أو أوقف الشركة بدل حذفها');
@@ -76,8 +76,10 @@ class AdminController extends Controller
 
     public function saveCompany(Request $request, ?Company $company = null)
     {
-        abort_unless(Access::for()->can('CMP', $company ? 'edit' : 'add'), 403);
+        // Policy §115 / owner's note: company data and identity are changed by the group CEO only
+        abort_unless(auth()->user()->hasRole('super'), 403, 'تعديل بيانات الشركات صلاحية الرئيس التنفيذي للمجموعة');
         $data = $request->validate([
+            'color' => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'], 'color2' => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'],
             'code' => ['required', 'string', 'max:20', Rule::unique('companies')->ignore($company?->id)], 'name' => 'required|string|max:150',
             'name_en' => 'nullable|string|max:150', 'legal_no' => 'nullable|string|max:50', 'tax_no' => 'nullable|string|max:50',
             'website' => 'nullable|string|max:200|regex:/^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(\/.*)?$/i',
@@ -87,11 +89,8 @@ class AdminController extends Controller
         ]);
         $data['code'] = strtoupper($data['code']);
         if (! $company && empty($data['tier_id'])) {
-            // new company → its own package, named after it, starting from the default package's benefits
-            $base = \App\Models\Tier::where('is_default', true)->first() ?? \App\Models\Tier::orderBy('rank')->first();
-            $tier = \App\Models\Tier::create(['name' => 'باقة '.$data['name'], 'name_en' => ($data['name_en'] ?? $data['code']).' package', 'color' => $base?->color ?? '#1B82C3',
-                'rank' => (int) \App\Models\Tier::max('rank') + 1, 'effective_from' => now()->toDateString(), 'benefits' => $base?->benefits ?? []]);
-            $data['tier_id'] = $tier->id;
+            // policy §49: a new company starts in the first classification tier (تأسيس)
+            $data['tier_id'] = (\App\Models\Tier::where('is_default', true)->first() ?? \App\Models\Tier::orderBy('rank')->first())?->id;
         }
         if (! empty($data['website']) && ! preg_match('#^https?://#i', $data['website'])) {
             $data['website'] = 'https://'.$data['website']; // typed as impactv.sa → stored as a full link
@@ -103,21 +102,78 @@ class AdminController extends Controller
         return $company;
     }
 
+    /** Company logo: PNG/JPG/SVG/WebP up to 2 MB, stored on the public disk and served by /brand/{file}. */
+    public function uploadLogo(Request $request, Company $company)
+    {
+        abort_unless($request->user()->hasRole('super'), 403, 'تعديل هوية الشركة صلاحية الرئيس التنفيذي للمجموعة');
+        $request->validate(['logo' => 'required|file|mimes:png,jpg,jpeg,svg,webp|max:2048']);
+        $file = $request->file('logo');
+        $path = 'brand/c'.$company->id.'-'.time().'.'.strtolower($file->getClientOriginalExtension() ?: 'png');
+        \Illuminate\Support\Facades\Storage::disk('public')->put($path, file_get_contents($file->getRealPath()));
+        if ($company->logo_path && $company->logo_path !== $path) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($company->logo_path);
+        }
+        $company->update(['logo_path' => $path]);
+        Audit::log('companies', $company->id, 'logo', null, ['logo_path' => $path]);
+
+        return $company->fresh(['tier:id,code,name,color', 'ceo:id,name']);
+    }
+
+    public function deleteLogo(Request $request, Company $company)
+    {
+        abort_unless($request->user()->hasRole('super'), 403);
+        if ($company->logo_path) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($company->logo_path);
+            $company->update(['logo_path' => null]);
+            Audit::log('companies', $company->id, 'logo_removed');
+        }
+
+        return $company->fresh(['tier:id,code,name,color', 'ceo:id,name']);
+    }
+
     public function tiers()
     {
-        abort_unless(auth()->user()->isHr(), 403);
+        abort_unless(auth()->user()->isHr() || auth()->user()->hasRole('fin'), 403);
         return Tier::withCount('companies')->orderBy('rank')->get();
     }
 
     public function updateTier(Request $request, Tier $tier)
     {
-        abort_unless($request->user()->hasRole('super'), 403, 'تعديل الباقات صلاحية المدير العام');
-        $data = $request->validate(['benefits' => 'required|array', 'reason' => 'required|string|max:300', 'name' => 'nullable|string|max:80']);
-        $before = $tier->benefits;
-        $tier->update(['benefits' => $data['benefits'], 'name' => $data['name'] ?? $tier->name, 'version' => $tier->version + 1, 'effective_from' => now()->toDateString()]);
-        Audit::log('tiers', $tier->id, 'benefits', $before, $data['benefits'], $data['reason']);
+        abort_unless($request->user()->hasRole('super'), 403, 'تعديل فئات التصنيف صلاحية الرئيس التنفيذي للمجموعة');
+        $data = $request->validate(['benefits' => 'nullable|array', 'reason' => 'required|string|max:300', 'name' => 'nullable|string|max:80',
+            'name_en' => 'nullable|string|max:80', 'color' => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/']]);
+        $before = $tier->only('name', 'name_en', 'color', 'benefits');
+        $patch = array_filter(['name' => $data['name'] ?? null, 'name_en' => $data['name_en'] ?? null, 'color' => $data['color'] ?? null], fn ($v) => $v !== null);
+        if (isset($data['benefits'])) {
+            $patch += ['benefits' => $data['benefits'], 'version' => $tier->version + 1, 'effective_from' => now()->toDateString()];
+        }
+        $tier->update($patch);
+        Audit::log('tiers', $tier->id, isset($data['benefits']) ? 'benefits' : 'update', $before, $patch, $data['reason']);
 
-        return $tier;
+        return $tier->loadCount('companies');
+    }
+
+    /** Deleting a tier that still classifies companies requires the tier they move to (asked for in the UI). */
+    public function deleteTier(Request $request, Tier $tier)
+    {
+        abort_unless($request->user()->hasRole('super'), 403, 'حذف فئات التصنيف صلاحية الرئيس التنفيذي للمجموعة');
+        abort_if(Tier::count() <= 1, 422, 'لا يمكن حذف آخر فئة');
+        $d = $request->validate(['move_to' => ['nullable', 'integer', Rule::exists('tiers', 'id')->whereNot('id', $tier->id)], 'reason' => 'required|string|max:300']);
+        $count = $tier->companies()->count();
+        if ($count && empty($d['move_to'])) {
+            abort(422, "الفئة مرتبطة بـ {$count} شركة — اختر الفئة التي تنتقل إليها هذه الشركات أولًا");
+        }
+        if ($count) {
+            $tier->companies()->update(['tier_id' => $d['move_to']]);
+        }
+        $snapshot = $tier->toArray();
+        $tier->delete();
+        if ($tier->is_default && ($first = Tier::orderBy('rank')->first())) {
+            $first->update(['is_default' => true]);
+        }
+        Audit::log('tiers', $snapshot['id'], 'delete', $snapshot, ['moved_to' => $d['move_to'] ?? null, 'companies' => $count], $d['reason']);
+
+        return ['ok' => true, 'moved' => $count];
     }
 
     // ---------- settings ----------
@@ -175,7 +231,7 @@ class AdminController extends Controller
 
     public function storeTier(Request $request)
     {
-        abort_unless($request->user()->hasRole('super'), 403, 'إنشاء الباقات صلاحية المدير العام');
+        abort_unless($request->user()->hasRole('super'), 403, 'إنشاء الباقات صلاحية الرئيس التنفيذي للمجموعة');
         $d = $request->validate(['name' => 'required|string|max:80', 'name_en' => 'nullable|string|max:80', 'color' => 'nullable|string|max:20',
             'copy_from' => 'nullable|exists:tiers,id', 'reason' => 'required|string|max:300']);
         $src = Tier::find($d['copy_from'] ?? null) ?? Tier::orderBy('rank')->first();

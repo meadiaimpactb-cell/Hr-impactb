@@ -188,7 +188,13 @@ class EmployeeController extends Controller
             'contract_type' => ['required', Rule::exists('lookups', 'code')->where('group', 'contract_types')->where('active', true)], 'part_ratio' => 'nullable|numeric|min:0.1|max:1',
             'punch_required' => 'boolean', 'geo_tolerance' => 'nullable|integer|min:0|max:100000', 'punch_anywhere' => 'boolean', 'schedule_id' => 'nullable|exists:schedules,id', 'week_pattern' => 'in:5,6',
             'work_hours' => 'nullable|array|max:7', 'work_hours.*' => 'array|size:2', 'work_hours.*.*' => 'date_format:H:i',
-            'country' => 'nullable|string|size:2', 'nationality' => 'nullable|string|max:60', 'national_id' => ['nullable', 'regex:/^\d{5,20}$/'],
+            'country' => 'nullable|string|size:2', 'nationality' => 'nullable|string|max:60', 'id_type' => 'nullable|in:national,iqama,passport',
+            'national_id' => ['nullable', 'string', 'max:20', function ($a, $v, $fail) use ($r) {
+                $type = $r->input('id_type', 'national');
+                if ($type === 'passport' ? ! preg_match('/^[A-Za-z0-9]{5,20}$/', $v) : ! preg_match('/^[12]\d{9}$/', $v)) {
+                    $fail($type === 'passport' ? 'رقم الجواز: أحرف وأرقام (5–20)' : 'رقم الهوية أو الإقامة: 10 أرقام يبدأ بـ 1 أو 2');
+                }
+            }],
             'birth_date' => 'nullable|date', 'gender' => 'nullable|in:m,f', 'phone' => ['nullable', 'regex:/^\+?\d{7,15}$/'],
             'email' => ['nullable', 'email', 'max:150', 'required_if_accepted:email_enabled', function ($a, $v, $fail) use ($e) { if ($v && \App\Models\Employee::where('email', $v)->where('id', '!=', $e?->id)->exists()) { $fail('هذا البريد مسجل لموظف آخر'); } }], 'email_enabled' => 'boolean', 'eosb_saudi' => 'boolean', 'gosi_scheme' => 'nullable|in:old,new,exempt,expat', 'flex_enabled' => 'boolean',
             'daily_note_required' => 'boolean', 'advances_enabled' => 'boolean', 'bank_iban' => ['nullable', 'string', 'max:40', function ($attr, $v, $fail) {

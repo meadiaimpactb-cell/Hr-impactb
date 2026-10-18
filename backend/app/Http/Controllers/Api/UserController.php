@@ -19,7 +19,7 @@ class UserController extends Controller
 {
     private function authorizeAdmin(Request $r): void
     {
-        abort_unless($r->user()->hasRole('super', 'hr_mgr'), 403, 'إدارة الحسابات صلاحية المدير العام ومدير الموارد البشرية');
+        abort_unless($r->user()->hasRole('super', 'hr_mgr'), 403, 'إدارة الحسابات صلاحية الرئيس التنفيذي للمجموعة ومدير الموارد البشرية');
     }
 
     /** Roles the current user may assign. */
@@ -71,7 +71,7 @@ class UserController extends Controller
             return 'لا يمكنك '.$action.' حسابك أنت';
         }
         if ($user->hasRole('super') && ! $me->hasRole('super')) {
-            return 'حساب المدير العام يديره المدير العام فقط';
+            return 'حساب الرئيس التنفيذي للمجموعة يديره الرئيس التنفيذي للمجموعة فقط';
         }
         if ($user->hasRole('super') && in_array($action, ['حذف', 'إيقاف'], true)
             && User::where('active', true)->where('id', '!=', $user->id)->get()->filter(fn ($u) => $u->hasRole('super'))->isEmpty()) {
@@ -170,8 +170,49 @@ class UserController extends Controller
             $user->tokens()->delete(); // force sign-out on deactivation
         }
         Audit::log('users', $user->id, 'update', $before, $user->only('login', 'roles', 'active', 'company_id'));
+        // §11: when an approver leaves the chain (role removed / deactivated) HR must name the replacement right away
+        $lost = array_diff(array_intersect($before['roles'] ?? [], ['hr_mgr', 'ceo', 'fin', 'mgr', 'super']), $user->active ? $user->roles : []);
+        $reports = $user->employee_id ? \App\Models\Employee::where('manager_id', $user->employee_id)->where('status', '!=', 'terminated')->count() : 0;
+        $ceoOf = $user->employee_id ? \App\Models\Company::where('ceo_employee_id', $user->employee_id)->pluck('name')->all() : [];
+        $pending = $this->pendingWith($user);
+        $user->setAttribute('handover', ['needed' => (bool) ($lost || (! $user->active && ($reports || $ceoOf))) && ($reports || $ceoOf || $pending), 'lost_roles' => array_values($lost), 'reports' => $reports, 'ceo_of' => $ceoOf, 'pending' => $pending]);
 
         return $user;
+    }
+
+    /** Pending requests whose current stage this user decides. */
+    private function pendingWith(User $u): int
+    {
+        return \App\Services\ApprovalService::inboxFor($u)->count();
+    }
+
+    /**
+     * Handover (§11): the replacement takes over the direct reports, the company CEO seat(s) and therefore every pending
+     * request that was waiting for the previous person. Pending requests with nobody left fall to the group CEO automatically.
+     */
+    public function handover(Request $request, User $user)
+    {
+        $this->authorizeAdmin($request);
+        $d = $request->validate(['to_employee_id' => ['required', 'exists:employees,id', Rule::notIn([$user->employee_id])], 'reason' => 'nullable|string|max:300']);
+        $to = \App\Models\Employee::findOrFail($d['to_employee_id']);
+        $moved = ['reports' => 0, 'companies' => 0, 'requests' => 0];
+        if ($user->employee_id) {
+            $moved['reports'] = \App\Models\Employee::where('manager_id', $user->employee_id)->where('id', '!=', $to->id)->update(['manager_id' => $to->id]);
+            $moved['companies'] = \App\Models\Company::where('ceo_employee_id', $user->employee_id)->update(['ceo_employee_id' => $to->id]);
+        }
+        $toUser = User::where('employee_id', $to->id)->where('active', true)->first();
+        foreach (\App\Models\ApprovalRequest::with('employee')->where('status', 'pending')->get() as $r) {
+            $now = \App\Services\ApprovalService::approvers($r);
+            if ($toUser && in_array($toUser->id, $now, true)) {
+                $moved['requests']++;
+            }
+        }
+        if ($toUser && $moved['requests']) {
+            Audit::notify($toUser->id, 'انتقلت إليك طلبات معلّقة', "{$moved['requests']} طلب بانتظار اعتمادك بعد تسلّمك مهام {$user->name}", 'approval', ['screen' => 'approvals']);
+        }
+        Audit::log('users', $user->id, 'handover', ['from' => $user->employee_id], ['to' => $to->id] + $moved, $d['reason'] ?? null);
+
+        return $moved;
     }
 
     public function resetPassword(Request $request, User $user)

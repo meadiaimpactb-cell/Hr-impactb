@@ -92,7 +92,7 @@ class ConfigController extends Controller
     // ---------- setting definitions ----------
     public function saveSettingDefinition(Request $request, ?SettingDefinition $def = null)
     {
-        abort_unless($request->user()->hasRole('super'), 403, 'تعريف القواعد صلاحية المدير العام');
+        abort_unless($request->user()->hasRole('super'), 403, 'تعريف القواعد صلاحية الرئيس التنفيذي للمجموعة');
         $d = $request->validate([
             'key' => [$def ? 'nullable' : 'required', 'regex:/^[a-zA-Z][a-zA-Z0-9_.]{1,59}$/', Rule::unique('setting_definitions')->ignore($def?->id)],
             'label' => 'required|string|max:120', 'label_en' => 'nullable|string|max:120', 'group' => 'required|string|max:60',

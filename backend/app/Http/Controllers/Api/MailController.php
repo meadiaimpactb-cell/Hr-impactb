@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MailMessage;
 use App\Models\MailThread;
 use App\Models\User;
+use App\Services\Access;
 use App\Services\Audit;
 use Illuminate\Http\Request;
 
@@ -17,6 +18,39 @@ class MailController extends Controller
         $u = $request->user();
 
         return MailThread::whereJsonContains('participants', $u->id)->orderByDesc('last_at')->limit(200)->get()->map(fn ($t) => $this->row($t, $u));
+    }
+
+    /** Who the user may write to (§115): employees inside their own company; HR, finance, the group CEO and company CEOs across their scope. */
+    public function recipients(Request $request)
+    {
+        $u = $request->user();
+        $ids = Access::for($u)->companyIds();
+        $q = User::where('active', true)->where('id', '!=', $u->id)->with('employee:id,company_id,name', 'employee.company:id,name');
+        if (! $u->hasRole('super', 'hr_mgr', 'hr_staff', 'fin')) {
+            $own = $u->employee?->company_id;
+            $cids = $u->hasRole('ceo') && $ids ? $ids : array_values(array_filter([$own]));
+            $q->whereHas('employee', fn ($e) => $e->whereIn('company_id', $cids ?: [0]));
+        }
+
+        return $q->orderBy('name')->get(['id', 'name', 'login', 'roles', 'employee_id'])
+            ->map(fn ($x) => ['id' => $x->id, 'name' => $x->name, 'role' => User::ROLES[$x->roles[0] ?? 'emp'] ?? '', 'company_id' => $x->employee?->company_id, 'company' => $x->employee?->company?->name]);
+    }
+
+    /** Governance view (§115): the group CEO and the HR manager may read every thread, silently (audited). */
+    public function all(Request $request)
+    {
+        $u = $request->user();
+        abort_unless($u->hasRole('super', 'hr_mgr'), 403);
+        Audit::log('mail', 0, 'governance_view');
+        $f = $request->validate(['q' => 'nullable|string|max:100', 'from' => 'nullable|date', 'to' => 'nullable|date']);
+        $q = MailThread::with('messages.sender:id,name')->orderByDesc('last_at');
+        if (! empty($f['from'])) $q->where('last_at', '>=', $f['from']);
+        if (! empty($f['to'])) $q->where('last_at', '<=', $f['to'].' 23:59:59');
+        $names = User::pluck('name', 'id');
+
+        return $q->limit(300)->get()->filter(fn ($t) => empty($f['q']) || str_contains(mb_strtolower($t->subject), mb_strtolower($f['q'])) || collect($t->participants)->contains(fn ($p) => str_contains(mb_strtolower($names[$p] ?? ''), mb_strtolower($f['q']))))
+            ->map(fn ($t) => ['id' => $t->id, 'subject' => $t->subject, 'participants' => collect($t->participants)->map(fn ($p) => $names[$p] ?? '')->values(), 'last_at' => $t->last_at,
+                'messages' => $t->messages->map(fn ($m) => ['from' => $m->sender?->name, 'body' => $m->body, 'at' => $m->created_at])])->values();
     }
 
     public function unread(Request $request)
@@ -41,6 +75,10 @@ class MailController extends Controller
     {
         $u = $request->user();
         $d = $request->validate(['to' => 'required|array|min:1|max:20', 'to.*' => 'exists:users,id', 'subject' => 'required|string|max:200', 'body' => 'required|string|max:10000']);
+        $allowed = collect($this->recipients($request))->pluck('id')->all();
+        if (array_diff(array_map('intval', $d['to']), $allowed)) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['to' => 'أحد المستلمين خارج نطاق مراسلاتك (موظفو شركتك فقط)']);
+        }
         $participants = array_values(array_unique([$u->id, ...array_map('intval', $d['to'])]));
         $thread = MailThread::create(['subject' => $d['subject'], 'participants' => $participants, 'read_by' => [$u->id], 'last_at' => now()]);
         $this->addMessage($request, $thread, $d['body']);

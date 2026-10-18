@@ -133,10 +133,15 @@ class EvaluationService
         $earned = $a1 + $a3 + $a4 + ($a2 ?? 0);
         $total = $applicable ? $earned / $applicable * 100 : 0;
         $bonus = (float) ($overrides['bonus'] ?? $rep?->hr_bonus ?? 0);
-        $score = min(100, $total + $bonus);
+        // §35: late submission −3; not submitted by the end of the month −10 (instead of −3) and a red flag
+        $monthOver = now()->gt(\Illuminate\Support\Carbon::parse($period.'-01')->endOfMonth());
+        $submitted = $rep && in_array($rep->status, ['submitted', 'reviewed', 'hr_checked', 'approved'], true);
+        $penalty = $submitted ? ($rep->late ? (float) Settings::get('reportLatePenalty', $e->company_id, 3) : 0) : ($monthOver ? (float) Settings::get('reportMissingPenalty', $e->company_id, 10) : 0);
+        $parts['report'] = ['submitted' => $submitted, 'late' => (bool) ($rep?->late), 'penalty' => $penalty, 'red_flag' => ! $submitted && $monthOver];
+        $score = max(0, min(100, $total + $bonus - $penalty));
 
         return ['axes' => ['achieve' => $r1($a1), 'attend' => $a2 === null ? null : $r1($a2), 'dev' => $r1($a3), 'disc' => $r1($a4)], 'weights' => $W,
-            'applicable' => $applicable, 'earned' => $r1($earned), 'total' => $r1($total), 'bonus' => $bonus, 'score' => round($score, 2),
+            'applicable' => $applicable, 'earned' => $r1($earned), 'total' => $r1($total), 'bonus' => $bonus, 'penalty' => $penalty, 'score' => round($score, 2),
             'grade' => self::grade($score, $tpl), 'exempt_attendance' => $att === null, 'parts' => $parts, 'template' => $tpl->only('id', 'name', 'pass_score', 'version')];
     }
 

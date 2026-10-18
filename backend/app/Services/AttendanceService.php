@@ -164,7 +164,7 @@ class AttendanceService
         $recs = $e->attendance()->whereBetween('work_date', [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()])->get()->keyBy(fn ($r) => $r->work_date->toDateString());
         $leaves = ApprovalRequest::where('employee_id', $e->id)->whereIn('type', ['leave', 'trip'])->where('status', 'approved')->get(['data']);
         $isLeave = fn ($d) => $leaves->contains(fn ($l) => ($l->data['from'] ?? '') <= $d && ($l->data['to'] ?? '') >= $d);
-        $s = ['required' => 0, 'present' => 0, 'late' => 0, 'late_minutes' => 0, 'early_minutes' => 0, 'absent' => 0, 'leave' => 0, 'pending' => 0];
+        $s = ['required' => 0, 'present' => 0, 'late' => 0, 'late_minutes' => 0, 'early_minutes' => 0, 'absent' => 0, 'leave' => 0, 'pending' => 0, 'no_checkout' => 0];
         for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
             if ($d->lt($e->hire_date) || ! self::isWorkDay($e, $d)) {
                 continue;
@@ -186,6 +186,11 @@ class AttendanceService
                 continue;
             }
             $s['present']++;
+            // §29: no check-out and no approved correction → only 25% of the day counts, the rest is absence
+            if ($r->check_in && ! $r->check_out && ! $r->corrected && $ds !== now()->toDateString()) {
+                $s['no_checkout']++;
+                $s['absent'] += 0.75;
+            }
             $lm = max(0, $r->late_minutes - $grace);
             if ($lm > 0) {
                 $s['late']++;

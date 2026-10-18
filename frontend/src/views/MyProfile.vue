@@ -7,9 +7,9 @@
   <div class="grid g2">
     <div class="card">
       <h3>{{ t('تغيير كلمة المرور') }}</h3>
-      <div class="fg"><label>كلمة المرور الحالية</label><input v-model="f.current" type="password" class="in" :class="{ err: fe.current }" autocomplete="current-password" /><span v-if="fe.current" class="e">{{ fe.current[0] }}</span></div>
-      <div class="fg"><label>كلمة المرور الجديدة</label><input v-model="f.password" type="password" class="in" :class="{ err: fe.password }" autocomplete="new-password" /><PasswordChecklist :value="f.password" /></div>
-      <div class="fg"><label>تأكيد الجديدة</label><input v-model="f.password_confirmation" type="password" class="in" :class="{ err: fe.password_confirmation }" autocomplete="new-password" /><span v-if="fe.password_confirmation" class="e">{{ fe.password_confirmation[0] }}</span></div>
+      <div class="fg"><label>كلمة المرور الحالية <span class="tiny muted">(اختياري)</span></label><div class="pw"><input v-model="f.current" :type="show ? 'text' : 'password'" class="in" :class="{ err: fe.current }" autocomplete="current-password" /><button type="button" class="eye" :aria-label="show ? 'إخفاء' : 'إظهار'" @click="show = !show"><Icon :name="show ? 'eye-off' : 'eye'" :size="16" /></button></div><span v-if="fe.current" class="e">{{ fe.current[0] }}</span></div>
+      <div class="fg"><label>كلمة المرور الجديدة</label><div class="pw"><input v-model="f.password" :type="show ? 'text' : 'password'" class="in" :class="{ err: fe.password }" autocomplete="new-password" /><button type="button" class="eye" :aria-label="show ? 'إخفاء' : 'إظهار'" @click="show = !show"><Icon :name="show ? 'eye-off' : 'eye'" :size="16" /></button></div><PasswordChecklist :value="f.password" /></div>
+      <div class="fg"><label>تأكيد الجديدة</label><div class="pw"><input v-model="f.password_confirmation" :type="show ? 'text' : 'password'" class="in" :class="{ err: fe.password_confirmation }" autocomplete="new-password" /><button type="button" class="eye" :aria-label="show ? 'إخفاء' : 'إظهار'" @click="show = !show"><Icon :name="show ? 'eye-off' : 'eye'" :size="16" /></button></div><span v-if="fe.password_confirmation" class="e">{{ fe.password_confirmation[0] }}</span></div>
       <div v-if="err" class="notice bad">{{ err }}</div>
       <button class="btn pri sm" :class="{ loading: saving }" :disabled="saving" @click="save">{{ t('حفظ') }}</button>
     </div>
@@ -39,7 +39,8 @@ const f = reactive({ current: '', password: '', password_confirmation: '' })
 const err = ref('')
 const fe = ref({})
 const saving = ref(false)
-const pwSchema = withConfirmation({ current: z.string().min(1, 'كلمة المرور الحالية مطلوبة'), password: passwordField, password_confirmation: passwordConfirmField })
+const show = ref(false)
+const pwSchema = withConfirmation({ current: z.string().optional(), password: passwordField, password_confirmation: passwordConfirmField })
 async function save() {
   err.value = ''
   fe.value = check(pwSchema, f)
@@ -49,3 +50,9 @@ async function save() {
 }
 const saveLocale = () => api.post('/auth/locale', { locale: ui.lang }).catch(() => {})
 </script>
+
+<style scoped>
+.pw { position: relative; }
+.pw .in { padding-inline-end: 42px; }
+.eye { position: absolute; inset-inline-end: 6px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); border-radius: 8px; cursor: pointer; }
+</style>

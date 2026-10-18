@@ -9,7 +9,7 @@
         </template>
       </div>
       <div class="row mb"><StatusPill :status="r.status" /><span class="small muted">{{ fmtDT(r.created_at) }}</span><span v-if="r.waiting_for?.length" class="pill warn">بانتظار: {{ r.waiting_for.join('، ') }}</span></div>
-      <div v-if="r.is_mine && r.status === 'pending' && ['hr_mgr', 'hr'].includes(r.flow[r.stage]?.role) && auth.has('hr_mgr')" class="notice warn small">هذا طلبك أنت، ولا يمكن لأحد اعتماد طلبه بنفسه، لذلك أُحيل تلقائيًا إلى {{ r.waiting_for?.join('، ') || 'المدير العام' }}. طلبات الموظفين الآخرين تصل إليك أنت.</div>
+      <div v-if="r.is_mine && r.status === 'pending' && ['hr_mgr', 'hr'].includes(r.flow[r.stage]?.role) && auth.has('hr_mgr')" class="notice warn small">هذا طلبك أنت، ولا يمكن لأحد اعتماد طلبه بنفسه، لذلك أُحيل تلقائيًا إلى {{ r.waiting_for?.join('، ') || 'الرئيس التنفيذي للمجموعة' }}. طلبات الموظفين الآخرين تصل إليك أنت.</div>
       <div class="notice info">{{ r.summary }} <a v-if="r.has_attachment" href="#" class="btn ghost xs" @click.prevent="fileUrl(r.attachment_path)"><Icon name="download" :size="13" /> المرفق</a></div>
       <div v-if="r.type === 'trip' && r.status === 'approved'" class="card" style="margin:8px 0">
         <b class="small">تقرير الرحلة</b>
@@ -85,7 +85,8 @@ const busy = ref(false)
 const tripReport = ref('')
 async function sendTripReport() { if (!tripReport.value.trim()) return; r.value = await api.post(`/requests/${props.id}/trip-report`, { report: tripReport.value }); ui.toast('أُرسل تقرير الرحلة', 'ok') }
 const decisions = { submit: 'تقديم الطلب', approve: 'اعتماد', return: 'إرجاع', cancel: 'إلغاء', skip: 'مرحلة متخطاة' }
-const labels = { type_name: 'النوع', from: 'من', to: 'إلى', days: 'الأيام', handover: 'تسليم المهام', amount: 'المبلغ', installments: 'الأقساط', monthly: 'القسط الشهري', purpose: 'الغرض', date: 'اليوم', kind: 'النوع', time: 'الوقت', reason: 'السبب', lang: 'اللغة', destination: 'الوجهة', estimate: 'التقدير', advance: 'العهدة', before: 'قبل', after: 'بعد', requested_last: 'آخر يوم مطلوب', computed_last: 'آخر يوم محسوب', notice: 'مدة الإشعار' }
+const labels = { type_name: 'النوع', from: 'من', to: 'إلى', days: 'الأيام', handover: 'تسليم المهام', amount: 'المبلغ', installments: 'الأقساط', monthly: 'القسط الشهري', purpose: 'الغرض', date: 'اليوم', kind: 'النوع', time: 'الوقت', reason: 'السبب', lang: 'اللغة', destination: 'الوجهة', estimate: 'التقدير الإجمالي', advance: 'العهدة النقدية', before: 'قبل', after: 'بعد', requested_last: 'آخر يوم مطلوب', computed_last: 'آخر يوم محسوب', notice: 'مدة الإشعار',
+  scope: 'نوع الرحلة', cost_flight: 'الطيران', cost_lodging: 'السكن', cost_allowance: 'البدل اليومي (تقدير)', cost_transport: 'التنقل', cost_fees: 'الرسوم', level: 'المستوى الوظيفي', per_diem: 'البدل اليومي المستحق', allowance_total: 'إجمالي البدل اليومي', hotel_cap: 'سقف الفندق لليلة', hotel_total_cap: 'سقف الفندق للرحلة', why: 'المبرر', needed_by: 'مطلوبة بتاريخ' }
 const hidden = ['type', 'substitute_id', 'delegate']
 const auth = useAuth()
 // Custom request types carry their own field labels (from the request-type form schema).
