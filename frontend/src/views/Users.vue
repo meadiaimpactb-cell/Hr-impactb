@@ -130,7 +130,7 @@
     <template #foot><button class="btn sec" @click="delegForm = null">إلغاء</button><button class="btn pri" @click="saveDeleg">تفويض</button></template>
   </Modal>
   <Modal v-if="view" title="بيانات الحساب" @close="view = null">
-    <div class="row mb" style="gap:12px;align-items:center"><span class="avatar" style="width:46px;height:46px;font-size:18px">{{ (view.employee?.name || view.name || '?')[0] }}</span><div><b style="font-size:16px">{{ view.employee?.name || view.name }}</b><div class="tiny muted">{{ view.employee?.company || '—' }}</div></div></div>
+    <div class="row mb" style="gap:12px;align-items:center"><Avatar :name="view.employee?.name || view.name" :url="view.photo_url" :size="56" :user-id="view.id" editable @changed="(u) => { view.photo_url = u; if (view.id === auth.user.id) auth.user.photo_url = u }" /><div><b style="font-size:16px">{{ view.employee?.name || view.name }}</b><div class="tiny muted">{{ view.employee?.company || '—' }}</div></div></div>
     <div class="tw"><table class="kv">
       <tr><th>اسم الدخول</th><td dir="ltr" style="text-align:right">{{ view.login }}</td></tr>
       <tr><th>البريد</th><td dir="ltr" style="text-align:right">{{ view.email || '—' }}</td></tr>

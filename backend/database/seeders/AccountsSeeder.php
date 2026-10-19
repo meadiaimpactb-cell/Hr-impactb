@@ -26,8 +26,8 @@ class AccountsSeeder extends Seeder
     public function run(): void
     {
         $holding = Company::where('is_holding', true)->first() ?? Company::first();
-        $schedule = Schedule::first() ?? Schedule::create(['name' => 'الدوام القياسي 9–5 (أحد–خميس)', 'week_days' => [0, 1, 2, 3, 4], 'flex' => true, 'week_pattern' => '5',
-            'hours' => ['0' => ['09:00', '17:00'], '1' => ['09:00', '17:00'], '2' => ['09:00', '17:00'], '3' => ['09:00', '17:00'], '4' => ['09:00', '15:00']]]);
+        $schedule = Schedule::first() ?? Schedule::create(['name' => 'الدوام الرسمي 10:00–19:00 (الأحد–الخميس)', 'week_days' => [0, 1, 2, 3, 4], 'flex' => false, 'week_pattern' => '5',
+            'hours' => ['0' => ['10:00', '19:00'], '1' => ['10:00', '19:00'], '2' => ['10:00', '19:00'], '3' => ['10:00', '19:00'], '4' => ['10:00', '19:00']]]);
         $jobs = [
             'GGM' => ['الرئيس التنفيذي للمجموعة', 'Group General Manager', 'قيادة'],
             'HRM' => ['مدير الموارد البشرية', 'HR Manager', 'موارد بشرية'],

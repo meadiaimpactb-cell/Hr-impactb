@@ -92,21 +92,9 @@
         <div class="fg" style="max-width:220px"><label>هامش إضافي على النطاق (متر)</label><input v-model.number="f.geo_tolerance" type="number" min="0" class="in" placeholder="مثال: 250" /></div>
         <label class="chk"><input v-model="f.flex_enabled" type="checkbox" /> الساعة المرنة</label>
         <label class="chk"><input v-model="f.daily_note_required" type="checkbox" /> إلزام المنجز اليومي</label>
-        <label class="chk" title="تحسب مكافأة نهاية الخدمة حسب نظام العمل السعودي — انظر الشرح أدناه"><input v-model="f.eosb_saudi" type="checkbox" /> قواعد نهاية الخدمة السعودية <Icon name="info" :size="13" /></label>
+        <label class="chk" title="تحسب مكافأة نهاية الخدمة حسب نظام العمل السعودي (المادتان 84 و85)"><input v-model="f.eosb_saudi" type="checkbox" /> قواعد نهاية الخدمة السعودية <Icon name="info" :size="13" /></label>
         <label class="chk" title="يحدد هل يُسمح للموظف بتقديم طلب سلفة من النظام. عند إلغائه لا يظهر له نوع طلب «سلفة»."><input v-model="f.advances_enabled" type="checkbox" /> تفعيل السلف <Icon name="info" :size="13" /></label>
         <label v-if="!id" class="chk"><input v-model="f.create_user" type="checkbox" /> إنشاء حساب دخول</label>
-      </div>
-      <div class="notice info small mt"><b>تفعيل السلف:</b> يحدد هل يُسمح لهذا الموظف بطلب سلفة من النظام أم لا. عند إلغائه لا يستطيع تقديم طلب سلفة.</div>
-      <div v-if="f.eosb_saudi" class="notice info small">
-        <b>قواعد نهاية الخدمة السعودية (نظام العمل، المادتان 84 و85):</b>
-        <ul style="margin:4px 0 0;padding-inline-start:18px">
-          <li>المكافأة على أساس آخر أجر (الأساسي + السكن + النقل): نصف أجر شهر عن كل سنة من السنوات الخمس الأولى، وأجر شهر كامل عن كل سنة بعدها، وتُحسب كسور السنة بنسبتها.</li>
-          <li>عند <b>إنهاء الشركة</b> للعقد أو انتهائه: المكافأة كاملة.</li>
-          <li>عند <b>الاستقالة</b>: أقل من سنتين لا شيء · من 2 إلى أقل من 5 سنوات ثلث المكافأة · من 5 إلى أقل من 10 سنوات ثلثاها · 10 سنوات فأكثر كاملة.</li>
-          <li>تُستحق كاملة للمرأة عند الاستقالة خلال ستة أشهر من الزواج أو ثلاثة أشهر من الولادة، وفي حالات القوة القاهرة.</li>
-          <li>الفصل وفق المادة 80 يُسقط المكافأة.</li>
-        </ul>
-        <span class="tiny muted">ألغِ الخيار لمن لا يخضع لنظام العمل السعودي (مثل المتعاونين من خارج المملكة).</span>
       </div>
       <div v-if="Object.keys(errors).length" class="notice bad mt">{{ Object.values(errors).flat().join(' · ') }}</div>
     </template>

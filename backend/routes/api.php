@@ -47,6 +47,8 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('auth/me', [AuthController::class, 'me']);
+        Route::post('users/{user}/photo', [\App\Http\Controllers\Api\ProfilePhotoController::class, 'store']);
+        Route::delete('users/{user}/photo', [\App\Http\Controllers\Api\ProfilePhotoController::class, 'destroy']);
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::post('auth/password', [AuthController::class, 'changePassword']);
         Route::post('auth/locale', [AuthController::class, 'locale']);
@@ -136,6 +138,9 @@ Route::prefix('v1')->group(function () {
         Route::get('mail/unread', [MailController::class, 'unread']);
         Route::get('mail/recipients', [MailController::class, 'recipients']);
         Route::get('mail/all', [MailController::class, 'all']);
+        Route::get('mail/drafts', [MailController::class, 'drafts']);
+        Route::post('mail/drafts', [MailController::class, 'saveDraft']);
+        Route::delete('mail/drafts/{draft}', [MailController::class, 'deleteDraft']);
         Route::get('mail', [MailController::class, 'threads']);
         Route::post('mail', [MailController::class, 'store']);
         Route::get('mail/{thread}', [MailController::class, 'show']);
@@ -209,6 +214,7 @@ Route::prefix('v1')->group(function () {
         Route::put('companies/{company}', [AdminController::class, 'saveCompany']);
         Route::delete('companies/{company}', [AdminController::class, 'deleteCompany']);
         Route::post('companies/{company}/logo', [AdminController::class, 'uploadLogo']);
+        Route::put('companies/{company}/identity', [AdminController::class, 'saveIdentity']);
         Route::delete('companies/{company}/logo', [AdminController::class, 'deleteLogo']);
         Route::get('tiers', [AdminController::class, 'tiers']);
         Route::put('tiers/{tier}', [AdminController::class, 'updateTier']);

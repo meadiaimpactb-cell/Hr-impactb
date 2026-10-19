@@ -117,7 +117,7 @@ class AuthController extends Controller
         $e = $u->employee;
 
         return [
-            'id' => $u->id, 'name' => $u->name, 'login' => $u->login, 'email' => $u->email, 'roles' => $u->roles,
+            'id' => $u->id, 'name' => $u->name, 'login' => $u->login, 'email' => $u->email, 'roles' => $u->roles, 'photo_url' => $u->photo_url,
             'role_label' => User::ROLES[$u->roles[0] ?? 'emp'] ?? '', 'locale' => $u->locale, 'must_change_password' => $u->must_change_password,
             'company_ids' => $acc->companyIds(),
             'has_reports' => $e ? $e->reports()->exists() : false,

@@ -13,7 +13,7 @@
     <div class="row">
       <a v-if="a.has_attachment" class="btn ghost xs" href="#" @click.prevent="fileUrl(a.file)"><Icon name="download" :size="14" /> مرفق</a>
       <button v-if="a.require_ack && !a.ack_at && !a.is_sender" class="btn okb xs" @click="ack(a)"><Icon name="check-circle" :size="14" /> أقرّ بالاطلاع</button>
-      <template v-if="!a.is_sender && reactionsOn"><button v-for="(l, k) in REACT" :key="k" class="btn xs" :class="a.my_reaction === k ? 'sec' : 'ghost'" @click="react(a, k)">{{ l }}</button></template>
+      <template v-if="!a.is_sender && reactionsOn"><button v-for="(l, k) in REACT" :key="k" class="btn xs" :class="a.my_reaction === k ? 'sec' : 'ghost'" style="padding:4px 8px" :title="l" :aria-label="l" @click="react(a, k)"><Icon :name="k" :size="16" /></button></template>
     </div>
   </div>
 
@@ -35,7 +35,7 @@
 
   <Modal v-if="tr" :title="`تتبع: ${tr.announcement.title}`" size="wide" @close="tr = null">
     <div class="grid g3 mb"><Kpi label="المستلمون" :value="tr.announcement.recipients" color="b" /><Kpi label="قرأوا" :value="tr.announcement.reads" color="g" /><Kpi label="أقرّوا" :value="tr.announcement.acks" color="y" /></div>
-    <div class="row mb"><span v-for="(n, k) in tr.reactions" :key="k" class="pill gray">{{ REACT[k] }} {{ n }}</span><button class="btn sec sm" @click="remind">تذكير من لم يقرأ / يقرّ</button><button class="btn ghost sm" @click="printProof"><Icon name="external" :size="14" /> إثبات الاطلاع PDF</button></div>
+    <div class="row mb"><span v-for="(n, k) in tr.reactions" :key="k" class="pill gray" :title="REACT[k]"><Icon :name="k" :size="14" /> {{ n }}</span><button class="btn sec sm" @click="remind">تذكير من لم يقرأ / يقرّ</button><button class="btn ghost sm" @click="printProof"><Icon name="external" :size="14" /> إثبات الاطلاع PDF</button></div>
     <div v-dt class="tw"><table><thead><tr><th>المستلم</th><th>القراءة</th><th>الإقرار</th><th>الجهاز</th></tr></thead><tbody><tr v-for="r in tr.recipients" :key="r.user?.id"><td>{{ r.user?.name }}</td><td class="small">{{ r.read_at ? fmtDT(r.read_at) : '—' }}</td><td class="small">{{ r.ack_at ? fmtDT(r.ack_at) : '—' }}</td><td class="tiny muted">{{ r.device }}</td></tr></tbody></table></div>
     <template #foot><button class="btn sec" @click="tr = null">إغلاق</button></template>
   </Modal>

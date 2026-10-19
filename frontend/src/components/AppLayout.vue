@@ -17,13 +17,13 @@
     <RouterLink v-if="auth.isApprover" class="tbtn icon" to="/approvals" :title="t('صندوق الموافقات')"><Icon name="approvals" /><span v-if="inbox" class="dot">{{ inbox }}</span></RouterLink>
     <button class="tbtn icon lg-only" :title="t('الوضع الليلي')" @click="ui.toggleTheme()"><Icon :name="ui.dark ? 'sun' : 'moon'" /></button>
     <button class="tbtn lg-only" :title="t('اللغة')" @click="ui.setLang(ui.lang === 'ar' ? 'en' : 'ar')"><Icon name="languages" :size="16" />{{ ui.lang === 'ar' ? 'EN' : 'ع' }}</button>
-    <RouterLink class="tbtn hide-sm" to="/me"><span class="avatar" style="width:22px;height:22px;font-size:11px">{{ auth.user?.name?.[0] }}</span>{{ auth.user?.name?.split(' ')[0] }} <span class="tiny" style="opacity:.75">· {{ auth.user?.role_label }}</span></RouterLink>
+    <RouterLink class="tbtn hide-sm" to="/me"><Avatar :name="auth.user?.name" :url="auth.user?.photo_url" :size="22" />{{ auth.user?.name?.split(' ')[0] }} <span class="tiny" style="opacity:.75">· {{ auth.user?.role_label }}</span></RouterLink>
     <button class="tbtn lg-only" :title="t('خروج')" @click="logout"><Icon name="logout" :size="16" flip-rtl /><span class="hide-sm">{{ t('خروج') }}</span></button>
     <!-- small screens: the rest of the header actions live in one menu, nothing is dropped -->
     <div ref="moreWrap" class="more-wrap">
       <button class="tbtn icon" :title="t('المزيد')" aria-label="المزيد" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><Icon name="more" /></button>
       <div v-if="moreOpen" class="more-menu" role="menu">
-        <RouterLink class="mi" to="/me" @click="moreOpen = false"><span class="avatar">{{ auth.user?.name?.[0] }}</span><span style="min-width:0"><b>{{ auth.user?.name }}</b><span class="tiny muted" style="display:block">{{ auth.user?.role_label }}</span></span></RouterLink>
+        <RouterLink class="mi" to="/me" @click="moreOpen = false"><Avatar :name="auth.user?.name" :url="auth.user?.photo_url" /><span style="min-width:0"><b>{{ auth.user?.name }}</b><span class="tiny muted" style="display:block">{{ auth.user?.role_label }}</span></span></RouterLink>
         <hr />
         <select v-if="companies.length > 1" class="in msel" :value="ui.company" aria-label="الشركة" @change="ui.setCompany($event.target.value); reload(); moreOpen = false">
           <option :value="0">{{ t('كل الشركات') }}</option>
@@ -62,7 +62,7 @@
   <!-- Announcements that require acknowledgement block the UI until acknowledged -->
   <div v-if="acks.length" class="mo" style="z-index:200">
     <div class="box">
-      <div class="mh"><h3><Icon name="megaphone" :size="18" /> إعلان يتطلب إقرارك</h3></div>
+      <div class="mh"><h3 class="row" style="gap:8px;align-items:center"><img v-if="ackCo?.logo_url" :src="ackCo.logo_url" :alt="ackCo.name" style="height:28px;max-width:90px;object-fit:contain" /><Icon v-else name="megaphone" :size="18" /> {{ ackCo ? `إعلان من ${ackCo.name}` : 'إعلان يتطلب إقرارك' }}</h3></div>
       <div class="mb"><b>{{ acks[0].title }}</b><div class="tiny muted">{{ acks[0].sender }}</div><p style="white-space:pre-wrap">{{ acks[0].body }}</p></div>
       <div class="mf"><span class="tiny muted">{{ acks.length > 1 ? `و${acks.length - 1} إعلانات أخرى` : '' }}</span><button class="btn okb" @click="ackOne"><Icon name="check-circle" :size="15" /> أقرّ بالاطلاع</button></div>
     </div>
@@ -94,6 +94,8 @@ const mailUnread = ref(0)
 const acks = ref([])
 async function ackOne() { const a = acks.value[0]; await api.post(`/announcements/${a.id}/ack`); acks.value = acks.value.slice(1) }
 const companies = computed(() => auth.meta?.companies || [])
+// the acknowledgement pop-up carries the official name and logo of the employee's own company
+const ackCo = computed(() => auth.user?.employee?.company || companies.value.find((c) => c.id === auth.user?.employee?.company_id) || null)
 // Company identity (policy §47: "تظهر صفحات الموظفين بهوية شركتهم وشعارها وألوانها"): an employee always sees their own company;
 // HR/the group CEO see the identity of the company they filtered on, and the group identity when viewing all companies.
 const brandCo = computed(() => {

@@ -1,6 +1,6 @@
 <template>
   <div class="page-h">
-    <div><h1>{{ t('ملفي') }} — {{ auth.user.name }}</h1><p>{{ auth.user.role_label }} · {{ auth.emp?.company?.name }}</p></div>
+    <div class="row" style="gap:14px;align-items:center"><Avatar :name="auth.user.name" :url="auth.user.photo_url" :size="64" :user-id="auth.user.id" editable @changed="auth.user.photo_url = $event" /><div><h1>{{ t('ملفي') }} — {{ auth.user.name }}</h1><p>{{ auth.user.role_label }} · {{ auth.emp?.company?.name }}</p></div></div>
     <div class="acts"><RouterLink v-if="auth.emp" class="btn sec sm" :to="`/employees/${auth.emp.id}`">الملف الكامل</RouterLink></div>
   </div>
   <div v-if="auth.user.must_change_password" class="notice warn">كلمة مرورك مؤقتة — يجب تغييرها قبل استخدام المنصة.</div>

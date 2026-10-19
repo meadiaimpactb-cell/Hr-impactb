@@ -107,6 +107,18 @@ class AdminController extends Controller
     }
 
     /** Company logo: PNG/JPG/SVG/WebP up to 2 MB, stored on the public disk and served by /brand/{file}. */
+    /** Colours of a company's identity only (from the Settings screen) — the group CEO's decision like the rest of the identity. */
+    public function saveIdentity(Request $request, Company $company)
+    {
+        abort_unless($request->user()->hasRole('super'), 403, 'تعديل هوية الشركة صلاحية الرئيس التنفيذي للمجموعة');
+        $d = $request->validate(['color' => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'], 'color2' => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/']], ['regex' => 'اللون يجب أن يكون بصيغة #RRGGBB']);
+        $before = $company->only('color', 'color2');
+        $company->update($d);
+        Audit::log('companies', $company->id, 'identity', $before, $d);
+
+        return $company->fresh();
+    }
+
     public function uploadLogo(Request $request, Company $company)
     {
         abort_unless($request->user()->hasRole('super'), 403, 'تعديل هوية الشركة صلاحية الرئيس التنفيذي للمجموعة');

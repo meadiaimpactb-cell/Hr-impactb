@@ -3,6 +3,7 @@
     <div><h1>{{ t('الإعدادات والسياسات') }}</h1><p>كل قاعدة قابلة للتعديل دون برمجة · لكل تعديل نسخة وتاريخ سريان وسبب · يمكن تخصيص أي قاعدة لشركة · تعريفات القواعد نفسها (الاسم والمجموعة) بيانات قابلة للتحرير</p></div>
     <div v-if="auth.has('super')" class="acts"><button class="btn pri sm" @click="defForm = { key: '', label: '', label_en: '', group: '', type: 'text', description: '' }"><Icon name="plus" :size="16" /> قاعدة جديدة</button></div>
   </div>
+  <IdentitySettings />
   <div v-if="!rows.length"><div class="skel" v-for="i in 6" :key="i" /></div>
   <div v-for="(items, g) in groups" :key="g" class="card">
     <h3>{{ g }}</h3>
@@ -63,6 +64,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../api'
 import Modal from '../components/Modal.vue'
+import IdentitySettings from '../components/IdentitySettings.vue'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 

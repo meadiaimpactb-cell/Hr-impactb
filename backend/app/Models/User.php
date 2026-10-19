@@ -17,7 +17,17 @@ class User extends Authenticatable
 
     protected $guarded = ['id'];
 
-    protected $hidden = ['password', 'remember_token', 'invite_token', 'invite_secret'];
+    protected $hidden = ['password', 'remember_token', 'invite_token', 'invite_secret', 'photo_path'];
+
+    protected $appends = ['photo_url'];
+
+    /** Public URL of the profile photo (served by the /photo route under an unguessable name). */
+    public function getPhotoUrlAttribute(): ?string
+    {
+        $p = $this->attributes['photo_path'] ?? null;
+
+        return $p ? url('/photo/'.basename($p)) : null;
+    }
 
     protected function casts(): array
     {

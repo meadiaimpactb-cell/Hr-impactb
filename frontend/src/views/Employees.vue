@@ -16,7 +16,7 @@
       <template #bulk="{ selected, clear }">
         <button class="btn sec xs" @click="bulkInvite(selected, clear)"><Icon name="mail-plus" :size="14" /> إرسال دعوات الدخول</button>
       </template>
-      <template #cell-name="{ row: e }"><div class="row" style="gap:8px;flex-wrap:nowrap"><span class="avatar">{{ e.name[0] }}</span><div><b>{{ e.name }}</b><span class="tiny muted">{{ e.emp_no }} · <span dir="ltr">{{ e.email_enabled ? e.email || 'بلا بريد' : 'بلا بريد' }}</span></span></div></div></template>
+      <template #cell-name="{ row: e }"><div class="row" style="gap:8px;flex-wrap:nowrap"><Avatar :name="e.name" :url="e.user?.photo_url" /><div><b>{{ e.name }}</b><span class="tiny muted">{{ e.emp_no }} · <span dir="ltr">{{ e.email_enabled ? e.email || 'بلا بريد' : 'بلا بريد' }}</span></span></div></div></template>
       <template #cell-job="{ row: e }">{{ e.job_title?.name || '—' }}<span class="tiny muted">{{ e.dept }}</span></template>
       <template #cell-contract="{ row: e }">{{ contractLabel(e.contract_type, auth.meta) }}<span class="tiny muted">{{ e.punch_required ? 'تحضير مطلوب' : 'معفى من التحضير' }}</span></template>
       <template #cell-account="{ row: e }"><span class="pill" :class="accountState(e).cls">{{ accountState(e).label }}</span></template>

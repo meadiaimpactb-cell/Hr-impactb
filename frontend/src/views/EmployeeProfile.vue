@@ -3,7 +3,7 @@
   <template v-else>
     <div class="page-h">
       <div class="row" style="gap:12px">
-        <span class="avatar" style="width:52px;height:52px;font-size:20px">{{ e.name[0] }}</span>
+        <Avatar :name="e.name" :url="e.user?.photo_url" :size="56" :user-id="e.user?.id" :editable="!!e.user && (auth.has('super', 'hr_mgr') || e.user.id === auth.user.id)" @changed="(u) => { e.user.photo_url = u; if (e.user.id === auth.user.id) auth.user.photo_url = u }" />
         <div><h1>{{ e.name }}</h1><p>{{ e.emp_no }} · {{ e.company?.name }} · {{ e.job_title?.name }} · <StatusPill :status="e.status" /></p></div>
       </div>
       <div class="acts">

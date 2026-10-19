@@ -28,6 +28,15 @@ Route::get('/brand/{file}', function (string $file) {
     return response()->file($path, ['Cache-Control' => 'public, max-age=86400']);
 })->where('file', '[A-Za-z0-9_.-]+');
 
+// Profile photos (random file names; uploaded from the profile / accounts screens to storage/app/public/photos)
+Route::get('/photo/{file}', function (string $file) {
+    abort_unless(preg_match('/^u\d+_[A-Za-z0-9]{24}\.(png|jpe?g|webp)$/i', $file), 404);
+    $path = storage_path('app/public/photos/'.$file);
+    abort_unless(is_file($path), 404);
+
+    return response()->file($path, ['Cache-Control' => 'public, max-age=604800']);
+})->where('file', '[A-Za-z0-9_.-]+');
+
 // Old bookmarks
 Route::redirect('/login', '/app/login');
 

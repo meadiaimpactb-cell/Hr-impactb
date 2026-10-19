@@ -42,7 +42,7 @@
       <tr><th>الموقع الإلكتروني</th><td><a v-if="view.website" :href="view.website" target="_blank" rel="noopener" dir="ltr">{{ view.website }} <Icon name="external" :size="12" /></a><span v-else>—</span></td></tr>
       <tr><th>الرئيس التنفيذي</th><td>{{ view.ceo?.name || '—' }}</td></tr>
       <tr><th>التصنيف</th><td><span v-if="view.tier" class="pill" :style="{ background: view.tier.color + '22', color: view.tier.color }">{{ view.tier.name }}</span><span v-else>—</span></td></tr>
-      <tr><th>الهوية</th><td><div class="row" style="align-items:center;gap:10px"><img v-if="view.logo_url" :src="view.logo_url" :alt="view.name" style="height:44px;max-width:160px;object-fit:contain;background:#fff;border-radius:8px;padding:3px 6px" /><span v-else class="muted">بلا شعار</span><span v-if="view.color" dir="ltr" class="tiny"><i class="sw" :style="{ background: view.color }" /> {{ view.color }} <i v-if="view.color2" class="sw" :style="{ background: view.color2 }" /> {{ view.color2 || '' }}</span></div></td></tr>
+      <tr><th>الهوية</th><td><div class="row" style="align-items:center;gap:10px"><img v-if="view.logo_url" :src="view.logo_url" :alt="view.name" style="height:44px;max-width:160px;object-fit:contain;border-radius:8px;padding:3px 6px" /><span v-else class="muted">بلا شعار</span><span v-if="view.color" dir="ltr" class="tiny"><i class="sw" :style="{ background: view.color }" /> {{ view.color }} <i v-if="view.color2" class="sw" :style="{ background: view.color2 }" /> {{ view.color2 || '' }}</span></div></td></tr>
       <tr><th>عدد الموظفين</th><td>{{ view.employees_count }}</td></tr>
       <tr><th>السجل التجاري</th><td>{{ view.legal_no || '—' }}</td></tr>
       <tr><th>الرقم الضريبي</th><td>{{ view.tax_no || '—' }}</td></tr>
@@ -123,7 +123,7 @@
       <div class="fg"><label>اللون الثانوي</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="color" class="cp" :value="form.color2 || '#4FCAF2'" @input="form.color2 = $event.target.value" /><input v-model.trim="form.color2" class="in" dir="ltr" placeholder="#4FCAF2" maxlength="7" /></div></div>
       <div class="fg"><label>الشعار <span class="tiny muted">PNG/SVG بخلفية شفافة · حتى 2MB</span></label>
         <div class="row" style="gap:8px;align-items:center;flex-wrap:nowrap">
-          <img v-if="logoPreview || form.logo_url" :src="logoPreview || form.logo_url" alt="" style="height:44px;max-width:150px;object-fit:contain;background:#fff;border-radius:8px;padding:3px 6px;border:1px solid var(--line)" />
+          <img v-if="logoPreview || form.logo_url" :src="logoPreview || form.logo_url" alt="" style="height:44px;max-width:150px;object-fit:contain" />
           <input ref="logoInput" type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style="display:none" @change="pickLogo" />
           <button type="button" class="btn sec xs" @click="$refs.logoInput.click()"><Icon name="upload" :size="14" /> {{ form.logo_url || logoFile ? 'تغيير' : 'رفع شعار' }}</button>
           <button v-if="form.id && form.logo_url && !logoFile" type="button" class="btn ghost xs" title="إزالة الشعار" @click="removeLogo"><Icon name="trash" :size="14" /></button>
@@ -323,11 +323,11 @@ onMounted(load)
 <style scoped>
 .site { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; margin-top: 2px; }
 .site:hover { text-decoration: underline; }
-.co-thumb { height: 34px; width: 56px; object-fit: contain; background: #fff; border-radius: 8px; padding: 2px 4px; border: 1px solid var(--line); flex: 0 0 auto; }
+.co-thumb { height: 34px; width: 56px; object-fit: contain; flex: 0 0 auto; }
 .co-none { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 12px; border: 0; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-inline-end: 3px; vertical-align: middle; }
 .cp { width: 34px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; flex: 0 0 auto; }
 .brand-preview { margin-top: 12px; border-radius: 10px; padding: 10px 14px; color: #fff; display: flex; align-items: center; gap: 12px; }
-.brand-preview img { height: 38px; max-width: 150px; object-fit: contain; background: #fff; border-radius: 8px; padding: 3px 6px; }
+.brand-preview img { height: 38px; max-width: 150px; object-fit: contain; filter: brightness(0) invert(1); }
 .brand-preview small { display: block; font-size: 10.5px; opacity: .85; font-weight: 400; }
 </style>

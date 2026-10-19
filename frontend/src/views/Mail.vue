@@ -15,11 +15,22 @@
   <div v-else class="grid mail-grid">
     <div class="card mail-list">
       <div class="row" style="gap:6px;margin-bottom:8px;flex-wrap:nowrap"><input v-model.trim="q" class="in" placeholder="بحث بالموضوع أو المرسل…" style="min-width:0" /><label class="chk tiny" style="white-space:nowrap"><input v-model="onlyUnread" type="checkbox" /> غير المقروء</label></div>
+      <div class="tabs mb"><button :class="{ on: box === 'in' }" @click="box = 'in'">المحادثات</button><button :class="{ on: box === 'drafts' }" @click="box = 'drafts'; loadDrafts()">المسودات<span v-if="drafts.length"> ({{ drafts.length }})</span></button></div>
+      <template v-if="box === 'drafts'">
+        <div class="notice info small">المسودة لم تُرسل بعد، ويمكنك تعديلها أو حذفها. الرسالة المرسلة لا تُحذف لأنها أصبحت سجلًا معتمدًا.</div>
+        <div v-if="!drafts.length" class="empty">لا مسودات</div>
+        <div v-for="d in drafts" :key="d.id" class="thread" @click="openDraft(d)">
+          <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>{{ d.subject || '(بدون موضوع)' }}</b><button class="btn ghost xs" title="حذف المسودة" @click.stop="removeDraft(d)"><Icon name="trash" :size="14" /></button></div>
+          <div class="small muted">إلى: {{ d.to_names.join('، ') || '—' }} · {{ fmtDT(d.updated_at) }}</div><div class="tiny muted">{{ (d.body || '').slice(0, 80) }}</div>
+        </div>
+      </template>
+      <template v-else>
       <div v-if="!shown.length" class="empty">لا رسائل</div>
       <div v-for="th in shown" :key="th.id" class="thread" :class="{ on: cur?.id === th.id, unread: th.unread }" @click="open(th.id)">
         <div class="row" style="justify-content:space-between"><b>{{ th.subject }}</b><span class="tiny muted">{{ fmtDT(th.last_at) }}</span></div>
         <div class="small muted">{{ th.others }} · {{ th.count }}</div><div class="tiny muted">{{ th.preview }}</div>
       </div>
+      </template>
     </div>
     <div class="card" style="margin:0">
       <div v-if="!cur" class="empty">اختر محادثة</div>
@@ -33,19 +44,20 @@
     </div>
   </div>
 
-  <Modal v-if="nf" title="رسالة جديدة" @close="nf = null">
+  <Modal v-if="nf" :title="nf.draft_id ? 'مسودة رسالة' : 'رسالة جديدة'" @close="nf = null">
     <div v-if="companies.length > 1" class="fg"><label>الشركة</label><select v-model="coFilter" class="in"><option value="">كل الشركات المتاحة لك</option><option v-for="c in companies" :key="c" :value="c">{{ c }}</option></select></div>
     <div class="fg"><label>إلى * <span class="tiny muted">(يمكن اختيار أكثر من مستلم)</span></label><SearchSelect :model-value="null" :options="users.filter((u) => !nf.to.includes(u.id) && (!coFilter || u.company === coFilter)).map((u) => ({ value: u.id, label: u.name, sub: [u.role, u.company].filter(Boolean).join(' · ') }))" placeholder="ابحث عن مستلم…" @update:model-value="(v) => v && nf.to.push(v)" /><div v-if="nf.to.length" class="row" style="gap:6px;margin-top:6px"><span v-for="id in nf.to" :key="id" class="pill info">{{ users.find((u) => u.id === id)?.name || id }} <a style="cursor:pointer" @click="nf.to = nf.to.filter((x) => x !== id)">×</a></span></div><span class="tiny muted">تصل الرسالة داخل المنصة، ونسخة منها إلى البريد الإلكتروني الرسمي للمستلم.</span></div>
     <label v-if="nf.to.length > 1" class="chk"><input v-model="nf.group" type="checkbox" /> محادثة جماعية مشتركة <span class="tiny muted">(بدونها تصل الرسالة لكل مستلم في محادثة خاصة منفصلة، ولا يرى أي مستلم الآخرين ولا ردودهم)</span></label>
     <div class="fg"><label>الموضوع *</label><input v-model="nf.subject" class="in" /></div>
     <div class="fg"><label>الرسالة *</label><textarea v-model="nf.body" class="in" rows="5" /></div>
     <div class="fg"><label>مرفق</label><input type="file" class="in" @change="file = $event.target.files[0]" /></div>
-    <template #foot><button class="btn sec" @click="nf = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="create">إرسال</button></template>
+    <template #foot><button v-if="nf.draft_id" class="btn dan" style="margin-inline-end:auto" @click="removeDraft({ id: nf.draft_id }, true)"><Icon name="trash" :size="14" /> حذف المسودة</button><button class="btn sec" @click="nf = null">إلغاء</button><button class="btn ghost" :disabled="busy" @click="saveDraft">حفظ كمسودة</button><button class="btn pri" :class="{ loading: busy }" @click="create">إرسال</button></template>
   </Modal>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { confirmBox } from '../dialog'
 import DateInput from '../components/DateInput.vue'
 import { useI18n } from 'vue-i18n'
 import api, { fileUrl } from '../api'
@@ -75,9 +87,25 @@ async function openNew(manager) { nf.value = { to: manager?.user_id ? [manager.u
 async function create() {
   if (!nf.value.to.length || !nf.value.subject.trim() || !nf.value.body.trim()) return ui.toast('المستلم والموضوع والرسالة إلزامية', 'warn')
   busy.value = true
-  try { const r = await api.post('/mail', fd(nf.value)); nf.value = null; file.value = null; await load(); open(r.id) } finally { busy.value = false }
+  try { const wasDraft = nf.value.draft_id; const r = await api.post('/mail', fd(nf.value)); nf.value = null; file.value = null; box.value = 'in'; await load(); if (wasDraft) loadDrafts(); open(r.id) } finally { busy.value = false }
 }
-onMounted(load)
+const box = ref('in'); const drafts = ref([])
+async function loadDrafts() { drafts.value = await api.get('/mail/drafts') }
+async function openDraft(d) { await openNew(); nf.value = { to: [...d.to], subject: d.subject || '', body: d.body || '', group: !!d.group, draft_id: d.id } }
+async function saveDraft() {
+  const n = nf.value
+  if (!n.subject.trim() && !n.body.trim() && !n.to.length) return ui.toast('المسودة فارغة', 'warn')
+  busy.value = true
+  try {
+    await api.post('/mail/drafts', { id: n.draft_id || null, to: n.to, subject: n.subject, body: n.body, group: n.group })
+    ui.toast(file.value ? 'حُفظت المسودة (المرفق لا يُحفظ في المسودة)' : 'حُفظت المسودة', 'ok'); nf.value = null; file.value = null; box.value = 'drafts'; loadDrafts()
+  } finally { busy.value = false }
+}
+async function removeDraft(d, fromModal) {
+  if (!(await confirmBox('حذف هذه المسودة نهائيًا؟', { confirmText: 'حذف' }))) return
+  await api.delete(`/mail/drafts/${d.id}`); if (fromModal) nf.value = null; ui.toast('حُذفت المسودة', 'ok'); loadDrafts()
+}
+onMounted(() => { load(); loadDrafts() })
 </script>
 
 <style scoped>

@@ -1,53 +1,59 @@
 <template>
   <div class="ht">
-    <div class="row" style="gap:8px;align-items:center;margin-bottom:6px">
-      <span class="tiny muted">علّم أيام العمل (السبت أو أي يوم) وحدد وقت كل يوم؛ اليوم غير المعلّم إجازة أسبوعية.</span>
-      <template v-if="!disabled">
-        <span class="tiny muted">تطبيق على كل أيام العمل:</span>
-        <input v-model="allStart" type="time" class="in xs" /><span class="tiny muted">إلى</span><input v-model="allEnd" type="time" class="in xs" />
-        <button type="button" class="btn ghost xs" @click="applyAll">تطبيق</button>
-      </template>
+    <div v-if="!disabled" class="row presets">
+      <span class="tiny muted">تعبئة سريعة:</span>
+      <button v-for="p in PRESETS" :key="p.label" type="button" class="btn ghost xs" @click="preset(p.days)">{{ p.label }}</button>
     </div>
-    <div class="days">
-      <div v-for="d in 7" :key="d - 1" class="day" :class="{ off: !on(d - 1) }">
-        <label class="chk"><input type="checkbox" :checked="on(d - 1)" :disabled="disabled" @change="toggle(d - 1, $event.target.checked)" /> {{ DAYS_AR[d - 1] }}</label>
-        <div class="times">
-          <input type="time" class="in xs" :value="h(d - 1)[0]" :disabled="disabled || !on(d - 1)" @change="set(d - 1, 0, $event.target.value)" />
-          <span class="tiny muted">إلى</span>
-          <input type="time" class="in xs" :value="h(d - 1)[1]" :disabled="disabled || !on(d - 1)" @change="set(d - 1, 1, $event.target.value)" />
-          <span v-if="on(d - 1) && h(d - 1)[1] < h(d - 1)[0]" class="pill warn" title="تنتهي الوردية في اليوم التالي">ليلية</span>
-          <span v-else-if="!on(d - 1)" class="tiny muted">إجازة — فعّل اليوم لتحديد وقته</span>
-        </div>
+    <div v-if="!rows.length" class="tiny muted mt">لا توجد أيام عمل. اضغط «إضافة» لإضافة يوم.</div>
+    <div v-for="r in rows" :key="r.d" class="line">
+      <select class="in day" :value="r.d" :disabled="disabled" title="اليوم" @change="move(r.d, Number($event.target.value))">
+        <option v-for="d in ORDER" :key="d" :value="d" :disabled="d !== r.d && used(d)">{{ DAYS_AR[d] }}</option>
+      </select>
+      <div class="times">
+        <input type="time" class="in t" :value="r.t[0]" :disabled="disabled" title="من" @change="set(r.d, 0, $event.target.value)" />
+        <span class="tiny muted">إلى</span>
+        <input type="time" class="in t" :value="r.t[1]" :disabled="disabled" title="إلى" @change="set(r.d, 1, $event.target.value)" />
       </div>
+      <span v-if="r.t[1] < r.t[0]" class="pill warn" title="تنتهي الوردية في اليوم التالي">ليلية</span>
+      <button v-if="!disabled" type="button" class="btn ghost xs x" title="حذف اليوم (يصبح إجازة أسبوعية)" @click="remove(r.d)"><Icon name="x" :size="15" /></button>
     </div>
+    <button v-if="!disabled && rows.length < 7" type="button" class="link-btn" @click="add">إضافة</button>
+    <div class="tiny muted mt">الأيام غير المضافة إجازة أسبوعية.</div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed } from 'vue'
 import { DAYS_AR } from '../utils'
 
 // v-model: { "0": ["10:00", "19:00"], … } keyed by day of week (0 = Sunday). Missing day = day off.
 const props = defineProps({ modelValue: { type: Object, default: () => ({}) }, disabled: Boolean })
 const emit = defineEmits(['update:modelValue'])
-const allStart = ref('09:00')
-const allEnd = ref('17:00')
-const on = (d) => Array.isArray(props.modelValue?.[String(d)])
-const h = (d) => props.modelValue[String(d)] || [allStart.value, allEnd.value]
-function put(obj) { emit('update:modelValue', obj) }
-function toggle(d, checked) {
-  const v = { ...props.modelValue }
-  if (checked) v[String(d)] = [allStart.value, allEnd.value]; else delete v[String(d)]
-  put(v)
-}
-function set(d, i, val) { const v = { ...props.modelValue }; const t = [...(v[String(d)] || ['09:00', '17:00'])]; t[i] = val || t[i]; v[String(d)] = t; put(v) }
-function applyAll() { const v = {}; for (const k of Object.keys(props.modelValue)) v[k] = [allStart.value, allEnd.value]; put(v) }
+const ORDER = [6, 0, 1, 2, 3, 4, 5] // the Saudi week starts on Saturday
+const PRESETS = [
+  { label: 'الأحد – الخميس', days: [0, 1, 2, 3, 4] },
+  { label: 'السبت – الخميس', days: [6, 0, 1, 2, 3, 4] },
+  { label: 'كل الأيام', days: ORDER },
+]
+const val = () => props.modelValue || {}
+const rows = computed(() => ORDER.filter((d) => Array.isArray(val()[String(d)])).map((d) => ({ d, t: val()[String(d)] })))
+const used = (d) => Array.isArray(val()[String(d)])
+const lastTimes = () => (rows.value.length ? [...rows.value[rows.value.length - 1].t] : ['10:00', '19:00'])
+const put = (v) => emit('update:modelValue', v)
+function set(d, i, t) { const v = { ...val() }; const x = [...v[String(d)]]; x[i] = t || x[i]; v[String(d)] = x; put(v) }
+function remove(d) { const v = { ...val() }; delete v[String(d)]; put(v) }
+function add() { const d = ORDER.find((x) => !used(x)); if (d === undefined) return; put({ ...val(), [String(d)]: lastTimes() }) }
+function move(from, to) { if (from === to) return; const v = { ...val() }; v[String(to)] = v[String(from)]; delete v[String(from)]; put(v) }
+function preset(days) { const t = lastTimes(); const v = {}; days.forEach((d) => { v[String(d)] = val()[String(d)] ? [...val()[String(d)]] : [...t] }); put(v) }
 </script>
 
 <style scoped>
-.days { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px 12px; }
-.day { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
-.day.off { opacity: .7; }
-.times { display: flex; align-items: center; gap: 6px; direction: ltr; flex-wrap: wrap; }
-.in.xs { padding: 4px 6px; width: 104px; font-size: 13px; flex: none; }
+.presets { gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.line { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.in.day { width: 150px; flex: none; }
+.times { display: flex; align-items: center; gap: 6px; direction: ltr; }
+.in.t { width: 104px; padding: 6px 8px; flex: none; }
+.x { color: var(--muted); }
+.link-btn { background: none; border: 0; padding: 2px 0; color: var(--brand, var(--pri)); cursor: pointer; font: inherit; font-size: 13px; }
+.link-btn:hover { text-decoration: underline; }
 </style>

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\MailDraft;
 use App\Models\MailMessage;
 use App\Models\MailThread;
 use App\Models\User;
@@ -56,6 +57,35 @@ class MailController extends Controller
                 'messages' => $t->messages->map(fn ($m) => ['from' => $m->sender?->name, 'body' => $m->body, 'at' => $m->created_at])])->values();
     }
 
+    /** The author's unsent drafts — the only mail that can be deleted (a sent message is a record and stays). */
+    public function drafts(Request $request)
+    {
+        $names = User::pluck('name', 'id');
+
+        return MailDraft::where('user_id', $request->user()->id)->latest('updated_at')->get()
+            ->map(fn ($d) => ['id' => $d->id, 'to' => $d->to ?? [], 'to_names' => collect($d->to ?? [])->map(fn ($i) => $names[$i] ?? '')->filter()->values(), 'subject' => $d->subject, 'body' => $d->body, 'group' => $d->group, 'updated_at' => $d->updated_at]);
+    }
+
+    public function saveDraft(Request $request)
+    {
+        $u = $request->user();
+        $d = $request->validate(['id' => 'nullable|integer', 'to' => 'nullable|array|max:20', 'to.*' => 'exists:users,id', 'subject' => 'nullable|string|max:200', 'body' => 'nullable|string|max:10000', 'group' => 'nullable|boolean']);
+        abort_if(empty($d['subject']) && empty($d['body']) && empty($d['to']), 422, 'المسودة فارغة');
+        $data = ['to' => array_map('intval', $d['to'] ?? []), 'subject' => $d['subject'] ?? null, 'body' => $d['body'] ?? null, 'group' => (bool) ($d['group'] ?? false)];
+        $draft = ! empty($d['id']) ? MailDraft::where('user_id', $u->id)->findOrFail($d['id']) : new MailDraft(['user_id' => $u->id]);
+        $draft->fill($data)->save();
+
+        return response()->json(['id' => $draft->id], 201);
+    }
+
+    public function deleteDraft(Request $request, MailDraft $draft)
+    {
+        abort_unless($draft->user_id === $request->user()->id, 403);
+        $draft->delete();
+
+        return ['ok' => true];
+    }
+
     public function unread(Request $request)
     {
         $u = $request->user();
@@ -77,7 +107,7 @@ class MailController extends Controller
     public function store(Request $request)
     {
         $u = $request->user();
-        $d = $request->validate(['to' => 'required|array|min:1|max:20', 'to.*' => 'exists:users,id', 'subject' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'group' => 'nullable|boolean']);
+        $d = $request->validate(['to' => 'required|array|min:1|max:20', 'to.*' => 'exists:users,id', 'subject' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'group' => 'nullable|boolean', 'draft_id' => 'nullable|integer']);
         $allowed = collect($this->recipients($request))->pluck('id')->all();
         if (array_diff(array_map('intval', $d['to']), $allowed)) {
             throw \Illuminate\Validation\ValidationException::withMessages(['to' => 'أحد المستلمين خارج نطاق مراسلاتك (موظفو شركتك فقط)']);
@@ -91,6 +121,10 @@ class MailController extends Controller
             $thread = MailThread::create(['subject' => $d['subject'], 'participants' => [$u->id, ...$members], 'read_by' => [$u->id], 'last_at' => now()]);
             $this->addMessage($request, $thread, $d['body']);
             $first ??= $thread;
+        }
+
+        if (! empty($d['draft_id'])) { // a sent draft is no longer a draft
+            MailDraft::where('user_id', $u->id)->where('id', $d['draft_id'])->delete();
         }
 
         return response()->json($this->row($first->fresh(), $u) + ['threads' => count($groups)], 201);
