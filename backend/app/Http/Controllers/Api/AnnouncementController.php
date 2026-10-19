@@ -82,6 +82,7 @@ class AnnouncementController extends Controller
         AnnouncementReceipt::insert(array_map(fn ($uid) => ['announcement_id' => $an->id, 'user_id' => $uid, 'created_at' => $now, 'updated_at' => $now], $users));
         Audit::notify($users, ($an->require_ack ? 'إعلان يتطلب إقرارك: ' : 'إعلان: ').$an->title, mb_substr($an->body, 0, 140), 'info', ['screen' => 'announcements']);
         Audit::log('announcements', $an->id, 'publish', null, ['audience' => $a, 'recipients' => count($users)]);
+        Audit::email($users, 'إعلان: '.$an->title, $an->title, $an->body, 'announcements', 'إعلان من '.$u->name.($an->require_ack ? ' — يتطلب تأكيد القراءة' : ''));
 
         return response()->json($this->row($an->load('sender:id,name'), null, $this->counts([$an->id])[$an->id] ?? null, $u), 201);
     }

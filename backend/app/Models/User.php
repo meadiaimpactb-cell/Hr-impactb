@@ -24,7 +24,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime', 'last_login_at' => 'datetime', 'password' => 'hashed',
             'invite_expires_at' => 'datetime', 'invited_at' => 'datetime', 'invite_accepted_at' => 'datetime',
-            'roles' => 'array', 'perms' => 'array', 'active' => 'boolean', 'must_change_password' => 'boolean',
+            'roles' => 'array', 'perms' => 'array', 'hr_scope' => 'array', 'active' => 'boolean', 'must_change_password' => 'boolean',
         ];
     }
 

@@ -64,6 +64,9 @@ class Access
         if (! $u) {
             return [];
         }
+        if ($u->hasRole('hr_mgr') && $u->hr_scope) {
+            return array_map('intval', (array) $u->hr_scope); // §7: an HR manager limited to specific companies
+        }
         if ($u->hasRole('super', 'hr_mgr', 'fin')) {
             return Company::pluck('id')->all();
         }
@@ -99,6 +102,9 @@ class Access
     {
         $u = $this->user;
         $q = Employee::query();
+        if ($u->hasRole('hr_mgr') && $u->hr_scope) {
+            return $q->whereIn('company_id', array_map('intval', (array) $u->hr_scope));
+        }
         if ($u->hasRole('super', 'hr_mgr', 'fin')) {
             return $q;
         }
@@ -201,7 +207,7 @@ class Access
     /** Active users, loaded once per request (approver resolution runs per inbox row). */
     public static function activeUsers(): \Illuminate\Support\Collection
     {
-        return self::$active ??= User::where('active', true)->get(['id', 'name', 'roles', 'perms', 'employee_id', 'company_id']);
+        return self::$active ??= User::where('active', true)->get(['id', 'name', 'roles', 'perms', 'employee_id', 'company_id', 'hr_scope']);
     }
 
     public static function flushCache(): void
@@ -209,10 +215,17 @@ class Access
         self::$active = null;
     }
 
+    /** HR managers who serve a company: those without a scope, plus those whose scope includes it (§7). */
+    public static function hrManagersFor(?int $companyId): array
+    {
+        return self::activeUsers()->filter(fn (User $u) => $u->hasRole('hr_mgr') && (! $u->hr_scope || ! $companyId || in_array($companyId, array_map('intval', (array) $u->hr_scope), true)))->pluck('id')->values()->all()
+            ?: self::usersWithRole('hr_mgr');
+    }
+
     /** User ids of HR who serve a company (for notifications). */
     public static function hrUsersFor(?int $companyId, ?string $op = null): array
     {
-        return self::activeUsers()->filter(fn (User $u) => $u->hasRole('hr_mgr')
+        return self::activeUsers()->filter(fn (User $u) => ($u->hasRole('hr_mgr') && (! $u->hr_scope || ! $companyId || in_array($companyId, array_map('intval', (array) $u->hr_scope), true)))
             || ($u->hasRole('hr_staff') && in_array($companyId, array_map('intval', $u->perms['companies'] ?? []), true)
                 && (! $op || array_intersect(['view', 'approve'], $u->perms['ops'][$op] ?? []))))
             ->pluck('id')->values()->all();

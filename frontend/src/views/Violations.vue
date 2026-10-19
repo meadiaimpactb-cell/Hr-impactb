@@ -28,9 +28,9 @@
   </div>
 
   <div v-else class="card">
-    <h3>لائحة التدرّج <span class="sub">تُدار من البيانات الأساسية ← القوائم العامة (أنواع المخالفات ودرجات الجزاء) · مهلة الإفادة والاعتراض {{ rules?.objection_days }} أيام</span></h3>
-    <div v-dt class="tw"><table><thead><tr><th>النوع</th><th>الواقعة 1</th><th>2</th><th>3</th><th>4+</th><th>مدة الرجوع</th><th>أيام الخصم عند الدرجة المالية</th></tr></thead>
-      <tbody><tr v-for="tp in rules?.types || []" :key="tp.code"><td><b>{{ tp.name }}</b></td><td v-for="(d, i) in ladder(tp)" :key="i">{{ degName(d) }}</td><td>{{ tp.meta.lookback_days }} يوم</td><td>{{ tp.meta.deduct_days }}</td></tr></tbody></table></div>
+    <h3>جداول المخالفات والجزاءات <span class="sub">اللائحة §97–103 · الغرامة على الأجر الأساسي اليومي (÷30) · لا تزيد على أجر 5 أيام للمخالفة و5 أيام في الشهر · مهلة الإفادة {{ rules?.statement_days }} أيام، والتظلم {{ rules?.objection_days }} يومًا، ولا اتهام بعد {{ rules?.charge_days }} يومًا من الكشف · تُعدَّل من البيانات الأساسية ← القوائم العامة</span></h3>
+    <div v-dt class="tw"><table><thead><tr><th>الجدول</th><th>المخالفة</th><th>المرة الأولى</th><th>الثانية</th><th>الثالثة</th><th>الرابعة</th><th>الرجوع</th></tr></thead>
+      <tbody><tr v-for="tp in rules?.types || []" :key="tp.code"><td class="small">{{ CAT[tp.meta.category] || '—' }}</td><td><b>{{ tp.name }}</b></td><td v-for="i in 4" :key="i" class="small">{{ stepLabel(ladder(tp)[i - 1]) }}</td><td class="small">{{ tp.meta.lookback_days }} يوم</td></tr></tbody></table></div>
     <div class="row mt"><span v-for="d in rules?.degrees || []" :key="d.code" class="pill" :class="d.meta.terminates ? 'bad' : d.meta.financial ? 'warn' : 'gray'">{{ d.code }} · {{ d.name }}</span></div>
   </div>
 
@@ -40,13 +40,20 @@
       <div><h4 style="margin:0 0 6px">الوصف</h4><p class="small">{{ d.description }}</p><p v-if="d.evidence" class="tiny muted">الدليل: {{ d.evidence }}</p>
         <h4 style="margin:10px 0 6px">إفادة الموظف</h4><p v-if="d.statement" class="small">{{ d.statement }} <span class="tiny muted">({{ fmtDT(d.statement_at) }})</span></p><textarea v-else-if="d.can_state" v-model="stmt" class="in" rows="4" placeholder="اكتب إفادتك…" /><p v-else class="muted small">لا إفادة</p></div>
       <div><h4 style="margin:0 0 6px">القرار</h4>
-        <div class="small">الدرجة المقترحة: <b>{{ d.proposed_name }}</b></div>
+        <div class="small">الجزاء بحسب الجدول (المرة {{ (d.step_index ?? 0) + 1 }}): <b>{{ d.step_label }}</b> <span class="tiny muted">· الدرجة المقترحة {{ d.proposed_name }}</span></div>
+        <div v-if="d.ladder" class="tiny muted">سلّم النوع: {{ d.ladder.join(' ← ') }}</div>
+        <div v-if="d.recommended_name" class="small">توصية الموارد البشرية: <b>{{ d.recommended_name }}</b></div>
+        <template v-if="d.can_recommend">
+          <div class="fr mt"><div class="fg"><label>الدرجة الموصى بها</label><select v-model="rec.recommended_degree" class="in"><option v-for="g in rules?.degrees || []" :key="g.code" :value="g.code">{{ g.code }} · {{ g.name }}</option></select></div>
+            <div class="fg"><label>الجزاء (من الجدول)</label><input v-model="rec.step" class="in" dir="ltr" placeholder="warn | 25% | 1d" /></div>
+            <div class="fg" style="grid-column:span 2"><label>توصية الموارد البشرية بعد التحقق *</label><input v-model="rec.note" class="in" /></div></div>
+        </template>
         <div v-if="d.signed_degree !== null" class="small">الدرجة الموقَّعة: <b>{{ d.degree_name }}</b><span v-if="d.amount"> · خصم <b class="num">{{ money(d.amount) }}</b> من راتب {{ d.period }}</span> · نافذة من {{ d.effective_from }}</div>
         <div v-if="d.objection_decision" class="notice info tiny">{{ d.objection_decision }}</div>
         <template v-if="d.can_sign">
           <div class="fr mt"><div class="fg"><label>الدرجة</label><select v-model="sign.signed_degree" class="in"><option v-for="g in rules?.degrees || []" :key="g.code" :value="g.code">{{ g.code }} · {{ g.name }}</option></select></div>
             <div class="fg"><label>سريان من</label><DateInput v-model="sign.effective_from" /></div>
-            <div v-if="isFinancial(sign.signed_degree)" class="fg"><label>المبلغ (فارغ = آلي حسب أيام الخصم)</label><input v-model.number="sign.amount" type="number" class="in" /></div>
+            <div v-if="isFinancial(sign.signed_degree)" class="fg"><label>المبلغ (فارغ = آلي من الجدول على الأجر الأساسي اليومي، بحد أجر 5 أيام)</label><input v-model.number="sign.amount" type="number" class="in" /></div>
             <div class="fg" style="grid-column:span 2"><label>مبررات القرار *</label><input v-model="sign.reason" class="in" /></div></div>
         </template>
         <div v-if="d.objection !== 'none'" class="notice warn tiny mt">اعتراض ({{ OBJ[d.objection] }}): {{ d.objection_text }}</div>
@@ -57,7 +64,8 @@
     <template #foot>
       <button class="btn sec" @click="d = null">إغلاق</button>
       <button v-if="d.can_state" class="btn pri" :class="{ loading: busy }" @click="act('statement', { statement: stmt })">إرسال الإفادة</button>
-      <button v-if="d.can_sign" class="btn okb" :class="{ loading: busy }" @click="act('sign', sign)">توقيع الدرجة</button>
+      <button v-if="d.can_recommend" class="btn pri" :class="{ loading: busy }" @click="act('recommend', rec)">رفع التوصية للرئيس التنفيذي</button>
+      <button v-if="d.can_sign" class="btn okb" :class="{ loading: busy }" @click="act('sign', sign)">اعتماد الدرجة</button>
       <button v-if="d.can_approve" class="btn okb" :class="{ loading: busy }" @click="act('approve')">اعتماد الموارد البشرية</button>
       <button v-if="d.can_object" class="btn dan" :class="{ loading: busy }" @click="act('object', { text: objText })">اعتراض</button>
       <template v-if="d.can_decide_objection"><button class="btn dan" :class="{ loading: busy }" @click="act('objection', { decision: 'rejected', note })">رفض الاعتراض</button><button class="btn okb" :class="{ loading: busy }" @click="act('objection', { decision: 'accepted', note })">قبول الاعتراض</button></template>
@@ -70,7 +78,8 @@
     <div class="fr"><div class="fg"><label>النوع *</label><select v-model="f.type" class="in"><option v-for="tp in rules?.types || []" :key="tp.code" :value="tp.code">{{ tp.name }}</option></select></div><div class="fg"><label>تاريخ الواقعة *</label><DateInput v-model="f.occurred_on" /></div></div>
     <div class="fg"><label>الوصف *</label><textarea v-model="f.description" class="in" rows="3" /></div>
     <div class="fg"><label>الدليل</label><input v-model="f.evidence" class="in" /></div>
-    <p class="tiny muted">الدرجة المقترحة تُحسب آليًا من سلّم النوع وعدد السوابق النافذة خلال مدة الرجوع.</p>
+    <label class="chk"><input v-model="f.operational_impact" type="checkbox" /> أثر تشغيلي مثبت (يرفع جزاء التأخر وفق §99)</label>
+    <p class="tiny muted">الجزاء يُحدَّد آليًا من جدول اللائحة وعدد السوابق النافذة خلال 180 يومًا، ويمر بإفادة الموظف ثم توصية الموارد البشرية ثم اعتماد الرئيس التنفيذي للشركة.</p>
     <template #foot><button class="btn sec" @click="f = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="save">تسجيل وإشعار الموظف</button></template>
   </Modal>
 </template>
@@ -87,8 +96,9 @@ import { fmtDT, money, today } from '../utils'
 
 const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
-const STATUS = { awaiting_statement: 'بانتظار الإفادة', awaiting_approval: 'بانتظار التوقيع والاعتماد', active: 'نافذة', cancelled: 'ملغاة' }
-const COLOR = { awaiting_statement: 'warn', awaiting_approval: 'info', active: 'bad', cancelled: 'gray' }
+const STATUS = { awaiting_statement: 'بانتظار الإفادة', awaiting_recommendation: 'بانتظار توصية الموارد البشرية', awaiting_approval: 'بانتظار اعتماد الرئيس التنفيذي', active: 'نافذة', cancelled: 'ملغاة' }
+const COLOR = { awaiting_statement: 'warn', awaiting_recommendation: 'purple', awaiting_approval: 'info', active: 'bad', cancelled: 'gray' }
+const rec = ref({ recommended_degree: '2', note: '' })
 const OBJ = { none: '—', open: 'قيد النظر', accepted: 'قُبل', rejected: 'رُفض' }
 const tabs = computed(() => [auth.emp && ['mine', 'مخالفاتي'], auth.isApprover && ['all', 'السجل'], auth.isApprover && ['suggest', 'اقتراحات آلية'], ['rules', 'لائحة التدرّج']].filter(Boolean))
 const tab = ref(auth.emp ? 'mine' : 'all')
@@ -96,7 +106,9 @@ const mine = ref([]); const all = ref([]); const suggestions = ref([]); const ru
 const d = ref(null); const f = ref(null); const emps = ref([]); const busy = ref(false); const stmt = ref(''); const objText = ref(''); const note = ref('')
 const sign = ref({ signed_degree: '1', effective_from: today(), amount: null, reason: '' })
 const empOptions = computed(() => emps.value.map((e) => ({ value: e.id, label: e.name, sub: e.emp_no })))
-const ladder = (tp) => String(tp.meta.ladder || '').split(',').map((x) => x.trim()).filter(Boolean)
+const ladder = (tp) => String(tp.meta.steps || tp.meta.ladder || '').split(',').map((x) => x.trim()).filter(Boolean)
+const stepLabel = (s) => (s === 'warn' ? 'إنذار' : s === 'dismiss' ? 'فصل مع المكافأة' : s === 'investigate' ? 'إحالة للتحقيق' : s === '-' || !s ? '—' : /%$/.test(s) ? `غرامة ${s} من الأجر الأساسي اليومي` : /d$/.test(s) ? `غرامة أجر ${s.replace('d', '')} يوم` : s)
+const CAT = { attendance: 'التأخر وإثبات الحضور (§99)', absence: 'الغياب (§100)', instructions: 'التعليمات والتقصير (§102)', conduct: 'السلوك والأصول والأموال (§103)' }
 const degName = (code) => (rules.value?.degrees || []).find((g) => g.code === String(code))?.name || code
 const isFinancial = (code) => !!(rules.value?.degrees || []).find((g) => g.code === String(code))?.meta?.financial
 async function load() {
@@ -105,7 +117,7 @@ async function load() {
   else if (tab.value === 'all') all.value = await api.get('/violations', { params: { status: status.value || undefined, company_id: ui.company || undefined } })
   else if (tab.value === 'suggest') suggestions.value = await api.get('/violations/suggestions')
 }
-async function open(id) { d.value = await api.get(`/violations/${id}`); stmt.value = ''; objText.value = ''; note.value = ''; sign.value = { signed_degree: String(d.value.proposed_degree), effective_from: today(), amount: null, reason: '' } }
+async function open(id) { d.value = await api.get(`/violations/${id}`); stmt.value = ''; objText.value = ''; note.value = ''; sign.value = { signed_degree: String(d.value.recommended_degree ?? d.value.proposed_degree), effective_from: today(), amount: null, reason: '' }; rec.value = { recommended_degree: String(d.value.proposed_degree), step: d.value.step, note: '' } }
 async function openForm(s) { if (!emps.value.length) emps.value = await api.get('/employees/options'); f.value = { employee_id: s?.employee?.id || null, type: s?.type || rules.value?.types?.[0]?.code, occurred_on: s?.occurred_on || today(), description: s?.description || '', evidence: s ? 'سجل الحضور' : '' } }
 async function save() {
   if (!f.value.employee_id || !f.value.description?.trim()) return ui.toast('الموظف والوصف إلزاميان', 'warn')
@@ -115,6 +127,7 @@ async function save() {
 async function act(action, body) {
   if (action === 'statement' && !stmt.value.trim()) return ui.toast('اكتب الإفادة', 'warn')
   if (action === 'sign' && !sign.value.reason?.trim()) return ui.toast('مبررات القرار إلزامية', 'warn')
+  if (action === 'recommend' && !rec.value.note?.trim()) return ui.toast('اكتب توصية الموارد البشرية', 'warn')
   if (action === 'object' && !objText.value.trim()) return ui.toast('اكتب نص الاعتراض', 'warn')
   if ((action === 'objection' || action === 'cancel') && !note.value.trim()) return ui.toast('ملاحظة القرار إلزامية', 'warn')
   busy.value = true

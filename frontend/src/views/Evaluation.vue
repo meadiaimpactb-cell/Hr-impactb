@@ -50,12 +50,18 @@
 
   <template v-else-if="tab === 'annual'">
     <div class="card">
-      <h3>التقييم السنوي {{ year }} <span class="sub">متوسط الأشهر المنشورة</span></h3>
-      <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th>الشركة</th><th>الأشهر</th><th>إنجاز</th><th>حضور</th><th>تطوير</th><th>انضباط</th><th>المعدل</th><th>التقدير</th></tr></thead>
+      <h3>التقييم السنوي {{ year }} <span class="sub">اللائحة §73: 70% متوسط الأشهر المنشورة (يُستبعد الشهر الذي عمل فيه أقل من 10 أيام) + 30% تقييم الأهداف السنوية · المكافأة §85: أشهر × أجر ديسمبر الشامل × نسبة الخدمة × معامل التمويل</span>
+        <span class="acts"><select v-model="annualKind" class="in" style="width:auto" @change="load"><option value="fiscal">السنة المالية (يناير–ديسمبر)</option><option value="contract">السنة العقدية (من المباشرة)</option></select></span></h3>
+      <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th>الشركة</th><th>الأشهر</th><th>إنجاز</th><th>حضور</th><th>تطوير</th><th>انضباط</th><th>الأهداف السنوية</th><th>المعدل</th><th>التقدير</th><th v-if="annualKind === 'fiscal'">المكافأة</th><th v-if="annualKind === 'fiscal'">العلاوة</th><th /></tr></thead>
         <tbody><tr v-for="r in annual" :key="r.employee.id">
           <td><b>{{ r.employee.name }}</b></td><td class="small">{{ r.company }}</td>
-          <td v-if="r.annual?.insufficient" colspan="7" class="muted">{{ r.annual.months }} أشهر فقط — يلزم {{ r.annual.min_months }} لاحتساب المعدل السنوي</td>
-          <template v-else-if="r.annual"><td>{{ r.annual.months }}</td><td>{{ r.annual.axes.achieve }}</td><td>{{ r.annual.axes.attend }}</td><td>{{ r.annual.axes.dev }}</td><td>{{ r.annual.axes.disc }}</td><td><b class="num">{{ r.annual.score }}</b></td><td><span class="pill" :class="r.annual.grade.pass ? 'ok' : 'bad'">{{ r.annual.grade.grade }} · {{ r.annual.grade.label }}</span></td></template>
+          <td v-if="r.annual?.insufficient" :colspan="annualKind === 'fiscal' ? 10 : 8" class="muted">{{ r.annual.months }} أشهر فقط — يلزم {{ r.annual.min_months }} لاحتساب المعدل السنوي</td>
+          <template v-else-if="r.annual"><td>{{ r.annual.months }}<span v-if="r.annual.excluded?.length" class="tiny muted" :title="r.annual.excluded.join(', ')"> (استُبعد {{ r.annual.excluded.length }})</span></td><td>{{ r.annual.axes.achieve }}</td><td>{{ r.annual.axes.attend }}</td><td>{{ r.annual.axes.dev }}</td><td>{{ r.annual.axes.disc }}</td>
+            <td><span v-if="r.annual.goals" class="num">{{ r.annual.goals.score }} <span class="tiny muted">({{ r.annual.goals.published_at ? 'معتمد' : 'مقترح' }})</span></span><span v-else class="muted tiny">لم تُقيَّم</span></td>
+            <td><b class="num">{{ r.annual.score }}</b><div class="tiny muted">{{ r.annual.formula }}</div></td><td><span class="pill" :class="r.annual.grade.pass ? 'ok' : 'bad'">{{ r.annual.grade.grade }} · {{ r.annual.grade.label }}</span></td>
+            <td v-if="annualKind === 'fiscal'"><template v-if="r.bonus"><b class="num">{{ r.bonus.eligible ? money(r.bonus.amount, 0) : '—' }}</b><div class="tiny muted">{{ r.bonus.months }} شهر × {{ money(r.bonus.wage, 0) }} × {{ Math.round(r.bonus.service_ratio * 100) }}%{{ r.bonus.funding_factor !== 1 ? ` × ${r.bonus.funding_factor}` : '' }}</div></template><span v-else class="muted">—</span></td>
+            <td v-if="annualKind === 'fiscal'"><span v-if="r.bonus" class="small">{{ r.bonus.raise_range[0] }}–{{ r.bonus.raise_range[1] }}%{{ r.bonus.promotion_eligible ? ' · مؤهل للترشيح' : '' }}</span></td>
+            <td><button v-if="auth.isApprover" class="btn ghost xs" @click="goalsForm = { employee: r.employee, score: r.annual.goals?.score ?? 90, note: '' }">تقييم الأهداف</button></td></template>
           <td v-else colspan="7" class="muted">لا تقييمات منشورة</td>
         </tr></tbody></table></div>
     </div>
@@ -85,6 +91,13 @@
       <div class="row mt"><span v-for="g in tp.grades" :key="g[1]" class="pill gray">≥{{ g[0] }} {{ g[1] }} {{ g[2] }}</span><span class="pill bad">&lt;{{ tp.pass_score }} غير مقبول — خطة تطوير</span></div>
     </div>
   </template>
+
+  <Modal v-if="goalsForm" :title="`تقييم الأهداف السنوية ${year} — ${goalsForm.employee.name}`" @close="goalsForm = null">
+    <p class="small muted">يقيّم المشرف المباشر مدى تحقق الأهداف السنوية والإنجاز التراكمي وجودة النتائج وأثرها (30% من النتيجة السنوية)، ويعتمده الرئيس التنفيذي للشركة.</p>
+    <div class="fr"><div class="fg"><label>الدرجة من 100 *</label><input v-model.number="goalsForm.score" type="number" min="0" max="100" class="in" /></div></div>
+    <div class="fg"><label>ملاحظة</label><textarea v-model="goalsForm.note" class="in" rows="3" /></div>
+    <template #foot><button class="btn sec" @click="goalsForm = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="saveGoals">{{ auth.has('super', 'ceo') ? 'اعتماد' : 'حفظ المقترح' }}</button></template>
+  </Modal>
 
   <Modal v-if="detail" :title="`تقييم ${fmtYM(detail.period)} — ${detail.employee.name}`" size="wide" @close="detail = null">
     <div v-if="detail.computed.flag" class="notice mb" :class="FLAG[detail.computed.flag.color][0]"><b>حالة الشهر: {{ FLAG[detail.computed.flag.color][1] }}</b><span v-if="detail.computed.flag.reasons?.length"> — {{ detail.computed.flag.reasons.join(' · ') }}</span></div>
@@ -162,6 +175,11 @@ const period = ref(prevMonth()); const year = ref(new Date().getFullYear())
 const tabs = computed(() => [auth.emp && ['my', 'تقييماتي'], auth.isApprover && ['monthly', 'التقييم الشهري'], auth.isApprover && ['annual', 'التقييم السنوي'], auth.isApprover && ['sim', 'محاكاة «ماذا لو»'], ['weights', 'الأوزان والتقديرات']].filter(Boolean))
 const tab = ref(auth.emp ? 'my' : 'monthly')
 const my = ref(null); const rows = ref([]); const annual = ref([]); const templates = ref([]); const detail = ref(null); const tplForm = ref(null)
+const annualKind = ref('fiscal'); const goalsForm = ref(null)
+async function saveGoals() {
+  busy.value = true
+  try { await api.post(`/evaluation/${goalsForm.value.employee.id}/goals`, { year: year.value, kind: annualKind.value, score: goalsForm.value.score, note: goalsForm.value.note }); ui.toast('حُفظ تقييم الأهداف', 'ok'); goalsForm.value = null; load() } catch (e) { ui.toast(e.message || 'تعذر الحفظ', 'bad') } finally { busy.value = false }
+}
 const sim = ref({ achieve: 50, attend: 20, dev: 20, disc: 10 }); const simRows = ref([]); const objText = ref(''); const objNote = ref(''); const objScore = ref(null); const busy = ref(false)
 const simTotal = computed(() => AXES.reduce((s, k) => s + sim.value[k], 0))
 const avg = computed(() => rows.value.length ? (rows.value.reduce((s, r) => s + r.score, 0) / rows.value.length).toFixed(1) : '—')
@@ -170,7 +188,7 @@ const canPublish = computed(() => auth.has('super', 'hr_mgr', 'hr_staff', 'ceo')
 async function load() {
   if (tab.value === 'my') my.value = await api.get('/evaluation/mine')
   else if (tab.value === 'monthly') rows.value = await api.get('/evaluation/monthly', { params: { period: period.value, company_id: ui.company || undefined } })
-  else if (tab.value === 'annual') annual.value = await api.get('/evaluation/annual', { params: { year: year.value, company_id: ui.company || undefined } })
+  else if (tab.value === 'annual') annual.value = await api.get('/evaluation/annual', { params: { year: year.value, kind: annualKind.value, company_id: ui.company || undefined } })
   else if (tab.value === 'weights' || tab.value === 'sim') { templates.value = await api.get('/evaluation/templates'); if (tab.value === 'sim' && templates.value[0]) sim.value = { ...templates.value[0].weights } }
 }
 async function openDetail(empId, p) { detail.value = await api.get(`/evaluation/${empId}/${p}`); const rt = detail.value.rating || {}; rateForm.value = { quality: rt.quality ?? null, coop: rt.coop ?? null, note: rt.note || '' }; objText.value = ''; objNote.value = ''; objScore.value = null }

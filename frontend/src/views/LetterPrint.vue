@@ -2,7 +2,7 @@
   <div style="padding:20px">
     <div class="noprint row mb" style="max-width:780px;margin-inline:auto;justify-content:space-between">
       <button class="btn sec sm" @click="$router.back()"><Icon name="arrow-right" :size="15" flip-rtl /> رجوع</button>
-      <div class="row"><button v-if="d?.can_sign" class="btn sec sm" @click="sign"><Icon name="signature" :size="15" /> توقيع إلكتروني</button><button v-if="d" class="btn pri sm" @click="print"><Icon name="external" :size="15" /> طباعة / حفظ PDF</button></div>
+      <div class="row"><button v-if="d?.can_sign" class="btn sec sm" @click="sign"><Icon name="signature" :size="15" /> توقيع إلكتروني</button><button v-if="d" class="btn sec sm" @click="word"><Icon name="download" :size="15" /> تنزيل Word</button><button v-if="d" class="btn pri sm" @click="print"><Icon name="external" :size="15" /> طباعة / حفظ PDF</button></div>
     </div>
     <div v-if="!d" class="center muted" style="padding:60px">جارٍ التحميل…</div>
     <div v-else class="doc-print" :dir="d.lang === 'en' ? 'ltr' : 'rtl'">
@@ -34,6 +34,17 @@ const props = defineProps({ id: [String, Number] })
 const ui = useUi()
 const d = ref(null)
 const print = () => window.print()
+// Word copy (§114): the letter as an HTML document Word opens natively, with the company identity in the header
+function word() {
+  const x = d.value; const rtl = x.lang !== 'en'
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" lang="${rtl ? 'ar' : 'en'}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><title>${x.title}</title><style>body{font-family:Arial;direction:${rtl ? 'rtl' : 'ltr'};font-size:13pt}.h{border-bottom:3px solid ${x.company.color || '#1A2363'};padding-bottom:8pt;margin-bottom:14pt}.co{color:${x.company.color || '#1A2363'};font-weight:bold;font-size:14pt}.m{color:#67718F;font-size:10pt}p{line-height:1.9}</style></head><body>
+<table class="h" width="100%"><tr><td>${x.company.logo_url ? `<img src="${x.company.logo_url}" height="56">` : ''}</td><td align="center"><b>${rtl ? 'خطاب رسمي' : 'Official letter'}</b><br><span class="m">${x.no}</span></td><td align="${rtl ? 'left' : 'right'}"><span class="co">${x.company.name}</span><br><span class="m">${x.company.name_en || ''}</span><br><span class="m">${rtl ? 'مجموعة وادي الأثر المالية' : 'Impact Valley Capital Group'}</span></td></tr></table>
+<p class="m">${rtl ? 'التاريخ' : 'Date'}: ${x.issued_at}${rtl ? ' · ' + x.hijri : ''} &nbsp;&nbsp; ${rtl ? 'الرقم' : 'Ref'}: ${x.no}</p><h2>${x.title}</h2><p>${String(x.body).replace(/\n/g, '<br>')}</p>
+<br><br><table width="100%"><tr><td>${rtl ? 'الموارد البشرية' : 'Human Resources'}<br><span class="m">${x.signer || x.issued_by || ''}</span></td><td align="center">${x.signature ? `<img src="${x.signature}" height="70">` : '<br><br>'}<br><span class="m">${x.signed ? (rtl ? 'موقَّع إلكترونيًا' : 'Electronically signed') : (rtl ? 'التوقيع' : 'Signature')}</span></td></tr></table>
+<p class="m">${x.no} · SHA-256 ${(x.hash || '').slice(0, 16)}…</p></body></html>`
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword' })
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${x.no}.doc`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+}
 const load = async () => { d.value = await api.get(`/letters/${props.id}`) }
 async function sign() { if (!await confirmBox('توقيع الخطاب إلكترونيًا؟')) return; try { d.value = await api.post(`/letters/${props.id}/sign`); ui.toast('وُقّع الخطاب', 'ok') } catch (e) { ui.toast(e.message, 'bad') } }
 onMounted(load)

@@ -98,6 +98,8 @@
       <span class="e">{{ errors.roles?.[0] }}</span>
     </div>
     <div v-if="form.role === 'ceo'" class="fg"><label>الشركة *</label><select v-model="form.company_id" class="in"><option v-for="c in meta.companies" :key="c.id" :value="c.id">{{ c.name }}</option></select><span class="e">{{ errors.company_id?.[0] }}</span></div>
+    <div v-if="form.role === 'hr_mgr' && auth.has('super')" class="fg"><label>نطاق مدير الموارد البشرية <span class="tiny muted">(اللائحة §7: اترك الكل فارغًا = كل شركات المجموعة؛ أو حدد الشركات التي تذهب إليه طلباتها)</span></label>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><label v-for="c in meta.companies" :key="c.id" class="chk"><input v-model="form.hr_scope" type="checkbox" :value="c.id" /> {{ c.name }}</label></div></div>
     <div v-if="!form.id" class="fg"><label>كلمة المرور (فارغ = كلمة مؤقتة تُولَّد تلقائيًا)</label><input v-model="form.password" class="in" /></div>
     <label class="chk"><input v-model="form.active" type="checkbox" /> الحساب نشط (الإيقاف يُخرج المستخدم من كل الأجهزة)</label>
     <template #foot><button class="btn sec" @click="form = null">إلغاء</button><button class="btn pri" @click="saveUser">حفظ</button></template>
@@ -237,12 +239,12 @@ async function loadDeleg() { delegs.value = await api.get('/delegations') }
 async function editUser(u) {
   errors.value = {}
   if (!emps.value.length) emps.value = await api.get('/employees/options')
-  form.value = { active: true, ...u, role: u.roles?.[0] || 'emp', employee_id: u.employee?.id || null }
+  form.value = { active: true, ...u, role: u.roles?.[0] || 'emp', employee_id: u.employee?.id || null, hr_scope: u.hr_scope || [] }
 }
 async function saveUser() {
   const f = form.value
   errors.value = {}
-  const body = { login: f.login, email: f.email || null, employee_id: f.employee_id || null, roles: [f.role], company_id: f.role === 'ceo' ? f.company_id : null, active: !!f.active, password: f.password || undefined }
+  const body = { login: f.login, email: f.email || null, employee_id: f.employee_id || null, roles: [f.role], company_id: f.role === 'ceo' ? f.company_id : null, active: !!f.active, password: f.password || undefined, hr_scope: f.role === 'hr_mgr' ? (f.hr_scope || []) : [] }
   try {
     if (f.id) {
       const r = await api.put(`/users/${f.id}`, body); ui.toast('تم الحفظ', 'ok')

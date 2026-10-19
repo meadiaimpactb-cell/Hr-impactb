@@ -143,7 +143,31 @@ class EvaluationController extends Controller
         $year = (int) $request->input('year', now()->year);
         $emps = $acc->employees()->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->orderBy('name')->get();
 
-        return $emps->map(fn ($e) => ['employee' => $e->only('id', 'name', 'emp_no'), 'company' => $e->company?->name, 'annual' => EvaluationService::annual($e, $year)])->values();
+        $kind = $request->input('kind', 'fiscal') === 'contract' ? 'contract' : 'fiscal';
+        $withBonus = $request->user()->hasRole('super', 'hr_mgr', 'fin') || $acc->canAny('PAY', 'view');
+
+        return $emps->map(function ($e) use ($year, $kind, $withBonus) {
+            $an = EvaluationService::annual($e, $year, $kind);
+
+            return ['employee' => $e->only('id', 'name', 'emp_no'), 'company' => $e->company?->name, 'annual' => $an,
+                'bonus' => $withBonus && $kind === 'fiscal' ? \App\Services\BonusService::annualBonus($e->load('company.tier'), $year, $an) : null];
+        })->values();
+    }
+
+    /** §73: the annual-goals rating (30% of the annual score) — the manager proposes, the company CEO approves. */
+    public function goals(Request $request, Employee $employee)
+    {
+        $u = $request->user();
+        $acc = Access::for();
+        abort_unless($acc->isManagerOf($employee) || $u->hasRole('super') || $acc->isCeoOf($employee->company_id) || ($u->isHr() && $acc->can('PRF', 'approve', ['employee' => $employee])), 403);
+        $d = $request->validate(['year' => 'required|integer|min:2024|max:2100', 'kind' => 'in:fiscal,contract', 'score' => 'required|numeric|min:0|max:100', 'note' => 'nullable|string|max:2000', 'approve' => 'boolean']);
+        $key = $d['year'].'-'.(($d['kind'] ?? 'fiscal') === 'contract' ? '99' : '00'); // evaluations.period is 7 chars: YYYY-00 fiscal goals, YYYY-99 contract-year goals
+        $isCeo = $u->hasRole('super') || $acc->isCeoOf($employee->company_id);
+        $ev = Evaluation::updateOrCreate(['employee_id' => $employee->id, 'period' => $key, 'type' => 'goals'], ['company_id' => $employee->company_id, 'score' => $d['score'], 'grade' => $isCeo ? 'approved' : 'proposed',
+            'grade_label' => $isCeo ? 'معتمد من الرئيس التنفيذي' : 'مقترح المشرف', 'axes' => [], 'weights' => [], 'details' => ['note' => $d['note'] ?? null, 'by' => $u->name], 'published_at' => $isCeo ? now() : null, 'published_by' => $u->id]);
+        Audit::log('evaluations', $ev->id, 'goals', null, ['score' => $d['score'], 'status' => $ev->grade], $d['note'] ?? null);
+
+        return ['score' => $ev->score, 'status' => $ev->grade, 'status_label' => $ev->grade_label, 'annual' => EvaluationService::annual($employee, (int) $d['year'], $d['kind'] ?? 'fiscal')];
     }
 
     public function object(Request $request, Evaluation $evaluation)

@@ -43,6 +43,8 @@
     <template v-else-if="handler === 'letter'">
       <div class="fg"><label>نوع الخطاب</label><select v-model="f.kind" class="in"><option v-for="k in letterKinds" :key="k.code" :value="k.code">{{ ui.lang === 'en' && k.name_en ? k.name_en : k.name }}</option></select></div>
       <div class="fg"><label>الجهة الموجّه إليها</label><input v-model="f.to" class="in" /></div>
+      <div class="fg"><label>شرح الخطاب والغرض منه <span class="req">*</span></label><textarea v-model="f.purpose" class="in" rows="2" placeholder="مثال: تعريف بالراتب لبنك الراجحي لطلب تمويل" /><span class="e">{{ errors.purpose?.[0] }}</span></div>
+      <div class="fg"><label>المبررات</label><input v-model="f.justification" class="in" /></div>
       <div class="fg"><label>اللغة</label><select v-model="f.lang" class="in"><option value="ar">العربية</option><option value="en">English</option></select></div>
     </template>
 

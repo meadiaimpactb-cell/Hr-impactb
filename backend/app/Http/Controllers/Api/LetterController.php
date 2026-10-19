@@ -75,16 +75,16 @@ class LetterController extends Controller
     // ---------- templates ----------
     public function templates()
     {
-        return ['templates' => LetterTemplate::orderBy('kind')->orderBy('lang')->get(), 'kinds' => Lookup::grouped()['letter_kinds'] ?? [], 'placeholders' => self::PLACEHOLDERS];
+        return ['templates' => LetterTemplate::with('company:id,name')->orderBy('company_id')->orderBy('kind')->orderBy('lang')->get(), 'kinds' => Lookup::grouped()['letter_kinds'] ?? [], 'placeholders' => self::PLACEHOLDERS];
     }
 
     public function saveTemplate(Request $request, ?LetterTemplate $template = null)
     {
         abort_unless($request->user()->hasRole('super', 'hr_mgr'), 403);
         $d = $request->validate(['kind' => ['required', Rule::in(array_column(Lookup::grouped()['letter_kinds'] ?? [], 'code'))], 'lang' => 'required|in:ar,en', 'title' => 'required|string|max:160',
-            'body' => 'required|string|max:8000', 'includes_salary' => 'boolean', 'active' => 'boolean']);
+            'body' => 'required|string|max:8000', 'includes_salary' => 'boolean', 'active' => 'boolean', 'company_id' => 'nullable|exists:companies,id']);
         $before = $template?->toArray();
-        $template = $template ? tap($template)->update($d + ['version' => $template->version + 1]) : LetterTemplate::updateOrCreate(['kind' => $d['kind'], 'lang' => $d['lang']], $d);
+        $template = $template ? tap($template)->update($d + ['version' => $template->version + 1]) : LetterTemplate::updateOrCreate(['kind' => $d['kind'], 'lang' => $d['lang'], 'company_id' => $d['company_id'] ?? null], $d);
         Audit::log('letter_templates', $template->id, $before ? 'update' : 'create', $before, $template->toArray());
 
         return $template;
@@ -113,19 +113,22 @@ class LetterController extends Controller
         abort_unless($letter->employee_id === $u->employee_id || Access::for()->canSeeEmployee($letter->employee), 403);
         $letter->load('employee.company', 'employee.jobTitle', 'company', 'issuer:id,name', 'signedDoc.signer:id,name');
 
-        return $this->row($letter) + ['employee' => $letter->employee->only('id', 'name', 'emp_no', 'nationality', 'national_id'), 'company' => $letter->company->only('id', 'name', 'name_en', 'legal_no', 'logo_url', 'color'),
+        return $this->row($letter) + ['purpose' => $letter->purpose, 'justification' => $letter->justification, 'employee' => $letter->employee->only('id', 'name', 'emp_no', 'nationality', 'national_id'), 'company' => $letter->company->only('id', 'name', 'name_en', 'legal_no', 'logo_url', 'color'),
             'job' => $letter->employee->jobTitle?->only('name', 'name_en'), 'hijri' => self::hijri($letter->issued_at), 'signature' => $letter->signedDoc?->signature, 'signer' => $letter->signedDoc?->signer?->name,
             'can_sign' => ! $letter->signed_doc_id && $u->isHr() && (bool) $u->signature];
     }
 
     /** Issue a letter (HR directly, or from an approved request). Salary letters need PAY view. */
-    public static function issue(Employee $e, string $kind, ?string $to, string $lang, ?int $by, ?int $requestId = null): Letter
+    public static function issue(Employee $e, string $kind, ?string $to, string $lang, ?int $by, ?int $requestId = null, ?array $extra = null): Letter
     {
         $code = self::kindCode($kind);
-        $tpl = LetterTemplate::where('kind', $code)->where('lang', $lang)->where('active', true)->first() ?? LetterTemplate::where('kind', $code)->where('active', true)->first();
+        // §114: the company's own template (its identity) first, then the group template
+        $q = fn () => LetterTemplate::where('kind', $code)->where('active', true);
+        $tpl = $q()->where('company_id', $e->company_id)->where('lang', $lang)->first() ?? $q()->whereNull('company_id')->where('lang', $lang)->first() ?? $q()->where('company_id', $e->company_id)->first() ?? $q()->whereNull('company_id')->first();
         $title = $tpl ? self::render($tpl->title, $e, $to, $lang) : Lookup::name('letter_kinds', $code);
         $body = $tpl ? self::render($tpl->body, $e, $to, $lang) : '';
         $letter = Letter::create(['employee_id' => $e->id, 'company_id' => $e->company_id, 'kind' => $code, 'to' => $to, 'lang' => $lang, 'no' => self::nextNo('LTR'), 'title' => $title, 'body' => $body,
+            'purpose' => $extra['purpose'] ?? null, 'justification' => $extra['justification'] ?? null,
             'includes_salary' => (bool) ($tpl?->includes_salary), 'issued_at' => now()->toDateString(), 'issued_by' => $by, 'request_id' => $requestId, 'hash' => hash('sha256', $title."\n".$body)]);
         Audit::log('letters', $letter->id, 'issue', null, ['kind' => $code, 'no' => $letter->no]);
         Audit::notify(User::where('employee_id', $e->id)->value('id'), 'صدر خطابك الرسمي', Lookup::name('letter_kinds', $code).' — '.$letter->no, 'ok', ['screen' => 'letters']);

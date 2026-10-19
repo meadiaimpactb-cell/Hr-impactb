@@ -165,6 +165,10 @@ class UserController extends Controller
         $d = $this->validated($request, $user);
         $before = $user->only('login', 'roles', 'active', 'company_id');
         unset($d['password']);
+        if ($request->has('hr_scope') && $request->user()->hasRole('super')) { // §7: companies an HR manager is limited to (empty = all)
+            $scope = array_values(array_filter(array_map('intval', (array) $request->input('hr_scope', []))));
+            $d['hr_scope'] = $scope ?: null;
+        }
         $user->update($d);
         if (! $user->active) {
             $user->tokens()->delete(); // force sign-out on deactivation

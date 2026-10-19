@@ -33,7 +33,11 @@ class TerminationController extends Controller
         $t = $termination->load('employee:id,name,emp_no,hire_date,manager_id,company_id', 'company:id,name');
         $stageRole = array_keys(Termination::STAGES)[$t->stage] ?? null;
 
+        $last = $t->last_working_day ?? $t->employee?->last_working_day;
+        $byEmployee = in_array($t->reason, ['resign', 'resignation'], true);
+
         return $this->row($t) + ['clearance' => $t->clearance, 'eosb' => $t->eosb, 'settlement' => $t->settlement, 'approvals' => $t->approvals ?? [],
+            'settlement_due' => $last ? \Illuminate\Support\Carbon::parse($last)->addDays($byEmployee ? 14 : 7)->toDateString() : null, 'settlement_due_rule' => $byEmployee ? 'أسبوعان من انتهاء العقد (الموظف أنهاه) — §112' : 'أسبوع من انتهاء العقد — §112',
             'next_stage' => $stageRole ? Termination::STAGES[$stageRole] : null,
             'can_approve' => $t->status === 'open' && $stageRole && $this->isStageActor($u, $t, $stageRole),
             'can_manage' => $u->isHr() && Access::for()->can('TRM', 'edit', ['employee' => $t->employee]), 'can_pay' => $u->hasRole('fin', 'super') && $t->status === 'settled',
@@ -121,7 +125,10 @@ class TerminationController extends Controller
         abort_unless($termination->status === 'open' && $stageRole && $this->isStageActor($u, $termination, $stageRole), 403, 'ليست مرحلتك');
         $d = $request->validate(['note' => 'nullable|string|max:300']);
         $open = collect($termination->clearance)->where('done', false)->count();
-        abort_if($stageRole === 'fin' && $open, 422, "لا يمكن اعتماد الصرف قبل إتمام إخلاء الطرف ($open مهام مفتوحة)");
+        // §111: undisputed statutory dues are not held until clearance completes — open items are only flagged in the approval note
+        if ($stageRole === 'fin' && $open) {
+            $d['note'] = trim(($d['note'] ?? '')." — اعتُمد الصرف مع $open مهام إخلاء مفتوحة (تُتابع على حدة، §111)");
+        }
         $appr = [...($termination->approvals ?? []), ['role' => $stageRole, 'label' => Termination::STAGES[$stageRole], 'by' => $u->name, 'at' => now()->toDateTimeString(), 'note' => $d['note'] ?? null]];
         $termination->update(['stage' => $termination->stage + 1, 'approvals' => $appr]);
         if ($termination->stage >= 4) {

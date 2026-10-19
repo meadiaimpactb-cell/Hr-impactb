@@ -40,6 +40,7 @@
         <div class="small">الإجمالي <b class="num">{{ money(d.eosb.gross) }}</b> × معامل {{ d.eosb.factor }} = <b class="num">{{ money(d.eosb.amount) }}</b> <span class="tiny muted">({{ d.eosb.why }})</span></div>
         <div v-if="d.eosb_adjusted !== null" class="notice warn tiny">مُعدَّلة إلى <b class="num">{{ money(d.eosb_adjusted) }}</b> — {{ d.eosb_adjust_reason }}</div>
         <div v-if="d.can_manage && d.status === 'open'" class="row mt"><input v-model.number="adj.amount" type="number" class="in" placeholder="مبلغ معدّل" style="max-width:140px" /><input v-model="adj.reason" class="in" placeholder="السبب *" /><button class="btn ghost xs" @click="adjust">تعديل</button></div>
+        <div v-if="d.settlement_due" class="notice info small">موعد تسوية المستحقات: <b>{{ d.settlement_due }}</b> — {{ d.settlement_due_rule }} · لا يُعلَّق صرف المستحقات غير المتنازع عليها على اكتمال إخلاء الطرف (§111)</div>
         <h3 style="margin-top:14px">التصفية النهائية <span class="sub">v{{ d.settlement?.version }}</span><span v-if="d.can_manage && d.status === 'open' && d.stage < 4" class="acts"><button class="btn ghost xs" @click="rebuild">إعادة بناء البنود</button></span></h3>
         <div v-dt class="tw"><table><tbody><tr v-for="(l, i) in d.settlement?.lines || []" :key="i"><td>{{ l.name }}</td><td class="num" :class="l.amount < 0 ? 'bad' : ''">{{ money(l.amount) }}</td></tr><tr><th>الصافي</th><th class="num">{{ money(d.settlement?.total) }}</th></tr></tbody></table></div>
       </div>

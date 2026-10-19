@@ -249,7 +249,7 @@ class EvaluationService
             })->values();
         }
         $min = (int) Settings::get('annualMinMonths', $e->company_id, 6);
-        $goals = Evaluation::where('employee_id', $e->id)->where('type', 'goals')->where('period', $year.'-'.$kind)->first();
+        $goals = Evaluation::where('employee_id', $e->id)->where('type', 'goals')->where('period', $year.'-'.($kind === 'contract' ? '99' : '00'))->first();
         $series = $rows->map(fn ($r) => ['period' => $r->period, 'score' => $r->score, 'grade' => $r->grade])->values();
         if ($rows->isEmpty() || $rows->count() < $min) {
             return $rows->isEmpty() ? null : ['year' => $year, 'kind' => $kind, 'months' => $rows->count(), 'min_months' => $min, 'score' => null, 'grade' => null, 'axes' => [], 'series' => $series, 'excluded' => $excluded, 'insufficient' => true, 'goals' => $goals?->only('score', 'details', 'published_at')];

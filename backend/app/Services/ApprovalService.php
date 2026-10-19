@@ -154,10 +154,10 @@ class ApprovalService
         $cid = $r->company_id;
         $ids = match ($st['role']) {
             // direct manager, and the HR manager may also decide this stage (either one is enough)
-            'mgr' => ($e?->manager_id && ($u = User::where('employee_id', $e->manager_id)->where('active', true)->value('id'))) ? array_values(array_unique([$u, ...Access::usersWithRole('hr_mgr')])) : self::hrApprovers($r),
+            'mgr' => ($e?->manager_id && ($u = User::where('employee_id', $e->manager_id)->where('active', true)->value('id'))) ? array_values(array_unique([$u, ...Access::hrManagersFor($cid)])) : self::hrApprovers($r),
             'hr' => self::hrApprovers($r),
             'hr_staff' => self::hrApprovers($r, staffOnly: true) ?: Access::usersWithRole('hr_mgr'),
-            'hr_mgr' => Access::usersWithRole('hr_mgr'),
+            'hr_mgr' => Access::hrManagersFor($cid),
             'ceo' => ($ceo = Company::find($cid)?->ceo_employee_id) && ($u = User::where('employee_id', $ceo)->value('id')) ? [$u] : Access::usersWithRole('super'),
             'fin' => Access::usersWithRole('fin'),
             'super' => Access::usersWithRole('super'),
@@ -201,7 +201,7 @@ class ApprovalService
             return $limit === null || $limit === '' || $metric === null || $metric <= (float) $limit;
         })->pluck('id')->all();
 
-        return $staffOnly ? array_values($staff) : array_values(array_unique([...Access::usersWithRole('hr_mgr'), ...$staff]));
+        return $staffOnly ? array_values($staff) : array_values(array_unique([...Access::hrManagersFor($r->company_id), ...$staff]));
     }
 
     public static function op(string $type): string
@@ -342,7 +342,7 @@ class ApprovalService
                 Audit::notify([...Access::usersWithRole('custodian'), ...Access::hrUsersFor($e->company_id, 'CUS')], 'طلب عهدة معتمد — جهّز وسلّم', $e->name.' — '.($d['kind'] ?? ''), 'approval', ['screen' => 'custody']);
                 break;
             case 'letter':
-                \App\Http\Controllers\Api\LetterController::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', auth()->id(), $r->id);
+                \App\Http\Controllers\Api\LetterController::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', auth()->id(), $r->id, ['purpose' => $d['purpose'] ?? null, 'justification' => $d['justification'] ?? null]);
                 break;
             case 'trip':
                 $e->addCareer('رحلة عمل', ($d['destination'] ?? '').' · '.($d['from'] ?? '').' → '.($d['to'] ?? ''));
@@ -353,6 +353,11 @@ class ApprovalService
                     $item->save();
                     Audit::notify(Access::usersWithRole('fin'), 'عهدة مالية لرحلة عمل', $e->name.' — '.number_format((float) $d['advance'], 2).' ر.س', 'info', ['screen' => 'custody']);
                 }
+                break;
+            case 'bonus': // §87: the approved instant bonus is recorded in the incentives register and paid with the next payroll
+                \App\Models\Incentive::create(['employee_id' => $e->id, 'company_id' => $e->company_id, 'kind' => 'bonus', 'title' => 'مكافأة إنجاز فورية', 'detail' => $d['achievement'] ?? null,
+                    'amount' => (float) ($d['amount'] ?? 0), 'points' => 20, 'period' => now()->format('Y-m'), 'given_by' => auth()->id(), 'request_id' => $r->id]);
+                $e->addCareer('مكافأة إنجاز', number_format((float) ($d['amount'] ?? 0)).' ر.س — '.mb_substr((string) ($d['achievement'] ?? ''), 0, 120));
                 break;
             case 'dev_program': // §80: the approved program lands in the development register as planned
                 $rec = \App\Models\DevRecord::create(['employee_id' => $e->id, 'program' => $d['program'] ?? 'برنامج تطويري', 'provider' => $d['provider'] ?? null, 'cost' => (float) ($d['cost'] ?? 0),

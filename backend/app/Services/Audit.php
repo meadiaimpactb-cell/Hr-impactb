@@ -46,5 +46,26 @@ class Audit
         if (PushService::enabled()) {
             \App\Jobs\SendPush::dispatch(array_values($ids), $title, $body, ['kind' => $kind, 'screen' => $link['screen'] ?? '', 'request_id' => (string) ($requestId ?? '')]);
         }
+        // §115: approvals waiting and decisions that touch the employee also reach the official mailbox
+        if (in_array($kind, ['approval', 'bad', 'warn'], true)) {
+            self::email(array_values($ids), $title, $title, (string) $body, $link['screen'] ?? '', 'تنبيه من منصة HC');
+        }
+    }
+
+    /** Formatted email copy in the recipient's company identity (queued; silent when the mailbox is not configured). */
+    public static function email(array $userIds, string $subject, string $heading, string $body, string $screen = '', ?string $kicker = null): void
+    {
+        if (! $userIds || ! \App\Services\InviteService::mailConfigured()) {
+            return;
+        }
+        $users = \App\Models\User::with('employee.company:id,name,logo_path,color,updated_at')->whereIn('id', $userIds)->where('active', true)->whereNotNull('email')->get();
+        foreach ($users as $u) {
+            $c = $u->employee?->company;
+            try {
+                \Illuminate\Support\Facades\Mail::to($u->email)->queue(new \App\Mail\BrandedNoticeMail($subject, $heading, $body, $screen, $c?->name, $c?->logo_url, $c?->color ?: '#1A2363', $kicker));
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
     }
 }

@@ -15,7 +15,7 @@
   <div v-else>
     <div class="notice info">المتغيرات المتاحة: <code v-for="p in placeholders" :key="p" style="margin-inline-end:6px" v-text="'{{' + p + '}}'" /></div>
     <div class="card"><div v-dt class="tw"><table><thead><tr><th>النوع</th><th>اللغة</th><th>العنوان</th><th>النص</th><th>راتب</th><th>النسخة</th><th /></tr></thead>
-      <tbody><tr v-for="tp in templates" :key="tp.id"><td><b>{{ kindName(tp.kind) }}</b></td><td>{{ tp.lang }}</td><td>{{ tp.title }}</td><td class="small" style="max-width:420px;white-space:pre-wrap">{{ tp.body }}</td><td>{{ tp.includes_salary ? '✓' : '—' }}</td><td>v{{ tp.version }}</td><td><button class="btn ghost xs" @click="tf = { ...tp }">تعديل</button></td></tr></tbody></table></div>
+      <tbody><tr v-for="tp in templates" :key="tp.id"><td><b>{{ kindName(tp.kind) }}</b><div class="tiny muted">{{ tp.company?.name || 'المجموعة (افتراضي)' }}</div></td><td>{{ tp.lang }}</td><td>{{ tp.title }}</td><td class="small" style="max-width:420px;white-space:pre-wrap">{{ tp.body }}</td><td>{{ tp.includes_salary ? '✓' : '—' }}</td><td>v{{ tp.version }}</td><td><button class="btn ghost xs" @click="tf = { ...tp }">تعديل</button></td></tr></tbody></table></div>
       <button class="btn sec sm" @click="tf = { kind: kinds[0]?.code, lang: 'ar', title: '', body: '', includes_salary: false, active: true }"><Icon name="plus" :size="14" /> قالب</button>
     </div>
   </div>
@@ -29,6 +29,7 @@
 
   <Modal v-if="tf" :title="tf.id ? 'تعديل قالب' : 'قالب جديد'" size="wide" @close="tf = null">
     <div class="fr3"><div class="fg"><label>النوع</label><select v-model="tf.kind" class="in" :disabled="!!tf.id"><option v-for="k in kinds" :key="k.code" :value="k.code">{{ k.name }}</option></select></div><div class="fg"><label>اللغة</label><select v-model="tf.lang" class="in" :disabled="!!tf.id"><option value="ar">ar</option><option value="en">en</option></select></div><div class="fg"><label>العنوان *</label><input v-model="tf.title" class="in" /></div></div>
+    <div class="fg"><label>الشركة <span class="tiny muted">(فارغ = قالب المجموعة الافتراضي؛ يُفضَّل قالب الشركة بهويتها عند وجوده)</span></label><select v-model="tf.company_id" class="in" :disabled="!!tf.id"><option :value="null">المجموعة — افتراضي</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.id">{{ c.name }}</option></select></div>
     <div class="fg"><label>النص *</label><textarea v-model="tf.body" class="in" rows="10" /></div>
     <div class="row"><label class="chk"><input v-model="tf.includes_salary" type="checkbox" /> يتضمن الراتب (يتطلب صلاحية الرواتب)</label><label class="chk"><input v-model="tf.active" type="checkbox" /> مفعّل</label></div>
     <template #foot><button class="btn sec" @click="tf = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="saveTpl">حفظ نسخة</button></template>

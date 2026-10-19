@@ -132,6 +132,10 @@ class PayrollService
         $pr = self::prorate($e, $period);
         $comps = $e->activeComponents($period);
         $earnings = $comps->map(fn ($c) => ['key' => $c->key, 'name' => $c->name, 'amount' => round((float) $c->amount * $pr['factor'], 2)])->values()->all();
+        // §87: approved instant bonuses of the period
+        foreach (\App\Models\Incentive::where('employee_id', $e->id)->where('kind', 'bonus')->where('period', $period)->where('amount', '>', 0)->get() as $b) {
+            $earnings[] = ['key' => 'bonus', 'name' => 'مكافأة إنجاز فورية', 'amount' => round((float) $b->amount, 2), 'ref' => $b->id];
+        }
         $gross = round(array_sum(array_column($earnings, 'amount')), 2);
 
         $deductions = [];

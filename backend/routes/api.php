@@ -312,6 +312,7 @@ Route::prefix('v1')->group(function () {
         Route::get('evaluation/mine', [EvaluationController::class, 'mine']);
         Route::get('evaluation/monthly', [EvaluationController::class, 'monthly']);
         Route::get('evaluation/annual', [EvaluationController::class, 'annual']);
+        Route::post('evaluation/{employee}/goals', [EvaluationController::class, 'goals']);
         Route::get('evaluation/{employee}/{period}', [EvaluationController::class, 'show']);
         Route::post('evaluation/{employee}/{period}/publish', [EvaluationController::class, 'publish']);
         Route::post('evaluations/{evaluation}/object', [EvaluationController::class, 'object']);
@@ -332,6 +333,21 @@ Route::prefix('v1')->group(function () {
         Route::post('violations', [ViolationController::class, 'store']);
         Route::get('violations/{violation}', [ViolationController::class, 'show']);
         Route::post('violations/{violation}/statement', [ViolationController::class, 'statement']);
+        Route::post('violations/{violation}/recommend', [ViolationController::class, 'recommend']);
+        // §88 incentives & praise register
+        Route::get('incentives/mine', [App\Http\Controllers\Api\IncentiveController::class, 'mine']);
+        Route::get('incentives/board', [App\Http\Controllers\Api\IncentiveController::class, 'board']);
+        Route::get('incentives', [App\Http\Controllers\Api\IncentiveController::class, 'index']);
+        Route::post('incentives', [App\Http\Controllers\Api\IncentiveController::class, 'store']);
+        Route::delete('incentives/{incentive}', [App\Http\Controllers\Api\IncentiveController::class, 'destroy']);
+        Route::get('incentives/employee/{employee}', [App\Http\Controllers\Api\IncentiveController::class, 'forEmployee']);
+        // §75 improvement plans
+        Route::get('improvement/mine', [App\Http\Controllers\Api\ImprovementPlanController::class, 'mine']);
+        Route::get('improvement', [App\Http\Controllers\Api\ImprovementPlanController::class, 'index']);
+        Route::post('improvement', [App\Http\Controllers\Api\ImprovementPlanController::class, 'store']);
+        Route::post('improvement/{plan}/approve', [App\Http\Controllers\Api\ImprovementPlanController::class, 'approve']);
+        Route::post('improvement/{plan}/review', [App\Http\Controllers\Api\ImprovementPlanController::class, 'review']);
+        Route::post('improvement/{plan}/close', [App\Http\Controllers\Api\ImprovementPlanController::class, 'close']);
         Route::post('violations/{violation}/sign', [ViolationController::class, 'sign']);
         Route::post('violations/{violation}/approve', [ViolationController::class, 'approve']);
         Route::post('violations/{violation}/cancel', [ViolationController::class, 'cancel']);
