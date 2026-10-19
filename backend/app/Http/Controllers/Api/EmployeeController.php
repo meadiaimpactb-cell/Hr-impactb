@@ -189,7 +189,7 @@ class EmployeeController extends Controller
             'punch_required' => 'boolean', 'geo_tolerance' => 'nullable|integer|min:0|max:100000', 'punch_anywhere' => 'boolean', 'schedule_id' => 'nullable|exists:schedules,id', 'week_pattern' => 'in:5,6',
             'work_hours' => 'nullable|array|max:7', 'work_hours.*' => 'array|size:2', 'work_hours.*.*' => 'date_format:H:i',
             'country' => 'nullable|string|size:2', 'nationality' => 'nullable|string|max:60', 'id_type' => 'nullable|in:national,iqama,passport',
-            'national_id' => ['nullable', 'string', 'max:20', function ($a, $v, $fail) use ($r) {
+            'national_id' => ['nullable', 'string', 'max:20', Rule::unique('employees', 'national_id')->ignore($e?->id)->whereNull('deleted_at'), function ($a, $v, $fail) use ($r) {
                 $type = $r->input('id_type', 'national');
                 if ($type === 'passport' ? ! preg_match('/^[A-Za-z0-9]{5,20}$/', $v) : ! preg_match('/^[12]\d{9}$/', $v)) {
                     $fail($type === 'passport' ? 'رقم الجواز: أحرف وأرقام (5–20)' : 'رقم الهوية أو الإقامة: 10 أرقام يبدأ بـ 1 أو 2');

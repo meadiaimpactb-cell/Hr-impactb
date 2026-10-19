@@ -109,7 +109,12 @@ class CustodyController extends Controller
     {
         abort_unless($this->canManage($request, $item->company_id), 403);
         $before = $item->only('ident', 'fields', 'value', 'condition');
-        $item->update($this->validated($request, $item));
+        $d = $this->validated($request, $item);
+        if (isset($d['company_id']) && (int) $d['company_id'] !== (int) $item->company_id) { // moving an item to another company needs rights there too
+            abort_unless($this->canManage($request, (int) $d['company_id']), 403, 'لا صلاحية لك على الشركة المنقول إليها');
+            abort_if($item->employee_id, 422, 'استرد العهدة من الموظف قبل نقلها لشركة أخرى');
+        }
+        $item->update($d);
         Audit::log('custody_items', $item->id, 'update', $before, $item->only('ident', 'fields', 'value', 'condition'));
 
         return $this->row($item->load('type', 'company:id,name', 'employee:id,name,emp_no'));
@@ -120,7 +125,7 @@ class CustodyController extends Controller
     {
         abort_unless($this->canManage($request, $item->company_id), 403);
         abort_unless($item->status === 'available', 422, 'العهدة ليست متاحة للتسليم');
-        $d = $request->validate(['employee_id' => 'required|exists:employees,id']);
+        $d = $request->validate(['employee_id' => ['required', \Illuminate\Validation\Rule::exists('employees', 'id')->where('company_id', $item->company_id)]], ['employee_id.exists' => 'الموظف ليس من موظفي الشركة المالكة للعهدة']);
         $item->employee_id = $d['employee_id'];
         $item->status = $item->type->requires_ack ? 'pending_ack' : 'in_use';
         $item->log($item->status === 'pending_ack' ? 'طلب تسليم' : 'تسليم', null, $d['employee_id']);
@@ -188,7 +193,7 @@ class CustodyController extends Controller
     {
         abort_unless($this->canManage($request, $item->company_id), 403);
         abort_unless($item->status === 'in_use', 422);
-        $d = $request->validate(['employee_id' => 'required|exists:employees,id|not_in:'.$item->employee_id]);
+        $d = $request->validate(['employee_id' => ['required', 'not_in:'.$item->employee_id, \Illuminate\Validation\Rule::exists('employees', 'id')->where('company_id', $item->company_id)]], ['employee_id.exists' => 'الموظف ليس من موظفي الشركة المالكة للعهدة']);
         $item->log('نقل من '.($item->employee?->name ?? '—'), null, $d['employee_id']);
         $item->employee_id = $d['employee_id'];
         $item->status = $item->type->requires_ack ? 'pending_ack' : 'in_use';

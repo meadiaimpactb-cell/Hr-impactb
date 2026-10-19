@@ -155,7 +155,7 @@ class RequestController extends Controller
             throw ValidationException::withMessages(['from' => 'يوجد طلب إجازة متداخل مع هذه الفترة']);
         }
         if ($lt->deducts && $lt->quota_key) {
-            $b = LeaveService::balance($e, $lt);
+            $b = LeaveService::balance($e, $lt, (int) substr($v['from'], 0, 4)); // the balance of the year the leave falls in
             if ($b['available'] < $days && ! Settings::get('leaveAdvanceAllowed', $e->company_id, false)) {
                 throw ValidationException::withMessages(['to' => "الرصيد المتاح {$b['available']} يوم أقل من المطلوب ({$days})"]);
             }

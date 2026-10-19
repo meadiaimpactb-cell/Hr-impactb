@@ -25,14 +25,14 @@ class LeaveController extends Controller
         $e = $request->user()->employee;
         abort_unless($e, 404);
 
-        return $this->balancesFor($e->load('company.tier'));
+        return $this->balancesFor($e->load('company.tier'), $request->integer('year') ?: null);
     }
 
-    public function balances(Employee $employee)
+    public function balances(Request $request, Employee $employee)
     {
         abort_unless(Access::for()->can('LVE', 'view', ['employee' => $employee]), 403);
 
-        return $this->balancesFor($employee->load('company.tier'));
+        return $this->balancesFor($employee->load('company.tier'), $request->integer('year') ?: null);
     }
 
     /** Consolidated balances for all visible employees. */
@@ -149,11 +149,17 @@ class LeaveController extends Controller
         return ['ok' => true];
     }
 
-    private function balancesFor(Employee $e): array
+    private function balancesFor(Employee $e, ?int $year = null): array
     {
+        $year ??= (int) now()->year;
+
         return [
-            'balances' => LeaveService::balances($e),
-            'ledger' => LeaveLedger::where('employee_id', $e->id)->where('year', now()->year)->orderByDesc('occurred_on')->get(),
+            'year' => $year,
+            // next year's balance too, so leave already booked for it is visible (it is deducted from that year's pool)
+            'next_year' => \App\Models\ApprovalRequest::where('employee_id', $e->id)->where('type', 'leave')->whereIn('status', ['approved', 'pending'])->where('data->from', 'like', ($year + 1).'%')->exists()
+                ? ['year' => $year + 1, 'balances' => LeaveService::balances($e, $year + 1)] : null,
+            'balances' => LeaveService::balances($e, $year),
+            'ledger' => LeaveLedger::where('employee_id', $e->id)->where('year', $year)->orderByDesc('occurred_on')->get(),
             'work_days' => array_values(array_filter(range(0, 6), fn ($d) => $e->isWorkDay($d))), // for counting days in the request form
         ];
     }

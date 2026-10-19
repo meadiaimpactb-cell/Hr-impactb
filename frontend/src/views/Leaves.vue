@@ -9,6 +9,7 @@
     <div class="grid g4 mb">
       <Kpi v-for="b in mine.balances" :key="b.type" :icon="LT_ICON[b.type] || 'calendar'" :label="b.name" color="b" :hint="`مستهلك ${b.used} · محجوز ${b.reserved}${b.accrual === 'monthly' ? ' · مكتسب ' + b.accrued : ''}`">{{ b.available }} <span class="muted small">يوم</span></Kpi>
     </div>
+    <div v-if="mine?.next_year" class="notice info small">لديك إجازات محجوزة في {{ mine.next_year.year }} — تُخصم من رصيد تلك السنة: <span v-for="b in mine.next_year.balances.filter((x) => x.used || x.reserved)" :key="b.type"><b>{{ b.name }}</b> متاح {{ b.available }} (مستهلك {{ b.used }} · محجوز {{ b.reserved }}) </span></div>
     <div class="card"><h3>حركة الرصيد {{ new Date().getFullYear() }}</h3>
       <div v-if="!mine.ledger.length" class="empty">الرصيد المكتسب يُحتسب آليًا من تاريخ المباشرة</div>
       <div v-dt v-else class="tw"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>الحركة</th><th>الأيام</th></tr></thead>

@@ -19,6 +19,10 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Dates leave the API in the company's timezone with its offset (2026-11-30T00:00:00+03:00), never shifted to UTC:
+        // a date-only value read through ->only() used to arrive as the previous day.
+        \Illuminate\Support\Carbon::serializeUsing(fn ($d) => $d->copy()->setTimezone(config('app.timezone'))->format('Y-m-d\TH:i:sP'));
+        \Carbon\Carbon::serializeUsing(fn ($d) => $d->copy()->setTimezone(config('app.timezone'))->format('Y-m-d\TH:i:sP'));
         if ($this->app->environment('production')) {
             \Illuminate\Support\Facades\URL::forceScheme('https'); // shared hosting terminates TLS in front of PHP
         }

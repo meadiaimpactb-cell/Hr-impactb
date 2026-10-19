@@ -74,6 +74,12 @@ class AnnouncementController extends Controller
             $a = ['scope' => 'people', 'employee_ids' => array_values(array_intersect(array_map('intval', $a['employee_ids'] ?? $reports), $reports)) ?: $reports];
         }
         $users = array_values(array_diff(self::audienceUsers($a), []));
+        if (! $u->hasRole('super', 'hr_mgr')) { // job / contract / people audiences are narrowed to the publisher's companies too
+            $allowed = User::whereIn('employee_id', Employee::whereIn('company_id', $acc->companyIds() ?: [0])->pluck('id'))->pluck('id')->all();
+            if ($u->hasRole('ceo', 'hr_staff') && $acc->canAny('COM', 'publish')) {
+                $users = array_values(array_intersect($users, $allowed));
+            }
+        }
         abort_unless($users, 422, 'لا مستلمين لهذا الجمهور');
         $path = $request->file('attachment')?->store('announcements/'.now()->format('Y'), 'local');
         $an = Announcement::create(['sender_id' => $u->id, 'title' => $d['title'], 'body' => $d['body'], 'audience' => $a, 'require_ack' => (bool) ($d['require_ack'] ?? false),

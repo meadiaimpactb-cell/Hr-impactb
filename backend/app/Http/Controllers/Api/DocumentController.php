@@ -83,9 +83,11 @@ class DocumentController extends Controller
     {
         $types = collect(Lookup::grouped()['document_types'] ?? []);
         $d = $request->validate(['scope' => 'required|in:employee,company', 'owner_id' => 'required|integer', 'type' => ['required', Rule::in($types->pluck('code'))],
-            'number' => 'nullable|string|max:80', 'issue_date' => 'nullable|date', 'expiry_date' => 'nullable|date', 'issuer' => 'nullable|string|max:120', 'follow_user_id' => 'nullable|exists:users,id']);
+            'number' => 'nullable|string|max:80', 'issue_date' => 'nullable|date', 'expiry_date' => 'nullable|date|after_or_equal:issue_date', 'issuer' => 'nullable|string|max:120', 'follow_user_id' => 'nullable|exists:users,id',
+            'attachment' => 'nullable|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic,doc,docx,xls,xlsx'], ['expiry_date.after_or_equal' => 'تاريخ الانتهاء يجب أن يكون بعد تاريخ الإصدار', 'attachment.mimes' => 'نوع الملف غير مسموح (PDF أو صورة أو Word أو Excel)']);
         if ($document) { // updating: must own/manage the existing document, and re-homing it needs DOC edit on both sides
             $this->authorizeOwner($document->scope, $document->owner_id, 'edit');
+            $this->guardHrRecord($document);
             if ($document->scope !== $d['scope'] || (int) $document->owner_id !== (int) $d['owner_id']) {
                 abort_unless(Access::for()->canAny('DOC', 'edit'), 403, 'لا يمكن نقل الوثيقة لمالك آخر');
             }
@@ -123,10 +125,21 @@ class DocumentController extends Controller
     public function destroy(Request $request, Document $document)
     {
         $this->authorizeOwner($document->scope, $document->owner_id, 'edit');
+        $this->guardHrRecord($document);
         $document->delete();
         Audit::log('documents', $document->id, 'delete', $document->toArray());
 
         return ['deleted' => true];
+    }
+
+    /** An employee may change or remove only documents they uploaded themselves; records entered by HR stay with HR. */
+    private function guardHrRecord(Document $doc): void
+    {
+        $u = auth()->user();
+        if ($doc->scope === 'employee' && (int) $doc->owner_id === (int) $u->employee_id && ! Access::for()->can('DOC', 'edit', ['employee' => $doc->employee ?? Employee::find($doc->owner_id)])) {
+            $mine = \App\Models\AuditLog::where('entity', 'documents')->where('entity_id', (string) $doc->id)->where('action', 'create')->where('user_id', $u->id)->exists();
+            abort_unless($mine, 403, 'هذه الوثيقة سجلتها الموارد البشرية — اطلب تعديلها منهم');
+        }
     }
 
     private function authorizeOwner(string $scope, int $ownerId, string $action): void

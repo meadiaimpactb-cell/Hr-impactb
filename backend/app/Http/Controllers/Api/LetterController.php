@@ -110,12 +110,14 @@ class LetterController extends Controller
     public function show(Request $request, Letter $letter)
     {
         $u = $request->user();
-        abort_unless($letter->employee_id === $u->employee_id || Access::for()->canSeeEmployee($letter->employee), 403);
+        $own = $letter->employee_id === $u->employee_id;
+        abort_unless($own || Access::for()->canSeeEmployee($letter->employee), 403);
+        abort_if(! $own && $letter->includes_salary && ! Access::for()->canSeeSalary($letter->employee), 403, 'خطاب يتضمن الراتب — يتطلب صلاحية الاطلاع على الرواتب');
         $letter->load('employee.company', 'employee.jobTitle', 'company', 'issuer:id,name', 'signedDoc.signer:id,name');
 
-        return $this->row($letter) + ['purpose' => $letter->purpose, 'justification' => $letter->justification, 'employee' => $letter->employee->only('id', 'name', 'emp_no', 'nationality', 'national_id'), 'company' => $letter->company->only('id', 'name', 'name_en', 'legal_no', 'logo_url', 'color'),
+        return array_merge($this->row($letter), ['purpose' => $letter->purpose, 'justification' => $letter->justification, 'employee' => $letter->employee->only('id', 'name', 'emp_no', 'nationality', 'national_id'), 'company' => $letter->company->only('id', 'name', 'name_en', 'legal_no', 'logo_url', 'color'),
             'job' => $letter->employee->jobTitle?->only('name', 'name_en'), 'hijri' => self::hijri($letter->issued_at), 'signature' => $letter->signedDoc?->signature, 'signer' => $letter->signedDoc?->signer?->name,
-            'can_sign' => ! $letter->signed_doc_id && $u->isHr() && (bool) $u->signature];
+            'can_sign' => ! $letter->signed_doc_id && $u->isHr() && (bool) $u->signature]);
     }
 
     /** Issue a letter (HR directly, or from an approved request). Salary letters need PAY view. */
@@ -139,13 +141,14 @@ class LetterController extends Controller
     public function store(Request $request)
     {
         $u = $request->user();
-        $d = $request->validate(['employee_id' => 'required|exists:employees,id', 'kind' => ['required', Rule::in(array_column(Lookup::grouped()['letter_kinds'] ?? [], 'code'))], 'to' => 'nullable|string|max:160', 'lang' => 'in:ar,en']);
+        $d = $request->validate(['employee_id' => 'required|exists:employees,id', 'kind' => ['required', Rule::in(array_column(Lookup::grouped()['letter_kinds'] ?? [], 'code'))], 'to' => 'nullable|string|max:160', 'lang' => 'in:ar,en',
+            'purpose' => 'nullable|string|max:500', 'justification' => 'nullable|string|max:1000']);
         $e = Employee::findOrFail($d['employee_id']);
         abort_unless($u->isHr() && Access::for()->can('EMP', 'edit', ['employee' => $e]), 403);
         $tpl = LetterTemplate::where('kind', $d['kind'])->first();
         abort_if($tpl?->includes_salary && ! Access::for()->canSeeSalary($e), 403, 'خطاب الراتب يتطلب صلاحية الاطلاع على الرواتب');
 
-        return response()->json($this->row(self::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', $u->id)->load('employee:id,name,emp_no', 'company:id,name')), 201);
+        return response()->json($this->row(self::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', $u->id, null, ['purpose' => $d['purpose'] ?? null, 'justification' => $d['justification'] ?? null])->load('employee:id,name,emp_no', 'company:id,name')), 201);
     }
 
     // ---------- e-signature ----------
