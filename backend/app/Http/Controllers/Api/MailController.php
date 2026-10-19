@@ -74,16 +74,23 @@ class MailController extends Controller
     public function store(Request $request)
     {
         $u = $request->user();
-        $d = $request->validate(['to' => 'required|array|min:1|max:20', 'to.*' => 'exists:users,id', 'subject' => 'required|string|max:200', 'body' => 'required|string|max:10000']);
+        $d = $request->validate(['to' => 'required|array|min:1|max:20', 'to.*' => 'exists:users,id', 'subject' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'group' => 'nullable|boolean']);
         $allowed = collect($this->recipients($request))->pluck('id')->all();
         if (array_diff(array_map('intval', $d['to']), $allowed)) {
             throw \Illuminate\Validation\ValidationException::withMessages(['to' => 'أحد المستلمين خارج نطاق مراسلاتك (موظفو شركتك فقط)']);
         }
-        $participants = array_values(array_unique([$u->id, ...array_map('intval', $d['to'])]));
-        $thread = MailThread::create(['subject' => $d['subject'], 'participants' => $participants, 'read_by' => [$u->id], 'last_at' => now()]);
-        $this->addMessage($request, $thread, $d['body']);
+        $to = array_values(array_unique(array_diff(array_map('intval', $d['to']), [$u->id])));
+        // Privacy: by default every recipient gets a separate, private conversation with the sender — recipients never see
+        // each other or each other's replies. A shared conversation is created only when the sender asks for one.
+        $groups = ! empty($d['group']) && count($to) > 1 ? [$to] : array_map(fn ($id) => [$id], $to);
+        $first = null;
+        foreach ($groups as $members) {
+            $thread = MailThread::create(['subject' => $d['subject'], 'participants' => [$u->id, ...$members], 'read_by' => [$u->id], 'last_at' => now()]);
+            $this->addMessage($request, $thread, $d['body']);
+            $first ??= $thread;
+        }
 
-        return response()->json($this->row($thread->fresh(), $u), 201);
+        return response()->json($this->row($first->fresh(), $u) + ['threads' => count($groups)], 201);
     }
 
     public function reply(Request $request, MailThread $thread)

@@ -14,6 +14,7 @@ import {
   FolderOpen, Hourglass, House, Inbox, Info, KeyRound, Languages, LayoutDashboard, LogOut, MapPin, Menu, Moon, Pencil,
   Plane, Plus, RefreshCw, Repeat, ScrollText, Search, Send, Settings, ShieldCheck, Sun, Trash2, TreePalm, TriangleAlert,
   UserCheck, UserRound, Users, Workflow, X, HeartPulse, Baby, Gem, Flower2, Zap, CircleDollarSign, Briefcase, UserX, TimerOff, Activity, Plug, ListChecks, FileSpreadsheet, Megaphone, Mail, GraduationCap, Gavel, UserMinus, Shield, Kanban, Upload, BarChart3, FileSignature, ClipboardList,
+  Award, TrendingUp,
 } from 'lucide-vue-next'
 
 defineProps({
@@ -35,7 +36,7 @@ const icons = {
   external: ExternalLink, send: Send, hourglass: Hourglass, 'user-check': UserCheck, plane: Plane,
   sick: HeartPulse, maternity: Baby, marriage: Gem, bereavement: Flower2, emergency: Zap, money: CircleDollarSign,
   briefcase: Briefcase, absent: UserX, late: TimerOff, activity: Activity, plug: Plug, lists: ListChecks, sheet: FileSpreadsheet,
-  megaphone: Megaphone, mail: Mail, training: GraduationCap, gavel: Gavel, exit: UserMinus, insurance: Shield, kanban: Kanban,
+  megaphone: Megaphone, mail: Mail, training: GraduationCap, gavel: Gavel, award: Award, trend: TrendingUp, exit: UserMinus, insurance: Shield, kanban: Kanban,
   upload: Upload, chart: BarChart3, signature: FileSignature, report: ClipboardList,
 }
 </script>

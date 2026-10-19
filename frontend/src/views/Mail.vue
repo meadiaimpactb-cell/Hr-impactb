@@ -24,7 +24,7 @@
     <div class="card" style="margin:0">
       <div v-if="!cur" class="empty">اختر محادثة</div>
       <template v-else>
-        <h3>{{ cur.subject }} <span class="sub">{{ cur.participants.map((p) => p.name).join('، ') }}</span></h3>
+        <h3>{{ cur.subject }} <span class="sub">{{ cur.participants.length > 2 ? 'محادثة جماعية: ' : 'محادثة خاصة مع: ' }}{{ cur.participants.filter((p) => p.id !== auth.user.id).map((p) => p.name).join('، ') }}</span></h3>
         <div style="max-height:50vh;overflow:auto">
           <div v-for="m in cur.messages" :key="m.id" class="msg" :class="{ mine: m.mine }"><div class="tiny muted">{{ m.from?.name }} · {{ fmtDT(m.at) }}</div><div style="white-space:pre-wrap">{{ m.body }}</div><a v-if="m.file" class="btn ghost xs" href="#" @click.prevent="fileUrl(m.file)"><Icon name="download" :size="13" /> مرفق</a></div>
         </div>
@@ -36,6 +36,7 @@
   <Modal v-if="nf" title="رسالة جديدة" @close="nf = null">
     <div v-if="companies.length > 1" class="fg"><label>الشركة</label><select v-model="coFilter" class="in"><option value="">كل الشركات المتاحة لك</option><option v-for="c in companies" :key="c" :value="c">{{ c }}</option></select></div>
     <div class="fg"><label>إلى * <span class="tiny muted">(يمكن اختيار أكثر من مستلم)</span></label><SearchSelect :model-value="null" :options="users.filter((u) => !nf.to.includes(u.id) && (!coFilter || u.company === coFilter)).map((u) => ({ value: u.id, label: u.name, sub: [u.role, u.company].filter(Boolean).join(' · ') }))" placeholder="ابحث عن مستلم…" @update:model-value="(v) => v && nf.to.push(v)" /><div v-if="nf.to.length" class="row" style="gap:6px;margin-top:6px"><span v-for="id in nf.to" :key="id" class="pill info">{{ users.find((u) => u.id === id)?.name || id }} <a style="cursor:pointer" @click="nf.to = nf.to.filter((x) => x !== id)">×</a></span></div><span class="tiny muted">تصل الرسالة داخل المنصة، ونسخة منها إلى البريد الإلكتروني الرسمي للمستلم.</span></div>
+    <label v-if="nf.to.length > 1" class="chk"><input v-model="nf.group" type="checkbox" /> محادثة جماعية مشتركة <span class="tiny muted">(بدونها تصل الرسالة لكل مستلم في محادثة خاصة منفصلة، ولا يرى أي مستلم الآخرين ولا ردودهم)</span></label>
     <div class="fg"><label>الموضوع *</label><input v-model="nf.subject" class="in" /></div>
     <div class="fg"><label>الرسالة *</label><textarea v-model="nf.body" class="in" rows="5" /></div>
     <div class="fg"><label>مرفق</label><input type="file" class="in" @change="file = $event.target.files[0]" /></div>
@@ -70,7 +71,7 @@ async function open(id) {
 }
 function fd(obj) { const x = new FormData(); Object.entries(obj).forEach(([k, v]) => { if (Array.isArray(v)) v.forEach((i) => x.append(k + '[]', i)); else if (v !== null && v !== '') x.append(k, v) }); if (file.value) x.append('attachment', file.value); return x }
 async function send() { if (!reply.value.trim()) return; busy.value = true; try { cur.value = await api.post(`/mail/${cur.value.id}/reply`, fd({ body: reply.value })); reply.value = ''; file.value = null; load() } finally { busy.value = false } }
-async function openNew(manager) { nf.value = { to: manager?.user_id ? [manager.user_id] : [], subject: '', body: '' }; if (!users.value.length) users.value = await api.get('/mail/recipients') }
+async function openNew(manager) { nf.value = { to: manager?.user_id ? [manager.user_id] : [], subject: '', body: '', group: false }; if (!users.value.length) users.value = await api.get('/mail/recipients') }
 async function create() {
   if (!nf.value.to.length || !nf.value.subject.trim() || !nf.value.body.trim()) return ui.toast('المستلم والموضوع والرسالة إلزامية', 'warn')
   busy.value = true
