@@ -7,6 +7,8 @@ api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem('hc_token')
   if (token) cfg.headers.Authorization = `Bearer ${token}`
   cfg.headers['X-Locale'] = localStorage.getItem('hc_lang') || 'ar'
+  const co = Number(localStorage.getItem('hc_company')) || 0 // company selector: the whole system narrows to it
+  if (co && !cfg.allCompanies) cfg.headers['X-Company'] = co // allCompanies: a request that must see every company (e.g. reassignment targets)
   return cfg
 })
 

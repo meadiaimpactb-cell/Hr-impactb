@@ -37,6 +37,10 @@ class PayrollController extends Controller
             $ids = array_values(array_filter($ids, fn ($id) => Access::for($u)->isCeoOf($id)));
         }
 
+        if ($f = Access::for($u)->focus()) {
+            $ids = array_values(array_intersect($ids, [$f]));
+        }
+
         return Company::whereIn('id', $ids)->orderBy('id')->get(['id', 'code', 'name']);
     }
 

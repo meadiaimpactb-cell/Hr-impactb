@@ -44,6 +44,9 @@ class LookupController extends Controller
         }
         if ($kind === 'locations') {
             $q->with('company:id,name');
+            if ($f = Access::for()->focus()) {
+                $q->where(fn ($w) => $w->where('company_id', $f)->orWhereNull('company_id')); // the company's sites + group-wide sites
+            }
         }
 
         return $q->orderBy('id')->get();

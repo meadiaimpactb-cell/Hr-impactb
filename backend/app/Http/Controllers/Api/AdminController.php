@@ -54,7 +54,10 @@ class AdminController extends Controller
     public function companies()
     {
         abort_unless(auth()->user()->isHr() || auth()->user()->hasRole('fin'), 403);
-        return Company::with('tier:id,name,color', 'ceo:id,name')->withCount(['employees' => fn ($q) => $q->where('status', '!=', 'terminated')])->orderBy('id')->get();
+        $f = Access::for()->focus();
+
+        return Company::with('tier:id,name,color', 'ceo:id,name')->withCount(['employees' => fn ($q) => $q->where('status', '!=', 'terminated')])
+            ->when($f, fn ($q) => $q->whereKey($f))->orderBy('id')->get();
     }
 
     /** Deletes a company that has no employees, records or settings; otherwise asks to suspend it instead. */
@@ -135,7 +138,9 @@ class AdminController extends Controller
     public function tiers()
     {
         abort_unless(auth()->user()->isHr() || auth()->user()->hasRole('fin'), 403);
-        return Tier::withCount('companies')->orderBy('rank')->get();
+        $f = Access::for()->focus(); // a selected company shows only its own classification
+
+        return Tier::withCount('companies')->when($f, fn ($q) => $q->whereKey(Company::whereKey($f)->value('tier_id')))->orderBy('rank')->get();
     }
 
     public function updateTier(Request $request, Tier $tier)

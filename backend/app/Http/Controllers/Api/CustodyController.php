@@ -54,10 +54,14 @@ class CustodyController extends Controller
     {
         $acc = $this->acc($request);
         $companies = array_values(array_filter($acc->companyIds(), fn ($c) => $acc->can('CUS', 'view', ['company_id' => $c])));
+        if ($f = $acc->focus()) {
+            $companies = array_values(array_intersect($companies, [$f]));
+        }
         $empIds = $acc->canAny('CUS', 'view') ? $acc->employees()->pluck('id') : collect([$request->user()->employee_id]);
 
         return CustodyItem::with('type:id,name,requires_ack,has_secret,is_cash', 'company:id,name', 'employee:id,name,emp_no')
             ->where(fn ($q) => $q->whereIn('company_id', $companies)->orWhereIn('employee_id', $empIds))
+            ->when($acc->focus(), fn ($q, $f) => $q->where('company_id', $f))
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
             ->orderByDesc('id')->get()->map(fn ($i) => $this->row($i));

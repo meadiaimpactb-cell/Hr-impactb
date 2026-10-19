@@ -97,8 +97,31 @@ class Access
         return array_map('intval', $p['companies'] ?? []);
     }
 
-    /** Query of employees visible to the current user. */
+    /**
+     * The company the user is working on (the company selector at the top of the portal, sent as X-Company): every
+     * list in the system is narrowed to it. Ignored unless that company is within the user's scope. null = all companies.
+     */
+    public function focus(): ?int
+    {
+        $r = request();
+        $id = (int) ($r?->header('X-Company') ?: 0);
+
+        return $id && in_array($id, $this->companyIds(), true) ? $id : null;
+    }
+
+    /** Query of employees visible to the current user, narrowed to the selected company (lists). */
     public function employees(): Builder
+    {
+        $q = $this->employeesAll();
+        if ($f = $this->focus()) {
+            $q->where('employees.company_id', $f);
+        }
+
+        return $q;
+    }
+
+    /** Every employee in the user's scope regardless of the selected company (permission checks). */
+    public function employeesAll(): Builder
     {
         $u = $this->user;
         $q = Employee::query();
@@ -129,7 +152,7 @@ class Access
 
     public function canSeeEmployee(Employee $e): bool
     {
-        return $this->employees()->whereKey($e->id)->exists();
+        return $this->employeesAll()->whereKey($e->id)->exists();
     }
 
     /** can('LVE','approve',['company_id'=>..]|['employee'=>Employee]) */

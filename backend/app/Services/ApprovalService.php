@@ -439,8 +439,10 @@ class ApprovalService
     /** Pending requests the given user can decide now (efficient: filters in PHP over pending set). */
     public static function inboxFor(User $u)
     {
+        $f = Access::for($u)->focus();
+
         return ApprovalRequest::with('employee:id,name,emp_no,company_id,manager_id', 'company:id,name')
-            ->where('status', 'pending')->orderBy('created_at')->get()
+            ->where('status', 'pending')->when($f, fn ($q) => $q->where('company_id', $f))->orderBy('created_at')->get()
             ->filter(fn ($r) => in_array($u->id, self::approvers($r), true))->values();
     }
 }

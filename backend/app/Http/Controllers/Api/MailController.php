@@ -26,6 +26,9 @@ class MailController extends Controller
         $u = $request->user();
         $ids = Access::for($u)->companyIds();
         $q = User::where('active', true)->where('id', '!=', $u->id)->with('employee:id,company_id,name', 'employee.company:id,name');
+        if ($f = Access::for($u)->focus()) { // the company selector narrows the recipient list too
+            $q->whereHas('employee', fn ($e) => $e->where('company_id', $f));
+        }
         if (! $u->hasRole('super', 'hr_mgr', 'hr_staff', 'fin')) {
             $own = $u->employee?->company_id;
             $cids = $u->hasRole('ceo') && $ids ? $ids : array_values(array_filter([$own]));

@@ -39,7 +39,10 @@ class UserController extends Controller
     {
         $this->authorizeAdmin($request);
 
+        $f = \App\Services\Access::for()->focus();
+
         return User::with('employee:id,name,emp_no,company_id', 'employee.company:id,name')
+            ->when($f, fn ($q) => $q->where(fn ($w) => $w->whereHas('employee', fn ($e) => $e->where('company_id', $f))->orWhere('company_id', $f)))
             ->when($request->input('q'), fn ($q, $s) => $q->where(fn ($w) => $w->where('name', 'like', "%$s%")->orWhere('login', 'like', "%$s%")))
             ->orderBy('id')->get()->map(fn (User $u) => $u->only('id', 'name', 'login', 'email', 'roles', 'perms', 'company_id', 'active', 'last_login_at', 'must_change_password', 'invited_at', 'invite_accepted_at', 'created_at')
                 + ['employee' => $u->employee ? $u->employee->only('id', 'name', 'emp_no') + ['company' => $u->employee->company?->name] : null]);

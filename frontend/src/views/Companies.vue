@@ -60,16 +60,25 @@
   <div v-else class="card">
     <h3>فئات التصنيف ومصفوفة المزايا <span class="sub">اللائحة §47: تأسيس (أقل من 100% من الخطة) · تمكين (100%–110%) · أثر (110% فأكثر) — التعديل صلاحية الرئيس التنفيذي للمجموعة وكل حفظ ينشئ نسخة جديدة مع السبب</span></h3>
     <div class="notice info small">التصنيف يؤثر في المزايا والحوافز فقط (§51)، ولا يغيّر الحقوق النظامية. هوية الشركة (الشعار والألوان) تُضبط من بطاقة الشركة نفسها وتظهر لموظفيها في كل الصفحات.</div>
+    <div v-if="ui.company" class="notice warn small">تُعرض الفئة الخاصة بالشركة المختارة في الأعلى فقط. لعرض كل الفئات اختر «كل الشركات».</div>
+    <div v-if="!auth.has('super')" class="notice warn small">إضافة الفئات وحذفها وتعديل مزاياها صلاحية الرئيس التنفيذي للمجموعة (اللائحة §49) — ادخل بحسابه لتظهر أدوات التعديل والحذف.</div>
+    <div v-if="auth.has('super') && (selTiers.length || selBen.length)" class="row mb" style="gap:8px;padding:8px 10px;background:var(--badbg);border-radius:10px;align-items:center">
+      <b class="small">المحدد: {{ selTiers.length }} فئة · {{ selBen.length }} بند</b>
+      <button v-if="selTiers.length" class="btn dan xs" @click="openBulkTier"><Icon name="trash" :size="13" /> حذف الفئات المحددة</button>
+      <button v-if="selBen.length" class="btn dan xs" @click="removeBenefits"><Icon name="trash" :size="13" /> حذف البنود المحددة من كل الفئات</button>
+      <button class="btn ghost xs" @click="selTiers = []; selBen = []">إلغاء التحديد</button>
+    </div>
     <div v-dt class="tw"><table>
-      <thead><tr><th>البند</th><th v-for="tr in tiers" :key="tr.id" :style="{ color: tr.color }">
+      <thead><tr><th><input v-if="auth.has('super')" type="checkbox" title="تحديد كل البنود" :checked="selBen.length === benefitKeys.length && benefitKeys.length > 0" @change="selBen = $event.target.checked ? [...benefitKeys] : []" /> البند</th><th v-for="tr in tiers" :key="tr.id" :style="{ color: tr.color }">
         <div class="row" style="gap:4px;flex-wrap:nowrap;align-items:center">
+          <input v-if="auth.has('super')" v-model="selTiers" type="checkbox" :value="tr.id" title="تحديد للحذف المتعدد" />
           <input v-if="auth.has('super')" type="color" :value="tr.color || '#1B82C3'" class="cp" :title="'لون الفئة'" @change="tierColor(tr, $event.target.value)" />
           <span style="min-width:0">{{ tr.name }} <span class="tiny muted">v{{ tr.version }} · {{ tr.companies_count }} شركات</span></span>
           <template v-if="auth.has('super')"><button class="btn ghost xs" title="تعديل الاسم" @click="renameTier(tr)"><Icon name="edit" :size="13" /></button><button class="btn ghost xs" title="حذف الفئة" @click="removeTier(tr)"><Icon name="trash" :size="13" /></button></template>
         </div>
       </th></tr></thead>
       <tbody><tr v-for="k in benefitKeys" :key="k">
-        <td><b>{{ BEN[k] || k }}</b><span class="tiny muted">{{ k }}</span></td>
+        <td><div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start"><input v-if="auth.has('super')" v-model="selBen" type="checkbox" :value="k" style="margin-top:4px" /><div><b>{{ BEN[k] || k }}</b><span class="tiny muted">{{ k }}</span></div><button v-if="auth.has('super')" class="btn ghost xs" style="margin-inline-start:auto" title="حذف البند من كل الفئات" @click="selBen = [k]; removeBenefits()"><Icon name="trash" :size="12" /></button></div></td>
         <td v-for="tr in tiers" :key="tr.id"><input v-model="tr.benefits[k]" class="in" style="min-height:32px;padding:3px 8px" :disabled="!auth.has('super')" /></td>
       </tr></tbody>
     </table></div>
@@ -82,12 +91,13 @@
     </div>
   </div>
 
-  <Modal v-if="delTier" :title="`حذف فئة «${delTier.name}»`" @close="delTier = null">
-    <p v-if="delTier.companies_count">هذه الفئة مرتبطة بـ <b>{{ delTier.companies_count }}</b> شركة. اختر الفئة التي تنتقل إليها هذه الشركات، وستتحدث مزايا موظفيها فورًا.</p>
-    <p v-else>لا توجد شركات مرتبطة بهذه الفئة.</p>
-    <div class="fg" v-if="delTier.companies_count"><label>نقل الشركات إلى *</label><select v-model="delTarget" class="in"><option :value="null">—</option><option v-for="tr in tiers.filter((x) => x.id !== delTier.id)" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select></div>
+  <Modal v-if="delTier" :title="delTier.list.length > 1 ? `حذف ${delTier.list.length} فئات` : `حذف فئة «${delTier.list[0].name}»`" @close="delTier = null">
+    <ul class="small"><li v-for="x in delTier.list" :key="x.id"><b>{{ x.name }}</b> — {{ x.companies_count ? `مرتبطة بـ ${x.companies_count} شركة` : 'لا شركات مرتبطة' }}</li></ul>
+    <p v-if="delCompanies" class="small">اختر الفئة التي تنتقل إليها الشركات المرتبطة ({{ delCompanies }} شركة)، وستتحدث مزايا موظفيها فورًا.</p>
+    <div v-if="delCompanies" class="fg"><label>نقل الشركات إلى *</label><select v-model="delTarget" class="in"><option :value="null">—</option><option v-for="tr in moveTargets" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select></div>
+    <div v-if="delCompanies && !moveTargets.length" class="notice bad small">لا توجد فئة أخرى تنتقل إليها الشركات — أنشئ فئة أولًا أو لا تحذف كل الفئات.</div>
     <div class="fg"><label>سبب الحذف *</label><input v-model="delReason" class="in" placeholder="مثال: إلغاء الباقات القديمة بعد اعتماد اللائحة" /></div>
-    <template #foot><button class="btn sec" @click="delTier = null">إلغاء</button><button class="btn pri" :disabled="(delTier.companies_count && !delTarget) || !delReason.trim()" @click="confirmRemoveTier">حذف</button></template>
+    <template #foot><button class="btn sec" @click="delTier = null">إلغاء</button><button class="btn dan" :class="{ loading: saving }" :disabled="saving || (delCompanies && !delTarget) || !delReason.trim()" @click="confirmRemoveTier">حذف</button></template>
   </Modal>
 
   <Modal v-if="form" :title="form.id ? 'تعديل شركة' : 'شركة جديدة'" @close="form = null">
@@ -225,11 +235,38 @@ async function tierColor(tr, color) {
   try { await api.put(`/tiers/${tr.id}`, { color, reason: 'تغيير لون الفئة' }); tr.color = color; auth.loadMeta() } catch (e) { alertBox(e.message, { icon: 'error' }) }
 }
 const delTier = ref(null); const delTarget = ref(null); const delReason = ref('')
-function removeTier(tr) { delTier.value = tr; delTarget.value = null; delReason.value = '' }
+const selTiers = ref([]); const selBen = ref([]); const allTiers = ref([])
+const delCompanies = computed(() => (delTier.value?.list || []).reduce((s, x) => s + (x.companies_count || 0), 0))
+const moveTargets = computed(() => allTiers.value.filter((x) => !(delTier.value?.list || []).some((d) => d.id === x.id)))
+async function openDelete(list) {
+  allTiers.value = await api.get('/tiers', { allCompanies: true }) // reassignment targets are every tier, whatever company is selected
+  delTier.value = { list }; delTarget.value = null; delReason.value = ''
+}
+function removeTier(tr) { openDelete([tr]) }
+function openBulkTier() { openDelete(tiers.value.filter((t) => selTiers.value.includes(t.id))) }
 async function confirmRemoveTier() {
+  saving.value = true
+  let moved = 0; let done = 0
   try {
-    const r = await api.delete(`/tiers/${delTier.value.id}`, { data: { move_to: delTarget.value, reason: delReason.value } })
-    ui.toast(r.moved ? `حُذفت الفئة ونُقلت ${r.moved} شركة` : 'حُذفت الفئة', 'ok'); delTier.value = null; load(); auth.loadMeta()
+    for (const t of delTier.value.list) {
+      const r = await api.delete(`/tiers/${t.id}`, { data: { move_to: t.companies_count ? delTarget.value : null, reason: delReason.value }, allCompanies: true })
+      moved += r.moved || 0; done++
+    }
+    ui.toast(`حُذفت ${done} فئة${moved ? ` ونُقلت ${moved} شركة` : ''}`, 'ok'); delTier.value = null; selTiers.value = []; load(); auth.loadMeta()
+  } catch (e) { alertBox(`${e.message}${done ? ` (حُذفت ${done} قبل الخطأ)` : ''}`, { icon: 'error' }); load() } finally { saving.value = false }
+}
+/** Removes benefit items from every tier (and their custom labels), with a reason — a new version of each tier. */
+async function removeBenefits() {
+  const keys = [...selBen.value]; if (!keys.length) return
+  const why = await promptBox(`حذف ${keys.length} بند من كل الفئات؟ اكتب السبب`, { text: keys.map((k) => BEN.value[k] || k).join('، '), multiline: false, confirmText: 'حذف' })
+  if (!why) return
+  try {
+    const all = await api.get('/tiers', { allCompanies: true })
+    for (const tr of all) { const b = { ...tr.benefits }; keys.forEach((k) => delete b[k]); await api.put(`/tiers/${tr.id}`, { benefits: b, reason: why }, { allCompanies: true }) }
+    const labels = { ...(auth.meta?.benefit_labels || {}) }; let custom = false
+    keys.forEach((k) => { if (k.startsWith('custom')) { delete labels[k]; custom = true } })
+    if (custom) await api.put('/settings', { key: 'benefitLabels', value: labels, reason: why })
+    ui.toast(`حُذف ${keys.length} بند من كل الفئات`, 'ok'); selBen.value = []; await Promise.all([auth.loadMeta(), load()])
   } catch (e) { alertBox(e.message, { icon: 'error' }) }
 }
 // logo: picked locally for preview, uploaded right after the company is saved (needs its id)
