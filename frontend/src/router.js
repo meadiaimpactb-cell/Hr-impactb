@@ -41,6 +41,7 @@ const routes = [
       { path: 'recruitment', name: 'recruitment', component: () => import('./views/Recruitment.vue'), meta: { roles: ['super', 'hr_mgr', 'hr_staff'] } },
       { path: 'projects', name: 'projects', component: () => import('./views/Projects.vue') },
       { path: 'import', name: 'import', component: () => import('./views/Import.vue'), meta: { roles: ['super', 'hr_mgr'] } },
+      { path: 'app-versions', name: 'app-versions', component: () => import('./views/AppVersions.vue'), meta: { roles: ['super', 'hr_mgr'] } },
       { path: 'reports-center', name: 'reports-center', component: () => import('./views/ReportsCenter.vue') },
       { path: 'companies', name: 'companies', component: () => import('./views/Companies.vue'), meta: { roles: ['super', 'hr_mgr'] } },
       { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue'), meta: { roles: ['super', 'hr_mgr'] } },

@@ -17,7 +17,7 @@ class Employee extends Model
     protected function casts(): array
     {
         return [
-            'hire_date' => 'date:Y-m-d', 'birth_date' => 'date:Y-m-d', 'last_working_day' => 'date:Y-m-d',
+            'hire_date' => 'date:Y-m-d', 'birth_date' => 'date:Y-m-d', 'last_working_day' => 'date:Y-m-d', 'track_viewers' => 'array',
             'punch_required' => 'boolean', 'punch_anywhere' => 'boolean', 'geo_tolerance' => 'integer', 'email_enabled' => 'boolean', 'eosb_saudi' => 'boolean',
             'flex_enabled' => 'boolean', 'daily_note_required' => 'boolean', 'advances_enabled' => 'boolean',
             'custom_benefits' => 'array', 'insurance' => 'array', 'service_companies' => 'array', 'part_ratio' => 'float', 'work_hours' => 'array',

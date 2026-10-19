@@ -37,6 +37,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
     Route::post('auth/login', [AuthController::class, 'login']);
+    Route::get('app/version', [App\Http\Controllers\Api\AppVersionController::class, 'version']);
     Route::post('auth/invite/check', [AuthController::class, 'inviteCheck'])->middleware('throttle:30,1');
     Route::post('auth/invite/accept', [AuthController::class, 'inviteAccept'])->middleware('throttle:10,1');
     Route::post('auth/forgot', [AuthController::class, 'forgot'])->middleware('throttle:10,1');
@@ -75,6 +76,15 @@ Route::prefix('v1')->group(function () {
         Route::get('attendance/pending', [AttendanceController::class, 'pending']);
         Route::get('attendance/employee/{employee}', [AttendanceController::class, 'employee']);
         Route::post('attendance/{record}/review', [AttendanceController::class, 'review']);
+        // §28 presence checks and location tracking
+        Route::get('attendance/presence', [App\Http\Controllers\Api\PresenceController::class, 'index']);
+        Route::get('attendance/presence/pending', [App\Http\Controllers\Api\PresenceController::class, 'pending']);
+        Route::post('attendance/presence/{employee}', [App\Http\Controllers\Api\PresenceController::class, 'request']);
+        Route::post('attendance/presence/{check}/confirm', [App\Http\Controllers\Api\PresenceController::class, 'confirm'])->where('check', '[0-9]+');
+        Route::post('attendance/track', [App\Http\Controllers\Api\PresenceController::class, 'track'])->middleware('throttle:60,1');
+        Route::get('attendance/movement/{employee}', [App\Http\Controllers\Api\PresenceController::class, 'movement']);
+        Route::put('attendance/movement/{employee}/viewers', [App\Http\Controllers\Api\PresenceController::class, 'viewers']);
+        Route::post('app/version', [App\Http\Controllers\Api\AppVersionController::class, 'publish']);
 
         // Leaves
         Route::get('leaves/types', [LeaveController::class, 'types']);

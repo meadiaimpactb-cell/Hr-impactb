@@ -167,6 +167,7 @@ const NAV = [
   { g: 'الإدارة', items: [
     { to: '/users', ic: 'shield', label: 'المستخدمون والصلاحيات', roles: ['super', 'hr_mgr'] },
     { to: '/import', ic: 'upload', label: 'الاستيراد', roles: ['super', 'hr_mgr'] },
+    { to: '/app-versions', ic: 'download', label: 'إصدارات التطبيق', roles: ['super', 'hr_mgr'] },
     { to: '/companies', ic: 'building', label: 'الشركات والتصنيفات', roles: ['super', 'hr_mgr'] },
     { to: '/lookups', ic: 'database', label: 'البيانات الأساسية', roles: ['super', 'hr_mgr'] },
     { to: '/flows', ic: 'workflow', label: 'أنواع الطلبات ومسارات الاعتماد', roles: ['super', 'hr_mgr'] },

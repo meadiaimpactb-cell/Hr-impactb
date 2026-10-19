@@ -45,7 +45,8 @@ class AdminController extends Controller
             'letter_kinds' => Lookup::names('letter_kinds'),
             'correction_kinds' => Lookup::names('correction_kinds'),
             'benefit_labels' => array_merge(config('hc.benefitLabels'), (array) Settings::get('benefitLabels')),
-            'policy' => ['grace_minutes' => (int) Settings::get('graceMinutes', null, 0), 'daily_note_min' => (int) Settings::get('dailyNoteMin', null, 20), 'sla_days' => (int) Settings::conf('approvalSlaDays'), 'max_absent_per_team' => (int) Settings::get('maxAbsentPerTeam', null, 0), 'reactions_enabled' => (bool) Settings::get('reactionsEnabled', null, true), 'selfie_enabled' => (bool) Settings::get('selfieEnabled', null, false), 'kudos_enabled' => (bool) Settings::get('peerKudosEnabled', null, true), 'biometric_punch' => (bool) Settings::get('biometricPunch', null, true)],
+            'policy' => ['grace_minutes' => (int) Settings::get('graceMinutes', null, 0), 'daily_note_min' => (int) Settings::get('dailyNoteMin', null, 20), 'sla_days' => (int) Settings::conf('approvalSlaDays'), 'max_absent_per_team' => (int) Settings::get('maxAbsentPerTeam', null, 0), 'reactions_enabled' => (bool) Settings::get('reactionsEnabled', null, true), 'selfie_enabled' => (bool) Settings::get('selfieEnabled', null, false), 'kudos_enabled' => (bool) Settings::get('peerKudosEnabled', null, true), 'biometric_punch' => (bool) Settings::get('biometricPunch', null, true),
+                'presence_check' => (bool) Settings::get('presenceCheckEnabled', null, true), 'location_tracking' => (bool) Settings::get('locationTrackingEnabled', null, false), 'track_interval' => (int) Settings::get('trackIntervalMinutes', null, 10)],
         ];
     }
 
