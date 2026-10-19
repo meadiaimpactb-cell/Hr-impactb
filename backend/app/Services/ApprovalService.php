@@ -354,6 +354,11 @@ class ApprovalService
                     Audit::notify(Access::usersWithRole('fin'), 'عهدة مالية لرحلة عمل', $e->name.' — '.number_format((float) $d['advance'], 2).' ر.س', 'info', ['screen' => 'custody']);
                 }
                 break;
+            case 'dev_program': // §80: the approved program lands in the development register as planned
+                $rec = \App\Models\DevRecord::create(['employee_id' => $e->id, 'program' => $d['program'] ?? 'برنامج تطويري', 'provider' => $d['provider'] ?? null, 'cost' => (float) ($d['cost'] ?? 0),
+                    'from' => ! empty($d['start']) ? $d['start'] : null, 'notes' => $d['relevance'] ?? null, 'source' => 'assigned', 'status' => 'planned']);
+                Audit::notify(User::where('employee_id', $e->id)->value('id'), 'اعتُمد طلب البرنامج التطويري', $rec->program.' — سجّل إكماله وارفع الإثبات من شاشة التطوير', 'ok', ['screen' => 'development']);
+                break;
             case 'advance':
                 $n = (int) ($d['installments'] ?? 1);
                 $per = round(((float) $d['amount']) / $n, 2);

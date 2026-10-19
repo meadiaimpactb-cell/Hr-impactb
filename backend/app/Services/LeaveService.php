@@ -16,7 +16,13 @@ class LeaveService
         $lt = $type instanceof LeaveType ? $type : LeaveType::where('code', $type)->firstOrFail();
         $year ??= (int) now()->year;
         $quota = $lt->quota_key ? (float) ($e->benefit($lt->quota_key) ?? ($lt->code === 'annual' ? 21 : 0)) : 0; // 21 days: labour-law default when the package sets none
+        if ($lt->code === 'annual' && $e->hire_date && $e->hire_date->diffInYears(Carbon::create($year, 12, 31)) >= 5) {
+            $quota = max($quota, 30); // §56: 30 days after five continuous years
+        }
         $factor = $e->contract_type === 'part' ? ($e->part_ratio ?: 0.5) : 1;
+        if ($lt->accrual === 'yearly' && $e->hire_date && $e->hire_date->year === $year) {
+            $factor *= max(0, 12 - $e->hire_date->month + 1) / 12; // §56: the first year accrues from the hire date
+        }
 
         $accrued = 0.0;
         if ($lt->accrual === 'monthly') {
@@ -44,7 +50,7 @@ class LeaveService
         $available = $lt->accrual === 'none' ? 0 : round($opening + $accrued + $adjusted - $used - $reserved, 2);
 
         return [
-            'type' => $lt->code, 'name' => $lt->name, 'accrual' => $lt->accrual, 'quota' => $quota, 'part_factor' => $factor,
+            'type' => $lt->code, 'name' => $lt->name, 'accrual' => $lt->accrual, 'quota' => $quota, 'part_factor' => $factor, 'unit' => self::unit($e),
             'opening' => $opening, 'accrued' => $accrued, 'adjusted' => $adjusted, 'used' => $used, 'reserved' => $reserved,
             'available' => $available,
         ];
@@ -62,10 +68,24 @@ class LeaveService
      * (Thursday + Sunday = 4 days), while weekend days at the start or end of the request do not
      * (they are outside the leave). Without an employee the plain calendar span is used.
      */
+    /** Unit of the annual balance (§52/§56): calendar days for tier 1, work days for tiers 2 and 3. */
+    public static function unit(?Employee $e): string
+    {
+        return $e && ($e->benefit('leaveUnit') ?? 'calendar') === 'work' ? 'work' : 'calendar';
+    }
+
     public static function days(string $from, string $to, ?Employee $e = null): int
     {
         $a = Carbon::parse($from)->startOfDay();
         $b = Carbon::parse($to)->startOfDay();
+        if ($e && self::unit($e) === 'work') { // tiers 2–3: only work days are deducted
+            $n = 0;
+            for ($d = $a->copy(); $d->lte($b); $d->addDay()) {
+                $n += $e->isWorkDay($d->dayOfWeek) ? 1 : 0;
+            }
+
+            return $n;
+        }
         if ($e) {
             while ($a->lte($b) && ! $e->isWorkDay($a->dayOfWeek)) {
                 $a->addDay();

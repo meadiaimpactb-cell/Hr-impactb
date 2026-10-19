@@ -87,6 +87,7 @@
   </template>
 
   <Modal v-if="detail" :title="`تقييم ${fmtYM(detail.period)} — ${detail.employee.name}`" size="wide" @close="detail = null">
+    <div v-if="detail.computed.flag" class="notice mb" :class="FLAG[detail.computed.flag.color][0]"><b>حالة الشهر: {{ FLAG[detail.computed.flag.color][1] }}</b><span v-if="detail.computed.flag.reasons?.length"> — {{ detail.computed.flag.reasons.join(' · ') }}</span></div>
     <div class="grid g5 mb">
       <Kpi v-for="k in AXES" :key="k" :label="AXIS[k]" :value="detail.computed.axes[k] ?? 'معفى'" :hint="`من ${detail.computed.weights[k]}`" color="b" />
       <Kpi label="الدرجة" :value="detail.computed.score" :hint="detail.computed.grade.label + (detail.computed.bonus ? ` · +${detail.computed.bonus} نقاط` : '') + (detail.computed.penalty ? ` · −${detail.computed.penalty} ${detail.computed.parts?.report?.submitted ? 'تأخر التقرير الشهري' : 'لم يُرفع التقرير الشهري'} (§35)` : '')" :color="detail.computed.grade.pass ? 'g' : 'r'" />
@@ -150,7 +151,9 @@ const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
 const AXES = ['achieve', 'attend', 'dev', 'disc']
 const AXIS = { achieve: 'الإنجاز', attend: 'الحضور', dev: 'التطوير', disc: 'الانضباط' }
-const SUB = { targets: 'المستهدفات', quality: 'جودة المخرجات', presence: 'الحضور', noLate: 'عدم التأخر', dailyNote: 'المنجز اليومي', complete: 'إكمال البرنامج', interact: 'التفاعل', apply: 'التطبيق', hrScore: 'تقدير الموارد البشرية', weekly: 'التقارير الأسبوعية', coop: 'التعاون', conduct: 'السلوك', pct: 'نسبة الإنجاز الموزونة', report_status: 'حالة التقرير', absent: 'أيام الغياب', late: 'مرات التأخر', no_late: 'عدم التأخر', daily_note: 'المنجز اليومي', hr_score: 'تقدير الموارد البشرية', records: 'سجلات موثقة', weeks: 'الأسابيع' }
+const SUB = { targets: 'المستهدفات', quality: 'جودة المخرجات', presence: 'الحضور', noLate: 'عدم التأخر', dailyNote: 'المنجز اليومي', complete: 'إكمال البرنامج', interact: 'التفاعل', apply: 'التطبيق', hrScore: 'تقدير الموارد البشرية', weekly: 'التقارير الأسبوعية', coop: 'التعاون', conduct: 'السلوك', pct: 'نسبة الإنجاز الموزونة', report_status: 'حالة التقرير', absent: 'أيام الغياب', late: 'مرات التأخر', no_late: 'عدم التأخر', daily_note: 'المنجز اليومي', hr_score: 'تقدير الموارد البشرية', records: 'أنشطة معتمدة', weeks: 'الأسابيع',
+  points: 'نقاط الشهر', carry: 'مرحّل من الشهر السابق', total: 'المجموع المحتسب (حد 150)', level: 'المستوى', score: 'درجة المحور' }
+const FLAG = { green: ['ok', 'أخضر — أداء جيد فأعلى'], orange: ['warn', 'برتقالي — متابعة وتوجيه'], red: ['bad', 'أحمر — غير مقبول، تبدأ المعالجة (§75)'] }
 const REP = { none: 'لا تقرير', draft: 'مسودة', submitted: 'مرفوع', mgr_reviewed: 'راجعه المدير', hr_reviewed: 'راجعته الموارد', approved: 'معتمد', returned: 'مُرجَع' }
 const OBJ = { none: '—', open: 'قيد النظر', accepted: 'قُبل', rejected: 'رُفض' }
 const SCOPE = { group: 'المجموعة', company: 'شركة', job: 'وظيفة' }

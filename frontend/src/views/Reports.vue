@@ -88,19 +88,26 @@
   <!-- Weekly -->
   <template v-else-if="tab === 'weekly'">
     <div class="card">
-      <h3>أسابيعي <span class="sub">تُرفع قبل نهاية الأسبوع، ويؤثر التأخر أو الغياب في محور الانضباط</span></h3>
-      <div v-dt class="tw"><table><thead><tr><th>الأسبوع</th><th>الحالة</th><th>ما أُنجز</th><th>الأسبوع القادم</th><th /></tr></thead>
+      <h3>أسابيعي <span class="sub">اللائحة §34: الخطة في أول يوم من الأسبوع ويعتمدها المشرف، والمنجز في آخر يوم منه أو أول يوم من الأسبوع التالي بحد أقصى · المتأخر برتقالي وغير المرفوع أحمر</span></h3>
+      <div v-if="!weeks.length" class="empty">لا أسابيع مطلوبة منك هذا الشهر</div>
+      <div v-dt v-else class="tw"><table><thead><tr><th>الأسبوع</th><th>الخطة</th><th>التقرير</th><th>البنود</th><th>ما أُنجز</th><th /></tr></thead>
         <tbody><tr v-for="w in weeks" :key="w.id">
-          <td class="num">{{ w.week_start }} → {{ w.week_end }}</td><td><span class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[w.status]">{{ WEEK[w.status] }}</span></td>
-          <td class="small">{{ w.done || '—' }}</td><td class="small">{{ w.next || '—' }}</td>
-          <td><button class="btn ghost xs" @click="weekForm = { ...w }">{{ w.status === 'missing' ? 'رفع' : 'تعديل' }}</button></td>
+          <td class="num">{{ w.week_start }} → {{ w.week_end }}</td>
+          <td><span class="pill" :class="{ none: 'gray', submitted: 'info', approved: 'ok' }[w.plan_status || 'none']">{{ PLAN[w.plan_status || 'none'] }}</span></td>
+          <td><span class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[w.status]">{{ WEEK[w.status] }}</span></td>
+          <td class="small">{{ (w.items || []).length ? `${(w.items || []).length} بند` : '—' }}</td>
+          <td class="small">{{ w.done || (w.items || []).filter((i) => i.achieved).map((i) => i.achieved).join(' · ') || '—' }}</td>
+          <td class="row" style="gap:4px;flex-wrap:nowrap"><button v-if="(w.plan_status || 'none') === 'none'" class="btn sec xs" @click="openWeek(w, 'plan')">خطة الأسبوع</button><button class="btn ghost xs" @click="openWeek(w, 'report')">{{ w.status === 'missing' ? 'رفع المنجز' : 'تعديل' }}</button></td>
         </tr></tbody></table></div>
     </div>
     <div v-if="auth.isApprover" class="card">
       <h3>لوحة أسابيع الفريق</h3>
       <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th v-for="ws in weekStarts" :key="ws" class="num">{{ ws.slice(5) }}</th></tr></thead>
         <tbody><tr v-for="(rows, name) in teamWeeksByEmp" :key="name"><td><b>{{ name }}</b></td>
-          <td v-for="ws in weekStarts" :key="ws"><span v-if="rows[ws]" class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[rows[ws].status]">{{ WEEK[rows[ws].status] }}</span><span v-else class="muted">—</span></td>
+          <td v-for="ws in weekStarts" :key="ws">
+            <template v-if="rows[ws]"><span class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[rows[ws].status]" style="cursor:pointer" @click="teamWeek = rows[ws]">{{ WEEK[rows[ws].status] }}</span><span v-if="rows[ws].plan_status === 'submitted'" class="pill info" style="cursor:pointer" title="خطة بانتظار اعتمادك" @click="teamWeek = rows[ws]">خطة</span></template>
+            <span v-else class="muted">—</span>
+          </td>
         </tr></tbody></table></div>
     </div>
   </template>
@@ -119,11 +126,28 @@
   </template>
 
 
-  <Modal v-if="weekForm" :title="`الأسبوع ${weekForm.week_start}`" @close="weekForm = null">
-    <div class="fg"><label>ما أُنجز *</label><textarea v-model="weekForm.done" class="in" rows="4" /></div>
-    <div class="fg"><label>خطة الأسبوع القادم</label><textarea v-model="weekForm.next" class="in" rows="3" /></div>
-    <div class="fg"><label>عقبات</label><input v-model="weekForm.blockers" class="in" /></div>
-    <template #foot><button class="btn sec" @click="weekForm = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="submitWeek">رفع</button></template>
+  <Modal v-if="weekForm" :title="`${weekMode === 'plan' ? 'خطة' : 'تقرير'} الأسبوع ${weekForm.week_start}`" size="wide" @close="weekForm = null">
+    <div class="row mb" style="gap:6px"><button class="btn sec xs" @click="fromMonthly"><Icon name="download" :size="13" /> جلب البنود من التقرير الشهري</button><button class="btn ghost xs" @click="weekForm.items.push({ axis: '', title: '', kpi: '', target: '', achieved: '' })"><Icon name="plus" :size="13" /> بند</button><span class="tiny muted">المحور · البند · المؤشر · المستهدف الأسبوعي{{ weekMode === 'report' ? ' · المنجز' : '' }}</span></div>
+    <div class="tw"><table class="wk"><thead><tr><th>المحور</th><th>البند</th><th>المؤشر</th><th>المستهدف الأسبوعي</th><th v-if="weekMode === 'report'">المنجز</th><th /></tr></thead>
+      <tbody><tr v-for="(it, i) in weekForm.items" :key="i">
+        <td><input v-model="it.axis" class="in" /></td><td><input v-model="it.title" class="in" /></td><td><input v-model="it.kpi" class="in" /></td><td><input v-model="it.target" class="in" /></td>
+        <td v-if="weekMode === 'report'"><textarea v-model="it.achieved" class="in" rows="1" /></td>
+        <td><button class="btn ghost xs" @click="weekForm.items.splice(i, 1)"><Icon name="x" :size="13" /></button></td>
+      </tr></tbody></table></div>
+    <template v-if="weekMode === 'report'">
+      <div class="fg mt"><label>ملخص ما أُنجز</label><textarea v-model="weekForm.done" class="in" rows="2" /></div>
+      <div class="fr"><div class="fg"><label>العقبات</label><input v-model="weekForm.blockers" class="in" /></div><div class="fg"><label>خطة الأسبوع القادم</label><input v-model="weekForm.next" class="in" /></div></div>
+    </template>
+    <template #foot><button class="btn sec" @click="weekForm = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="weekMode === 'plan' ? submitPlan() : submitWeek()">{{ weekMode === 'plan' ? 'رفع الخطة لاعتماد المشرف' : 'رفع التقرير' }}</button></template>
+  </Modal>
+
+  <Modal v-if="teamWeek" :title="`${teamWeek.employee?.name} — أسبوع ${teamWeek.week_start}`" size="wide" @close="teamWeek = null">
+    <div class="row mb" style="gap:6px"><span class="pill" :class="{ none: 'gray', submitted: 'info', approved: 'ok' }[teamWeek.plan_status || 'none']">الخطة: {{ PLAN[teamWeek.plan_status || 'none'] }}</span><span class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[teamWeek.status]">التقرير: {{ WEEK[teamWeek.status] }}</span></div>
+    <div v-if="(teamWeek.items || []).length" class="tw"><table><thead><tr><th>المحور</th><th>البند</th><th>المؤشر</th><th>المستهدف</th><th>المنجز</th></tr></thead>
+      <tbody><tr v-for="(it, i) in teamWeek.items" :key="i"><td>{{ it.axis }}</td><td>{{ it.title }}</td><td>{{ it.kpi }}</td><td>{{ it.target }}</td><td>{{ it.achieved || '—' }}</td></tr></tbody></table></div>
+    <div v-if="teamWeek.done" class="small mt"><b>الملخص:</b> {{ teamWeek.done }}</div><div v-if="teamWeek.blockers" class="small"><b>العقبات:</b> {{ teamWeek.blockers }}</div><div v-if="teamWeek.next" class="small"><b>الأسبوع القادم:</b> {{ teamWeek.next }}</div>
+    <div v-if="teamWeek.plan_status === 'submitted'" class="fg mt"><label>ملاحظة للموظف</label><input v-model="planNote" class="in" /></div>
+    <template #foot><button class="btn sec" @click="teamWeek = null">إغلاق</button><button v-if="teamWeek.plan_status === 'submitted'" class="btn pri" :class="{ loading: busy }" @click="approvePlan">اعتماد الخطة</button></template>
   </Modal>
 
   <Modal v-if="tplForm" :title="tplForm.id ? 'تعديل قالب' : 'قالب جديد'" size="wide" @close="tplForm = null">
@@ -165,6 +189,19 @@ const STATUS_COLOR = { draft: 'gray', submitted: 'warn', mgr_reviewed: 'info', h
 const STAGE_ACTOR = { draft: 'الموظف', returned: 'الموظف', submitted: 'المدير المباشر', mgr_reviewed: 'الموارد البشرية', hr_reviewed: 'رئيس الشركة', approved: 'منشور' }
 const ROLE = { mgr: 'المدير المباشر', hr: 'الموارد البشرية', ceo: 'رئيس الشركة' }
 const WEEK = { submitted: 'في الموعد', late: 'متأخر', missing: 'لم يُرفع' }
+const PLAN = { none: 'لم تُرفع', submitted: 'بانتظار المشرف', approved: 'معتمدة' }
+const weekMode = ref('report'); const teamWeek = ref(null); const planNote = ref('')
+function openWeek(w, mode) { weekMode.value = mode; weekForm.value = { ...w, items: (w.items || []).map((i) => ({ ...i })) } }
+async function fromMonthly() { const items = await api.get(`/reports/weekly/${weekForm.value.id}/from-monthly`); if (!items.length) return ui.toast('لا بنود في التقرير الشهري بعد', 'warn'); weekForm.value.items = items }
+async function submitPlan() {
+  if (!weekForm.value.items.some((i) => i.title?.trim())) return ui.toast('أضف بندًا واحدًا على الأقل', 'warn')
+  busy.value = true
+  try { await api.post(`/reports/weekly/${weekForm.value.id}/plan`, { items: weekForm.value.items.filter((i) => i.title?.trim()) }); ui.toast('رُفعت الخطة لاعتماد المشرف', 'ok'); weekForm.value = null; load() } catch (e) { ui.toast(e.message || 'تعذر الرفع', 'bad') } finally { busy.value = false }
+}
+async function approvePlan() {
+  busy.value = true
+  try { await api.post(`/reports/weekly/${teamWeek.value.id}/plan/approve`, { note: planNote.value || null }); ui.toast('اعتُمدت الخطة', 'ok'); teamWeek.value = null; planNote.value = ''; load() } catch (e) { ui.toast(e.message || 'تعذر الاعتماد', 'bad') } finally { busy.value = false }
+}
 const SCOPE = { group: 'المجموعة', company: 'شركة', job: 'وظيفة', employee: 'موظف بعينه' }
 const prevMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 const period = ref(auth.emp ? curYM() : prevMonth())
@@ -235,9 +272,10 @@ async function review(action) {
   } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad', 6000) } finally { busy.value = false }
 }
 async function submitWeek() {
-  if (!weekForm.value.done?.trim()) return ui.toast('اكتب ما أُنجز', 'warn')
+  const w = weekForm.value
+  if (!w.done?.trim() && !w.items.some((i) => i.achieved?.trim())) return ui.toast('اكتب المنجز مقابل البنود أو ملخص ما أُنجز', 'warn')
   busy.value = true
-  try { await api.post(`/reports/weekly/${weekForm.value.id}`, { done: weekForm.value.done, next: weekForm.value.next, blockers: weekForm.value.blockers }); ui.toast('رُفع التقرير الأسبوعي', 'ok'); weekForm.value = null; load() } finally { busy.value = false }
+  try { await api.post(`/reports/weekly/${w.id}`, { done: w.done, next: w.next, blockers: w.blockers, items: w.items.filter((i) => i.title?.trim()) }); ui.toast('رُفع التقرير الأسبوعي', 'ok'); weekForm.value = null; load() } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') } finally { busy.value = false }
 }
 const staff = ref([])
 async function loadStaff() { if (!staff.value.length) staff.value = ((await api.get('/employees', { params: { per_page: 1000 } })).data || []).map((e) => ({ id: e.id, name: e.name })) }
@@ -249,3 +287,8 @@ async function saveTpl() {
 }
 onMounted(load)
 </script>
+
+<style scoped>
+.wk input, .wk textarea { min-height: 32px; padding: 4px 8px; font-size: 13px; }
+.wk td { padding: 3px; vertical-align: top; }
+</style>

@@ -18,8 +18,11 @@ class DevelopmentController extends Controller
         $e = $request->user()->employee;
         abort_unless($e, 404);
 
+        $period = $request->input('period', now()->format('Y-m'));
+
         return ['records' => DevRecord::where('employee_id', $e->id)->orderByDesc('from')->get()->map(fn ($r) => $this->row($r)),
-            'budget' => $e->benefit('devBudget'), 'programs_per_month' => $e->benefit('programsPerMonth'),
+            'budget' => $e->benefit('devBudget'), 'programs_per_month' => $e->benefit('programsPerMonth'), 'points' => \App\Services\EvaluationService::devPoints($e, $period) + ['period' => $period],
+            'activities' => \App\Models\Lookup::where('group', 'dev_activities')->where('active', true)->orderBy('sort')->get(['code', 'name', 'name_en', 'meta']),
             'spent' => (float) DevRecord::where('employee_id', $e->id)->where('status', 'verified')->where('from', 'like', now()->year.'-%')->sum('cost'),
             'committed' => (float) DevRecord::where('employee_id', $e->id)->whereNotIn('status', ['rejected', 'cancelled'])->where('from', 'like', now()->year.'-%')->sum('cost')];
     }
@@ -29,7 +32,7 @@ class DevelopmentController extends Controller
         abort_unless(Access::for()->canAny('DEV', 'view'), 403);
         $ids = Access::for()->employees()->pluck('id');
 
-        return DevRecord::with('employee:id,name,emp_no,company_id', 'employee.company:id,name')->whereIn('employee_id', $ids)
+        return DevRecord::with('employee:id,name,emp_no,company_id,manager_id', 'employee.company:id,name')->whereIn('employee_id', $ids)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->orderByDesc('id')->limit(300)->get()->map(fn ($r) => $this->row($r));
     }
 
@@ -37,7 +40,10 @@ class DevelopmentController extends Controller
     {
         $u = $request->user();
         $d = $request->validate(['employee_id' => 'nullable|exists:employees,id', 'program' => 'required|string|max:160', 'provider' => 'nullable|string|max:120', 'kind' => 'nullable|string|max:60',
+            'activity' => ['nullable', 'string', 'max:20', \Illuminate\Validation\Rule::exists('lookups', 'code')->where('group', 'dev_activities')],
             'from' => 'nullable|date', 'to' => 'nullable|date|after_or_equal:from', 'hours' => 'nullable|numeric|min:0', 'cost' => 'nullable|numeric|min:0', 'notes' => 'nullable|string|max:1000']);
+        $pf = \App\Services\EvaluationService::pointsFor($d['activity'] ?? null, isset($d['hours']) ? (float) $d['hours'] : null);
+        $d['activity'] = $pf['activity'];
         $target = ! empty($d['employee_id']) && (int) $d['employee_id'] !== $u->employee_id ? Employee::findOrFail($d['employee_id']) : $u->employee;
         abort_unless($target, 422);
         $assigned = $target->id !== $u->employee_id;
@@ -65,30 +71,29 @@ class DevelopmentController extends Controller
     public function complete(Request $request, DevRecord $record)
     {
         abort_unless($record->employee_id === $request->user()->employee_id && $record->status === 'planned', 403);
-        if (! empty($d['cost'])) {
-            $budget = (float) ($target->benefit('devBudget') ?? 0);
-            $year = substr($d['from'] ?? now()->toDateString(), 0, 4);
-            $committed = (float) DevRecord::where('employee_id', $target->id)->whereNotIn('status', ['rejected', 'cancelled'])->where('from', 'like', "$year-%")->sum('cost');
-            if ($budget > 0 && $committed + (float) $d['cost'] > $budget) {
-                throw \Illuminate\Validation\ValidationException::withMessages(['cost' => 'التكلفة تتجاوز ميزانية التطوير: الميزانية '.number_format($budget).' ر.س، المستخدم '.number_format($committed).'، المتبقي '.number_format(max(0, $budget - $committed)).' ر.س']);
-            }
-        }
         $path = $request->file('certificate')?->store('dev/'.now()->format('Y'), 'local');
         $record->update(['status' => 'pending', 'certificate_path' => $path ?? $record->certificate_path, 'to' => $record->to ?? now()->toDateString()]);
-        Audit::notify(Access::hrUsersFor($record->employee->company_id, 'DEV'), 'سجل تطوير بانتظار التحقق', $record->employee->name.' — '.$record->program, 'approval', ['screen' => 'development']);
+        $mgr = $record->employee->manager_id ? User::where('employee_id', $record->employee->manager_id)->where('active', true)->value('id') : null;
+        Audit::notify($mgr ? [$mgr] : Access::hrUsersFor($record->employee->company_id, 'DEV'), 'إثبات تطوير بانتظار اعتمادك', $record->employee->name.' — '.$record->program, 'approval', ['screen' => 'development']);
 
-        return $this->row($record->fresh()->load('employee:id,name,emp_no'));
+        return $this->row($record->fresh()->load('employee:id,name,emp_no,manager_id'));
     }
 
+    /** §78: the direct manager approves the evidence (HR may too, and audits); points are then booked in the month. */
     public function verify(Request $request, DevRecord $record)
     {
-        abort_unless(Access::for()->can('DEV', 'approve', ['employee' => $record->employee]) && $request->user()->isHr(), 403);
-        $d = $request->validate(['decision' => 'required|in:verified,rejected', 'note' => 'nullable|string|max:500']);
-        $record->update(['status' => $d['decision'], 'verified_by' => $request->user()->id, 'verified_at' => now(), 'notes' => $d['note'] ?? $record->notes]);
+        $u = $request->user();
+        $acc = Access::for();
+        abort_unless($acc->isManagerOf($record->employee) || ($u->isHr() && $acc->can('DEV', 'approve', ['employee' => $record->employee])) || $u->hasRole('super'), 403, 'يعتمد الإثبات المشرف المباشر أو الموارد البشرية');
+        $d = $request->validate(['decision' => 'required|in:verified,rejected', 'note' => 'nullable|string|max:500', 'activity' => ['nullable', 'string', \Illuminate\Validation\Rule::exists('lookups', 'code')->where('group', 'dev_activities')]]);
+        $pf = \App\Services\EvaluationService::pointsFor($d['activity'] ?? $record->activity, $record->hours);
+        $month = ($record->to ?? $record->from ?? now())->format('Y-m');
+        $record->update(['status' => $d['decision'], 'verified_by' => $u->id, 'verified_at' => now(), 'notes' => $d['note'] ?? $record->notes,
+            'activity' => $pf['activity'], 'points' => $d['decision'] === 'verified' ? $pf['points'] : 0, 'points_month' => $d['decision'] === 'verified' ? $month : null]);
         Audit::log('dev_records', $record->id, $d['decision'], null, null, $d['note'] ?? null);
         Audit::notify(User::where('employee_id', $record->employee_id)->value('id'), $d['decision'] === 'verified' ? 'وُثّق سجل التطوير' : 'رُفض سجل التطوير', $record->program.(! empty($d['note']) ? ' — '.$d['note'] : ''), $d['decision'] === 'verified' ? 'ok' : 'bad', ['screen' => 'development']);
         if ($d['decision'] === 'verified') {
-            $record->employee->addCareer('تطوير موثَّق', $record->program.($record->hours ? " ({$record->hours} ساعة)" : ''));
+            $record->employee->addCareer('تطوير موثَّق', $record->program.($record->hours ? " ({$record->hours} ساعة)" : '').' — '.$record->points.' نقطة');
         }
 
         return $this->row($record->fresh()->load('employee:id,name,emp_no'));
@@ -96,9 +101,9 @@ class DevelopmentController extends Controller
 
     private function row(DevRecord $r): array
     {
-        return $r->only('id', 'program', 'provider', 'kind', 'from', 'to', 'hours', 'cost', 'source', 'status', 'notes', 'verified_at') + [
-            'status_label' => DevRecord::STATUSES[$r->status] ?? $r->status, 'has_certificate' => (bool) $r->certificate_path,
-            'employee' => $r->relationLoaded('employee') ? $r->employee?->only('id', 'name', 'emp_no') : null, 'company' => $r->relationLoaded('employee') && $r->employee?->relationLoaded('company') ? $r->employee->company?->name : null,
+        return $r->only('id', 'program', 'provider', 'kind', 'activity', 'points', 'points_month', 'from', 'to', 'hours', 'cost', 'source', 'status', 'notes', 'verified_at') + [
+            'status_label' => DevRecord::STATUSES[$r->status] ?? $r->status, 'has_certificate' => (bool) $r->certificate_path, 'certificate_path' => $r->certificate_path,
+            'employee' => $r->relationLoaded('employee') ? $r->employee?->only('id', 'name', 'emp_no', 'manager_id') : null, 'company' => $r->relationLoaded('employee') && $r->employee?->relationLoaded('company') ? $r->employee->company?->name : null,
         ];
     }
 }

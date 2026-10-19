@@ -31,8 +31,10 @@
     </div>
 
     <div class="card">
-      <h3>التطوير هذا الشهر</h3>
-      <div class="small">{{ rv.dev?.program || 'لم يُذكر برنامج' }}<span v-if="rv.dev?.provider"> · {{ rv.dev.provider }}</span> · {{ rv.dev?.completed ? 'مكتمل' : 'غير مكتمل' }} · {{ rv.dev?.applied ? 'طُبّق في العمل' : 'لم يُطبَّق بعد' }}</div>
+      <h3>التطوير المنجز خلال الشهر <span class="sub">يُدرج تلقائيًا من سجل التطوير بعد اعتماد المشرف (§35/§78) · {{ rv.dev_points?.total ?? 0 }} / {{ rv.dev_points?.target ?? 100 }} نقطة{{ rv.dev_points?.carry ? ` (منها ${rv.dev_points.carry} مرحّلة)` : '' }} · المستوى: {{ rv.dev_points?.level_label || '—' }}</span></h3>
+      <div v-if="!rv.dev_records?.length" class="small muted">لا أنشطة تطوير معتمدة في هذا الشهر — سجّلها من شاشة «التطوير والتدريب».</div>
+      <div v-dt v-else class="tw"><table><thead><tr><th>النشاط أو البرنامج</th><th>الجهة</th><th>النوع</th><th>الساعات</th><th>النقاط</th></tr></thead>
+        <tbody><tr v-for="d in rv.dev_records" :key="d.id"><td><b>{{ d.program }}</b></td><td>{{ d.provider || '—' }}</td><td class="small">{{ d.activity_name || d.activity }}</td><td>{{ d.hours || '—' }}</td><td class="num"><b>{{ d.points }}</b></td></tr></tbody></table></div>
       <div v-if="rv.dev?.notes" class="small muted mt" style="white-space:pre-line">{{ rv.dev.notes }}</div>
     </div>
 

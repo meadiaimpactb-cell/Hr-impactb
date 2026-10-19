@@ -119,6 +119,10 @@ Route::prefix('v1')->group(function () {
         Route::post('announcements/{announcement}/remind', [AnnouncementController::class, 'remind']);
 
         // Internal mail
+        Route::post('reports/weekly/{week}/plan', [ReportController::class, 'weeklyPlan']);
+        Route::post('reports/weekly/{week}/plan/approve', [ReportController::class, 'weeklyPlanApprove']);
+        Route::get('reports/weekly/{week}/from-monthly', [ReportController::class, 'weeklyFromMonthly']);
+        Route::put('reports/weekly/employee/{employee}', [ReportController::class, 'weeklyToggle']);
         Route::get('mail/unread', [MailController::class, 'unread']);
         Route::get('mail/recipients', [MailController::class, 'recipients']);
         Route::get('mail/all', [MailController::class, 'all']);
