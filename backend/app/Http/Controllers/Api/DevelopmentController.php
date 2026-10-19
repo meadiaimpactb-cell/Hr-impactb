@@ -101,7 +101,7 @@ class DevelopmentController extends Controller
 
     private function row(DevRecord $r): array
     {
-        return $r->only('id', 'program', 'provider', 'kind', 'activity', 'points', 'points_month', 'from', 'to', 'hours', 'cost', 'source', 'status', 'notes', 'verified_at') + [
+        return $r->only('id', 'program', 'provider', 'kind', 'activity', 'points', 'points_month', 'hours', 'cost', 'source', 'status', 'notes', 'verified_at') + ['from' => $r->from?->format('Y-m-d'), 'to' => $r->to?->format('Y-m-d')] + [
             'status_label' => DevRecord::STATUSES[$r->status] ?? $r->status, 'has_certificate' => (bool) $r->certificate_path, 'certificate_path' => $r->certificate_path,
             'employee' => $r->relationLoaded('employee') ? $r->employee?->only('id', 'name', 'emp_no', 'manager_id') : null, 'company' => $r->relationLoaded('employee') && $r->employee?->relationLoaded('company') ? $r->employee->company?->name : null,
         ];
