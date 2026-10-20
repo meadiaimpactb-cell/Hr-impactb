@@ -25,7 +25,7 @@ class UserController extends Controller
     /** Roles the current user may assign. */
     private function assignable(User $me): array
     {
-        return $me->hasRole('super') ? array_keys(User::ROLES) : array_values(array_diff(array_keys(User::ROLES), ['super', 'hr_mgr']));
+        return $me->hasRole('super') ? array_keys(User::ROLES) : array_values(array_diff(array_keys(User::ROLES), ['super', 'hr_mgr', 'board']));
     }
 
     /** Active accounts (name only) — lets any approver pick a delegate. */

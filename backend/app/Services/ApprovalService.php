@@ -434,6 +434,17 @@ class ApprovalService
                 }
                 Audit::notify([...Access::usersWithRole('custodian'), ...Access::hrUsersFor($e->company_id, 'CUS')], 'طلب عهدة معتمد — جهّز وسلّم', $e->name.' — '.($d['kind'] ?? ''), 'approval', ['screen' => 'custody']);
                 break;
+            case 'tier_change': // §49: the approved classification applies to the company's employees' benefits automatically
+                $co = \App\Models\Company::find((int) $d['company']);
+                $tier = \App\Models\Tier::where('name', $d['tier'])->first() ?? \App\Models\Tier::where('code', ['تأسيس' => 'tasis', 'تمكين' => 'tamkeen', 'أثر' => 'athar'][$d['tier']] ?? '')->first();
+                if ($co && $tier) {
+                    $before = $co->tier_id;
+                    $co->update(['tier_id' => $tier->id]);
+                    Audit::log('companies', $co->id, 'tier', ['tier_id' => $before], ['tier_id' => $tier->id], 'طلب تصنيف #'.$r->id.' — بطاقة الأداء '.$d['achievement'].'%');
+                    $users = User::whereIn('employee_id', \App\Models\Employee::where('company_id', $co->id)->pluck('id'))->pluck('id')->all();
+                    Audit::notify($users, 'تصنيف شركتك للسنة الجديدة: '.$tier->name, 'يسري من '.$d['effective'].' وتتحدث مزاياك تلقائيًا (§49–50)', 'info', ['screen' => 'dashboard']);
+                }
+                break;
             case 'ticket':
                 $e->addCareer('تذكرة إجازة', ($d['destination'] ?? '').' · '.($d['travel_date'] ?? '').' · حتى '.number_format((float) ($d['approved_amount'] ?? 0)).' ر.س'.(! empty($d['cash']) ? ' (بدل مالي)' : ''));
                 Audit::notify(Access::usersWithRole('fin'), 'تذكرة إجازة معتمدة', $e->name.' — '.($d['destination'] ?? '').(! empty($d['cash']) ? ' — بدل مالي يُحوَّل للآيبان' : ' — احجز على الدرجة الاقتصادية'), 'approval', ['screen' => 'requests']);
@@ -575,6 +586,7 @@ class ApprovalService
             'promotion' => ($d['kind'] ?? '').' · '.($d['title'] ?? ''),
             'transfer' => 'إلى '.($d['to_company_name'] ?? '').' · '.($d['effective'] ?? ''),
             'probation' => ($d['decision'] ?? '').' · '.($d['recommendation'] ?? ''),
+            'tier_change' => ($d['company_name'] ?? '').': '.($d['current'] ?? '—').' ← '.($d['tier'] ?? '').' ('.($d['achievement'] ?? '').'%)',
             default => self::customSummary($r->type, $d),
         };
     }

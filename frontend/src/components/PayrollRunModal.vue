@@ -35,7 +35,7 @@
             <span v-if="!lateDed(l) && l.adj_late == null">—</span>
           </td>
           <td class="num c" :title="attTitle(l)">{{ absDed(l) ? money(absDed(l)) : '—' }}<span v-if="l.att_overflow > 0" class="tiny muted">يُرحَّل {{ money(l.att_overflow) }}</span></td>
-          <td class="num c" :title="advTitle(l)">{{ advDed(l) ? money(advDed(l)) : '—' }}<span v-if="(l.advance_deferrals || []).length" class="tiny muted">مؤجل {{ money(l.advance_deferrals.reduce((s, x) => s + x.deferred, 0)) }}</span></td>
+          <td class="num c" :title="advTitle(l)">{{ advDed(l) ? money(advDed(l)) : '—' }}<span v-if="(l.advance_deferrals || []).length" class="tiny muted" title="ما زاد على نصف الأجر يُرحَّل للشهر التالي (§41–42)">مُرحّل {{ money(l.advance_deferrals.reduce((s, x) => s + x.deferred, 0)) }}</span></td>
           <td class="num c" :title="l.gosi ? `${l.gosi.scheme_label} · الموظف ${l.gosi.employee_rate}% · المنشأة ${l.gosi.employer_rate}% = ${money(l.gosi.employer)}` : 'غير مشمول'">{{ gosiDed(l) ? money(gosiDed(l)) : '—' }}</td>
           <td class="num c" :title="otherTitle(l)">{{ otherDed(l) ? money(otherDed(l)) : '—' }}</td>
           <td class="num c"><b>{{ money(l.net) }}</b></td>

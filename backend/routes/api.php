@@ -351,6 +351,11 @@ Route::prefix('v1')->group(function () {
         Route::post('evaluations/{evaluation}/objection', [EvaluationController::class, 'decideObjection']);
 
         // Development & training
+        // §77 annual individual development plan
+        Route::get('dev-plans/mine', [\App\Http\Controllers\Api\DevPlanController::class, 'mine']);
+        Route::get('dev-plans', [\App\Http\Controllers\Api\DevPlanController::class, 'team']);
+        Route::post('dev-plans', [\App\Http\Controllers\Api\DevPlanController::class, 'save']);
+        Route::post('dev-plans/{plan}/decide', [\App\Http\Controllers\Api\DevPlanController::class, 'decide'])->where('plan', '[0-9]+');
         Route::get('development/mine', [DevelopmentController::class, 'mine']);
         Route::get('development', [DevelopmentController::class, 'index']);
         Route::post('development', [DevelopmentController::class, 'store']);

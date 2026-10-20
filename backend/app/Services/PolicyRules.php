@@ -50,6 +50,7 @@ class PolicyRules
             'promotion' => self::promotion($data, $e),
             'transfer' => (int) $data['to_company'] !== (int) $e->company_id ? ($data['consent'] ? $data : self::fail('consent', 'النقل يتطلب موافقة الموظف (§23)')) : self::fail('to_company', 'الموظف في هذه الشركة أصلًا'),
             'allowance' => self::allowance($data, $e),
+            'tier_change' => self::tierChange($data, $e),
             default => $data,
         };
     }
@@ -268,6 +269,30 @@ class PolicyRules
 
         return $d + ['acting_allowance' => round((float) $d['role_basic'] * $pct / 100, 2), 'acting_pct' => $pct,
             'allowance_from' => $start->copy()->addMonthsNoOverflow(3)->toDateString(), 'allowance_to' => $start->copy()->addMonthsNoOverflow(9)->subDay()->toDateString()];
+    }
+
+    // ---------------------------------------------------------------- §47–50 company classification
+    private static function tierChange(array $d, Employee $e): array
+    {
+        $u = auth()->user();
+        $cid = (int) $d['company'];
+        if (! $u->hasRole('super', 'hr_mgr') && ! \App\Models\Company::where('id', $cid)->where('ceo_employee_id', $u->employee_id)->exists()) {
+            self::fail('company', 'يُعد طلب التصنيف الرئيس التنفيذي للشركة مع الموارد البشرية (الملحق الخامس)');
+        }
+        $pct = (float) $d['achievement'];
+        // §47: below 100% of the scorecard → تأسيس · 100% to below 110% → تمكين · 110% and above → أثر
+        $earned = $pct >= 110 ? 'أثر' : ($pct >= 100 ? 'تمكين' : 'تأسيس');
+        $rank = ['تأسيس' => 1, 'تمكين' => 2, 'أثر' => 3];
+        if ($rank[$d['tier']] > $rank[$earned] && empty($d['board_exception'])) {
+            self::fail('tier', "نتيجة البطاقة ({$pct}%) تستحق فئة «{$earned}»؛ التصنيف الأعلى يتطلب قرارًا مسبَّبًا من مجلس الإدارة (§48)");
+        }
+        $eff = \Illuminate\Support\Carbon::parse($d['effective']);
+        if ($eff->format('m-d') !== '02-01') {
+            self::fail('effective', 'يسري التصنيف على سنة المزايا التالية — تبدأ في 1 فبراير (§49)');
+        }
+        $cur = \App\Models\Company::with('tier')->find($cid)?->tier?->name;
+
+        return $d + ['earned' => $earned, 'current' => $cur, 'company_name' => \App\Models\Company::find($cid)?->name];
     }
 
     // ---------------------------------------------------------------- §39 car vs transport

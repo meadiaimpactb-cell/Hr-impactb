@@ -301,6 +301,12 @@ class PayrollService
         foreach (Violation::where('employee_id', $e->id)->where('status', 'active')->where('period', $period)->where('amount', '>', 0)->get() as $v) {
             $deductions[] = ['key' => 'penalty', 'name' => 'جزاء مخالفة — '.Lookup::name('violation_types', $v->type), 'amount' => (float) $v->amount, 'ref' => $v->id];
         }
+        // the part of a fine held back last month by the half-wage rule (§41–42) is deducted now
+        if (\Illuminate\Support\Facades\Schema::hasColumn('violations', 'deferred_period')) {
+            foreach (Violation::where('employee_id', $e->id)->where('status', 'active')->where('deferred_period', $period)->where('deferred_amount', '>', 0)->get() as $v) {
+                $deductions[] = ['key' => 'penalty', 'name' => 'جزاء مخالفة مُرحّل — '.Lookup::name('violation_types', $v->type), 'amount' => (float) $v->deferred_amount, 'ref' => $v->id, 'carried' => true];
+            }
+        }
         // social insurance on the contributory wage (basic + housing of the period, capped)
         $g = self::gosiFor($e, $period);
         $gosi = null;
@@ -334,6 +340,18 @@ class PayrollService
                     $dd['name'] .= ' (خُفّض القسط ليبقى مجموع الحسومات ≤ نصف الأجر — §42؛ يُرحَّل الفرق '.number_format($cut, 2).' بعد آخر قسط)';
                     $dd['deferred'] = $cut;
                     $deferrals[] = ['ref' => $dd['ref'], 'scheduled' => $dd['scheduled'], 'deducted' => $dd['amount'], 'deferred' => $cut];
+                    $excess -= $cut;
+                }
+            }
+            unset($dd);
+            // still above half the wage after the instalments: fines are reduced next and the rest is carried to the
+            // following month (never forgiven, never deducted beyond the legal limit)
+            foreach ($deductions as &$dd) {
+                if ($dd['key'] === 'penalty' && $excess > 0.009) {
+                    $cut = round(min($excess, $dd['amount']), 2);
+                    $dd['amount'] = round($dd['amount'] - $cut, 2);
+                    $dd['name'] .= ' (يُرحَّل '.number_format($cut, 2).' للشهر التالي — نصف الأجر §41)';
+                    $deferrals[] = ['ref' => $dd['ref'], 'kind' => 'penalty', 'deferred' => $cut];
                     $excess -= $cut;
                 }
             }

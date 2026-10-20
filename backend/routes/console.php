@@ -17,3 +17,5 @@ Schedule::command('hc:policy-reminders')->dailyAt('07:15');
 // Policy audit (payroll / custody): §44 overdue cash-custody settlements, §46 monthly reconciliation
 Schedule::command('hc:custody-overdue')->dailyAt('07:20');
 Schedule::command('hc:finance-reconciliation')->monthlyOn(1, '08:00');
+// §116: periodic access-rights review (every accessReviewDays days)
+Schedule::command('hc:access-review')->dailyAt('08:10');

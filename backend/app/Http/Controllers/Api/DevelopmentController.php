@@ -125,8 +125,12 @@ class DevelopmentController extends Controller
     public function complete(Request $request, DevRecord $record)
     {
         abort_unless($record->employee_id === $request->user()->employee_id && $record->status === 'planned', 403);
+        // §81: a program the employee was nominated for ends with a summary of what was learned and how it will be applied
+        $d = $request->validate(['summary' => [$record->source === 'assigned' ? 'required' : 'nullable', 'string', 'min:30', 'max:4000']],
+            ['summary.required' => 'اكتب ملخص ما تعلمته والتطبيق المتوقع في عملك (§81)', 'summary.min' => 'الملخص قصير — 30 حرفًا على الأقل']);
         $path = $request->file('certificate')?->store('dev/'.now()->format('Y'), 'local');
-        $record->update(['status' => 'pending', 'certificate_path' => $path ?? $record->certificate_path, 'to' => $record->to ?? now()->toDateString()]);
+        $record->update(['status' => 'pending', 'certificate_path' => $path ?? $record->certificate_path, 'to' => $record->to ?? now()->toDateString()]
+            + (! empty($d['summary']) ? ['summary' => $d['summary'], 'summary_at' => now()] : []));
         $mgr = $record->employee->manager_id ? User::where('employee_id', $record->employee->manager_id)->where('active', true)->value('id') : null;
         Audit::notify($mgr ? [$mgr] : Access::hrUsersFor($record->employee->company_id, 'DEV'), 'إثبات تطوير بانتظار اعتمادك', $record->employee->name.' — '.$record->program, 'approval', ['screen' => 'development']);
 
@@ -155,7 +159,12 @@ class DevelopmentController extends Controller
 
     private function row(DevRecord $r): array
     {
-        return $r->only('id', 'program', 'provider', 'kind', 'activity', 'points', 'points_month', 'hours', 'cost', 'source', 'status', 'notes', 'applied_note', 'verified_at') + ['from' => $r->from?->format('Y-m-d'), 'to' => $r->to?->format('Y-m-d')] + [
+        $sumDays = (int) \App\Services\Settings::get('trainingSummaryDays', null, 3);
+        $due = $r->source === 'assigned' && $r->to ? \App\Services\WorkCalendar::addDays(null, $r->to, $sumDays)->toDateString() : null;
+
+        return $r->only('id', 'program', 'provider', 'kind', 'activity', 'points', 'points_month', 'hours', 'cost', 'source', 'status', 'notes', 'applied_note', 'verified_at', 'summary') + ['from' => $r->from?->format('Y-m-d'), 'to' => $r->to?->format('Y-m-d')] + [
+            // §81: summary due 3 working days after the program ends
+            'summary_due' => $due, 'summary_late' => $due && (! $r->summary_at ? now()->toDateString() > $due : $r->summary_at->toDateString() > $due),
             'status_label' => DevRecord::STATUSES[$r->status] ?? $r->status, 'has_certificate' => (bool) $r->certificate_path, 'certificate_path' => $r->certificate_path,
             'employee' => $r->relationLoaded('employee') ? $r->employee?->only('id', 'name', 'emp_no', 'manager_id') : null, 'company' => $r->relationLoaded('employee') && $r->employee?->relationLoaded('company') ? $r->employee->company?->name : null,
         ];

@@ -30,13 +30,50 @@
       <div v-if="!mine?.records.length" class="empty"><div class="ic"><Icon name="training" :size="40" :stroke="1.4" /></div>لا سجلات تطوير بعد</div>
       <div v-dt v-else class="tw"><table><thead><tr><th>النشاط</th><th>النوع</th><th>الفترة</th><th>الساعات</th><th>النقاط</th><th>الإثبات</th><th>الحالة</th><th /></tr></thead>
         <tbody><tr v-for="r in mine.records" :key="r.id">
-          <td><b>{{ r.program }}</b><div class="tiny muted">{{ r.provider }}<span v-if="r.notes"> · {{ r.notes }}</span></div><div v-if="r.applied_note" class="tiny muted">التطبيق في العمل: {{ r.applied_note }}</div></td><td class="small">{{ actName(r.activity) }}</td><td class="num small">{{ fmtD(r.from) }} → {{ fmtD(r.to) }}</td><td>{{ r.hours }}</td>
+          <td><b>{{ r.program }}</b><div class="tiny muted">{{ r.provider }}<span v-if="r.notes"> · {{ r.notes }}</span></div><div v-if="r.applied_note" class="tiny muted">التطبيق في العمل: {{ r.applied_note }}</div><div v-if="r.summary" class="tiny muted">الملخص: {{ r.summary }}</div><span v-if="r.summary_late" class="pill bad tiny" title="يُقدَّم ملخص ما تعلّمته خلال 3 أيام عمل من انتهاء البرنامج (§81)">تأخر الملخص</span></td><td class="small">{{ actName(r.activity) }}</td><td class="num small">{{ fmtD(r.from) }} → {{ fmtD(r.to) }}</td><td>{{ r.hours }}</td>
           <td class="num"><b v-if="r.status === 'verified'">{{ r.points }}</b><span v-else class="muted">{{ r.points || '—' }}</span><div v-if="r.points_month" class="tiny muted">{{ r.points_month }}</div></td>
           <td><a v-if="r.certificate_path" href="#" class="tiny" @click.prevent="fileUrl(r.certificate_path)"><Icon name="download" :size="12" /> عرض</a><span v-else class="tiny muted">—</span></td>
           <td><span class="pill" :class="COLOR[r.status]">{{ r.status_label }}</span></td>
           <td><button v-if="r.status === 'planned'" class="btn okb xs" @click="complete(r)">أكملته — ارفع الإثبات</button></td>
         </tr></tbody></table></div>
     </div>
+  </template>
+
+  <template v-else-if="tab === 'plan' && plan">
+    <div class="card">
+      <div class="row mb" style="gap:8px;align-items:center"><h3 style="margin:0">خطة التطوير الفردية</h3><input v-model.number="planYear" type="number" class="in" style="width:100px" @change="load" /><span class="pill" :class="PLAN_COLOR[plan.status]">{{ plan.status_label }}</span></div>
+      <p class="small muted">تُعد في بداية السنة وتتفق عليها مع مشرفك المباشر: الفجوات والمسارات المستهدفة، ونشاط تطويري واحد على الأقل كل شهر مع تطبيقه ودليله (§77).</p>
+      <div v-if="plan.manager_note" class="notice warn small">ملاحظة المشرف: {{ plan.manager_note }}</div>
+      <div class="fg"><label>الفجوات والمهارات المستهدفة *</label><textarea v-model="plan.gaps" class="in" rows="3" :disabled="plan.status === 'approved'" /></div>
+      <div class="tw"><table><thead><tr><th>النشاط أو المسار</th><th style="width:140px">الشهر</th><th>كيف ستطبّقه</th><th /></tr></thead>
+        <tbody><tr v-for="(t, i) in plan.tracks" :key="i">
+          <td><input v-model="t.title" class="in" :disabled="plan.status === 'approved'" placeholder="مثال: دورة إدارة المشاريع" /></td>
+          <td><input v-model="t.month" type="month" class="in" :disabled="plan.status === 'approved'" /></td>
+          <td><input v-model="t.apply" class="in" :disabled="plan.status === 'approved'" /></td>
+          <td><button v-if="plan.status !== 'approved'" class="btn ghost xs" @click="plan.tracks.splice(i, 1)"><Icon name="x" :size="13" /></button></td>
+        </tr></tbody></table></div>
+      <div v-if="plan.status !== 'approved'" class="row mt" style="gap:8px">
+        <button class="btn ghost sm" @click="plan.tracks.push({ title: '', month: '', apply: '' })"><Icon name="plus" :size="14" /> نشاط</button><span class="spacer" />
+        <button class="btn sec sm" :disabled="busy" @click="savePlan(false)">حفظ مسودة</button><button class="btn pri sm" :class="{ loading: busy }" :disabled="busy" @click="savePlan(true)">إرسال لاعتماد المشرف</button>
+      </div>
+    </div>
+  </template>
+
+  <template v-else-if="tab === 'plans'">
+    <div class="card">
+      <div class="row mb" style="gap:8px;align-items:center"><h3 style="margin:0">خطط التطوير السنوية</h3><input v-model.number="planYear" type="number" class="in" style="width:100px" @change="load" /></div>
+      <div v-if="!plans.length" class="empty">لا موظفين في نطاقك</div>
+      <div v-else class="tw"><table><thead><tr><th>الموظف</th><th>الحالة</th><th>الأنشطة</th><th /></tr></thead>
+        <tbody><tr v-for="p in plans" :key="p.employee.id"><td><b>{{ p.employee.name }}</b><div class="tiny muted">{{ p.employee.emp_no }}</div></td>
+          <td><span class="pill" :class="PLAN_COLOR[p.status]">{{ p.status_label }}</span></td><td class="num">{{ p.tracks?.length || 0 }}</td>
+          <td class="row" style="gap:4px;flex-wrap:nowrap"><button v-if="p.id" class="btn ghost xs" @click="viewPlan = p">عرض</button>
+            <template v-if="p.status === 'submitted'"><button class="btn okb xs" @click="decidePlan(p, 'approve')">اعتماد</button><button class="btn ghost xs" @click="decidePlan(p, 'return')">إعادة</button></template></td></tr></tbody></table></div>
+    </div>
+    <Modal v-if="viewPlan" :title="`خطة ${viewPlan.employee?.name} — ${viewPlan.year}`" @close="viewPlan = null">
+      <p class="small"><b>الفجوات:</b> {{ viewPlan.gaps }}</p>
+      <ul class="small"><li v-for="(t, i) in viewPlan.tracks" :key="i"><b>{{ t.title }}</b> <span v-if="t.month" class="muted">({{ t.month }})</span><span v-if="t.apply"> — {{ t.apply }}</span></li></ul>
+      <template #foot><button class="btn sec" @click="viewPlan = null">إغلاق</button></template>
+    </Modal>
   </template>
 
   <template v-else-if="tab === 'board'">
@@ -108,7 +145,24 @@ import { money } from '../utils'
 const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
 const COLOR = { planned: 'info', pending: 'warn', verified: 'ok', rejected: 'bad' }
-const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.isApprover && ['all', 'سجلات الفريق'], auth.isApprover && ['board', 'لوحة التطوير ونجم الربع']].filter(Boolean))
+const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.emp && ['plan', 'خطتي السنوية'], auth.isApprover && ['plans', 'خطط الفريق'], auth.isApprover && ['all', 'سجلات الفريق'], auth.isApprover && ['board', 'لوحة التطوير ونجم الربع']].filter(Boolean))
+// §77: individual development plan for the year, agreed with the direct manager
+const plan = ref(null); const plans = ref([]); const planYear = ref(new Date().getFullYear())
+const PLAN_COLOR = { none: 'gray', draft: 'info', submitted: 'warn', approved: 'ok', returned: 'bad' }
+async function savePlan(submit) {
+  const p = plan.value
+  if (!p.gaps?.trim()) return ui.toast('اكتب الفجوات أو المهارات المستهدفة', 'warn')
+  const tracks = (p.tracks || []).filter((t) => t.title?.trim())
+  if (!tracks.length) return ui.toast('أضف نشاطًا تطويريًا واحدًا على الأقل', 'warn')
+  busy.value = true
+  try { plan.value = await api.post('/dev-plans', { year: planYear.value, gaps: p.gaps, tracks, submit }); ui.toast(submit ? 'أُرسلت الخطة لاعتماد مشرفك' : 'حُفظت المسودة', 'ok') } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') } finally { busy.value = false }
+}
+async function decidePlan(p, action) {
+  const note = action === 'return' ? await promptBox('سبب الإعادة للتعديل:') : null
+  if (action === 'return' && !note) return
+  await api.post(`/dev-plans/${p.id}/decide`, { action, note }); ui.toast(action === 'approve' ? 'اعتُمدت الخطة' : 'أُعيدت الخطة', 'ok'); load()
+}
+const viewPlan = ref(null)
 const tab = ref(auth.emp ? 'mine' : 'all')
 const board = ref(null); const boardPeriod = ref(new Date().toISOString().slice(0, 7))
 const mine = ref(null); const all = ref([]); const status = ref(''); const f = ref(null); const busy = ref(false); const emps = ref([])
@@ -119,6 +173,8 @@ const activities = computed(() => mine.value?.activities || auth.meta?.lookups?.
 const actName = (c) => activities.value.find((a) => a.code === c)?.name || c || '—'
 const canVerify = (r) => auth.has('super') || auth.isHr || (auth.emp && r.employee?.manager_id === auth.emp.id)
 async function load() {
+  if (tab.value === 'plan') { const p = await api.get('/dev-plans/mine', { params: { year: planYear.value } }); if (!p.tracks?.length) p.tracks = [{ title: '', month: '', apply: '' }]; plan.value = p; return }
+  if (tab.value === 'plans') { plans.value = await api.get('/dev-plans', { params: { year: planYear.value } }); return }
   if (tab.value === 'mine') mine.value = await api.get('/development/mine')
   else if (tab.value === 'board') board.value = await api.get('/development', { params: { board: 1, period: boardPeriod.value, company_id: ui.company || undefined } })
   else all.value = await api.get('/development', { params: { status: status.value || undefined } })
@@ -137,8 +193,13 @@ async function save() {
   try { await api.post('/development', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); ui.toast('تم الحفظ وأُرسل للاعتماد', 'ok'); f.value = null; load() } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') } finally { busy.value = false }
 }
 async function complete(r) {
+  let summary = null
+  if (r.source === 'assigned') { // §81: what you learned and how you will apply it, within 3 working days of the end
+    summary = await promptBox('ملخص ما تعلمته والتطبيق المتوقع في عملك (§81):', { multiline: true, confirmText: 'التالي: رفع الإثبات' })
+    if (!summary) return
+  }
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.pdf,.jpg,.jpeg,.png,.doc,.docx'
-  inp.onchange = async () => { const fd = new FormData(); if (inp.files[0]) fd.append('certificate', inp.files[0]); await api.post(`/development/${r.id}/complete`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); ui.toast('أُرسل الإثبات لاعتماد مشرفك', 'ok'); load() }
+  inp.onchange = async () => { const fd = new FormData(); if (inp.files[0]) fd.append('certificate', inp.files[0]); if (summary) fd.append('summary', summary); await api.post(`/development/${r.id}/complete`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); ui.toast('أُرسل الإثبات لاعتماد مشرفك', 'ok'); load() }
   inp.click()
 }
 async function verify(r, decision) { const note = decision === 'rejected' ? await promptBox('سبب الرفض:') : null; if (decision === 'rejected' && !note) return; await api.post(`/development/${r.id}/verify`, { decision, note }); ui.toast('تم', 'ok'); load() }

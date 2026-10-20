@@ -297,6 +297,12 @@ class PayrollController extends Controller
                 $managers[$mgr][] = $l['employee_name'];
             }
             $this->settleAdvances($run, $l);
+            // §41–42: a fine cut by the half-wage rule is carried to the next month on the violation itself
+            foreach ($l['advance_deferrals'] ?? [] as $df) {
+                if (($df['kind'] ?? null) === 'penalty' && ! empty($df['ref']) && ($v = \App\Models\Violation::find($df['ref']))) {
+                    $v->forceFill(['deferred_amount' => $df['deferred'], 'deferred_period' => \Illuminate\Support\Carbon::parse($run->period.'-01')->addMonthNoOverflow()->format('Y-m')])->save();
+                }
+            }
         }
         foreach ($managers as $mgrEmp => $names) { // for information only
             Audit::notify(\App\Models\User::where('employee_id', $mgrEmp)->value('id'), "اعتُمد مسير رواتب {$run->period} — للعلم",
@@ -311,7 +317,7 @@ class PayrollController extends Controller
     private function settleAdvances(PayrollRun $run, array $l): void
     {
         $deducted = collect($l['deductions'])->where('key', 'advance')->filter(fn ($x) => ! empty($x['ref']))->groupBy('ref')->map(fn ($g) => (float) $g->sum('amount'));
-        $ids = $deducted->keys()->merge(collect($l['advance_deferrals'] ?? [])->pluck('ref'))->unique()->filter();
+        $ids = $deducted->keys()->merge(collect($l['advance_deferrals'] ?? [])->filter(fn ($x) => ($x['kind'] ?? 'advance') === 'advance')->pluck('ref'))->unique()->filter();
         foreach ($ids as $id) {
             $adv = Advance::find($id);
             if (! $adv) {

@@ -115,7 +115,8 @@ class EmployeeController extends Controller
             $b = Company::with('tier')->find($e->company_id)->tier?->benefits ?? [];
             $comps = [['key' => 'basic', 'name' => 'الأجر الأساسي', 'amount' => $basic, 'source' => 'contract']];
             $comps[] = ['key' => 'housing', 'name' => 'بدل السكن', 'amount' => round($basic * ($b['housingPct'] ?? 0) / 100, 2), 'source' => 'tier'];
-            $comps[] = ['key' => 'transport', 'name' => 'بدل النقل', 'amount' => $b['transport'] ?? 0, 'source' => 'tier'];
+            // §39: transport = 10% of the basic wage, at least 350 a month (tier values)
+            $comps[] = ['key' => 'transport', 'name' => 'بدل النقل', 'amount' => max(round($basic * (float) ($b['transportPct'] ?? 0) / 100, 2), (float) ($b['transportMin'] ?? $b['transport'] ?? 0)), 'source' => 'tier'];
             if (! empty($b['comm'])) {
                 $comps[] = ['key' => 'comm', 'name' => 'بدل الاتصال', 'amount' => $b['comm'], 'source' => 'tier'];
             }
@@ -203,6 +204,18 @@ class EmployeeController extends Controller
             'name' => 'required|string|max:150', 'name_en' => 'nullable|string|max:150',
             'company_id' => 'required|exists:companies,id', 'job_title_id' => 'nullable|exists:job_titles,id', 'job_level' => 'nullable|integer|between:1,5',
             'religion' => 'nullable|in:muslim,other', 'probation_days' => 'nullable|integer|min:0|max:180',
+            // §13: when the employee serves several companies, the allocation of his service totals 100%
+            'service_allocation' => ['nullable', 'array', 'max:12', function ($a, $v, $fail) {
+                $v = array_filter((array) $v, fn ($x) => (float) $x > 0);
+                if ($v && abs(array_sum(array_map('floatval', $v)) - 100) > 0.01) {
+                    $fail('مجموع نسب تخصيص الخدمة بين الشركات يجب أن يساوي 100% (§13)');
+                }
+                foreach (array_keys($v) as $cid) {
+                    if (! \App\Models\Company::whereKey($cid)->exists()) {
+                        $fail('شركة غير معروفة في نسب التخصيص');
+                    }
+                }
+            }],
             'manager_id' => ['nullable', 'exists:employees,id', Rule::notIn([$e?->id])],
             'dept' => 'nullable|string|max:100', 'hire_date' => 'required|date',
             'contract_type' => ['required', Rule::exists('lookups', 'code')->where('group', 'contract_types')->where('active', true)], 'part_ratio' => 'nullable|numeric|min:0.1|max:1',

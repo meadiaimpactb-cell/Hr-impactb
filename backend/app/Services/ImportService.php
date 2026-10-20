@@ -199,7 +199,7 @@ class ImportService
                     'punch_required' => self::yes($d['punch'] ?? 'نعم'), 'eosb_saudi' => self::yes($d['eosb_saudi'] ?? 'نعم'), 'status' => 'active', 'advances_enabled' => true]);
                 $b = $company->tier?->benefits ?? [];
                 $basic = (float) $d['basic'];
-                $comps = [['key' => 'basic', 'name' => 'الأجر الأساسي', 'amount' => $basic, 'source' => 'import'], ['key' => 'housing', 'name' => 'بدل السكن', 'amount' => round($basic * ($b['housingPct'] ?? 0) / 100, 2), 'source' => 'tier'], ['key' => 'transport', 'name' => 'بدل النقل', 'amount' => $b['transport'] ?? 0, 'source' => 'tier']];
+                $comps = [['key' => 'basic', 'name' => 'الأجر الأساسي', 'amount' => $basic, 'source' => 'import'], ['key' => 'housing', 'name' => 'بدل السكن', 'amount' => round($basic * ($b['housingPct'] ?? 0) / 100, 2), 'source' => 'tier'], ['key' => 'transport', 'name' => 'بدل النقل', 'amount' => max(round($basic * (float) ($b['transportPct'] ?? 0) / 100, 2), (float) ($b['transportMin'] ?? $b['transport'] ?? 0)), 'source' => 'tier']];
                 if (! empty($b['comm'])) {
                     $comps[] = ['key' => 'comm', 'name' => 'بدل الاتصال', 'amount' => $b['comm'], 'source' => 'tier'];
                 }

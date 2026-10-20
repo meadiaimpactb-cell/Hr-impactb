@@ -28,6 +28,18 @@
         <F label="تاريخ الالتحاق" req k="hire_date" type="date" />
         <div class="fg" title="يحدد فئة التأمين الطبي والبدل اليومي للرحلات (المواد 5 و63 و67)"><label>المستوى الوظيفي <span class="req">*</span></label><select v-model.number="f.job_level" class="in"><option v-for="(l, k) in JOB_LEVELS" :key="k" :value="Number(k)">{{ l }}</option></select></div>
         <div class="fg" title="مدة التجربة المنصوص عليها في العقد (المادة 20)"><label>مدة التجربة (يوم)</label><input v-model.number="f.probation_days" type="number" min="0" max="180" class="in" /></div>
+        <div class="fg" style="grid-column:1/-1">
+          <label class="chk"><input v-model="multiCo" type="checkbox" /> يخدم أكثر من شركة في المجموعة <span class="tiny muted">(المادة 13: نسب التخصيص مجموعها 100%، والأجر لا يتكرر)</span></label>
+          <div v-if="multiCo" class="mt">
+            <div v-for="(row, i) in alloc" :key="i" class="row" style="gap:8px;margin-bottom:6px;flex-wrap:nowrap">
+              <select v-model.number="row.company_id" class="in" style="flex:1"><option :value="null">— الشركة —</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+              <input v-model.number="row.pct" type="number" min="1" max="100" class="in" style="width:110px" placeholder="%" />
+              <button type="button" class="btn ghost xs" title="حذف" @click="alloc.splice(i, 1)"><Icon name="x" :size="14" /></button>
+            </div>
+            <div class="row" style="gap:10px;align-items:center"><button type="button" class="btn ghost xs" @click="alloc.push({ company_id: null, pct: null })"><Icon name="plus" :size="13" /> شركة</button>
+              <span class="tiny" :class="allocSum === 100 ? 'ok' : 'bad'">المجموع {{ allocSum }}%</span></div>
+          </div>
+        </div>
         <div class="fg"><label>نوع التعاقد</label><SearchSelect v-model="f.contract_type" :options="opts.contracts" :error="!!errors.contract_type" :add-label="canAdd ? 'إضافة نوع تعاقد' : ''" @add="addContract" /></div>
         <F v-if="f.contract_type === 'part'" label="نسبة الدوام (0.5 = نصف)" k="part_ratio" type="number" />
         <div class="fg" style="grid-column:1/-1">
@@ -134,6 +146,9 @@ const ready = ref(false)
 const busy = ref(false)
 const errors = ref({})
 const JOB_LEVELS = { 1: '1 — الرئيس التنفيذي', 2: '2 — القيادات ومديرو الإدارات', 3: '3 — مديرو الأقسام والمشاريع', 4: '4 — الأخصائيون والمنسقون والمهنيون والإداريون', 5: '5 — التشغيليون والمساندة' }
+const multiCo = ref(false)
+const alloc = ref([])
+const allocSum = computed(() => alloc.value.reduce((s, r) => s + (Number(r.pct) || 0), 0))
 const f = reactive({ job_level: 4, probation_days: 180, religion: null, id_type: 'national', contract_type: 'full', punch_required: true, punch_anywhere: false, geo_tolerance: 0, email_enabled: true, eosb_saudi: true, advances_enabled: true, flex_enabled: false, daily_note_required: false, week_pattern: '5', gender: 'm', create_user: true, location_ids: [], country: 'SA', nationality: 'SA', phone: '', email: '', dept: null })
 const opts = reactive({ companies: [], jobs: [], emps: [], depts: [], contracts: [], schedules: [], locations: [] })
 // working hours: the schedule's hours are shown read-only; "customise" copies them into f.work_hours which then wins
@@ -188,6 +203,8 @@ onMounted(async () => {
     const r = await api.get(`/employees/${props.id}`)
     Object.assign(f, r.employee, { location_ids: r.employee.locations.map((l) => l.id), phone: r.employee.phone || '', email: r.employee.email || '' })
     customHours.value = !!(r.employee.work_hours && Object.keys(r.employee.work_hours).length)
+    alloc.value = Object.entries(r.employee.service_allocation || {}).map(([k, v]) => ({ company_id: Number(k), pct: Number(v) }))
+    multiCo.value = alloc.value.length > 1
   } else {
     f.schedule_id = auth.meta.schedules[0]?.id
     f.hire_date = today()
@@ -269,6 +286,8 @@ async function save() {
   const body = Object.fromEntries(keys.map((k) => [k, f[k] === '' ? null : f[k]]))
   body.allowances = (f.allowances || []).filter((a) => a.name?.trim() && Number(a.amount) > 0)
   body.work_hours = customHours.value && f.work_hours && Object.keys(f.work_hours).length ? f.work_hours : null
+  body.service_allocation = multiCo.value ? Object.fromEntries(alloc.value.filter((r) => r.company_id && r.pct > 0).map((r) => [r.company_id, r.pct])) : null
+  if (multiCo.value && allocSum.value !== 100) { busy.value = false; return ui.toast('مجموع نسب التخصيص يجب أن يساوي 100%', 'warn') }
   try {
     const r = props.id ? await api.put(`/employees/${props.id}`, body) : await api.post('/employees', body)
     ui.toast(props.id ? 'تم الحفظ' : 'أُضيف الموظف', 'ok')
