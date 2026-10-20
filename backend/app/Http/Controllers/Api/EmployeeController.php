@@ -224,8 +224,8 @@ class EmployeeController extends Controller
             'country' => 'nullable|string|size:2', 'nationality' => 'nullable|string|max:60', 'id_type' => 'nullable|in:national,iqama,passport',
             'national_id' => ['nullable', 'string', 'max:20', Rule::unique('employees', 'national_id')->ignore($e?->id)->whereNull('deleted_at'), function ($a, $v, $fail) use ($r) {
                 $type = $r->input('id_type', 'national');
-                if ($type === 'passport' ? ! preg_match('/^[A-Za-z0-9]{5,20}$/', $v) : ! preg_match('/^[12]\d{9}$/', $v)) {
-                    $fail($type === 'passport' ? 'رقم الجواز: أحرف وأرقام (5–20)' : 'رقم الهوية أو الإقامة: 10 أرقام يبدأ بـ 1 أو 2');
+                if ($type === 'passport' ? ! preg_match('/^[A-Za-z0-9]{5,20}$/', $v) : ! preg_match('/^\d{10}$/', $v)) {
+                    $fail($type === 'passport' ? 'رقم الجواز: أحرف وأرقام (5–20)' : 'رقم الهوية أو الإقامة: 10 أرقام');
                 }
             }],
             'birth_date' => 'nullable|date', 'gender' => 'nullable|in:m,f', 'phone' => ['nullable', 'regex:/^\+?\d{7,15}$/'],

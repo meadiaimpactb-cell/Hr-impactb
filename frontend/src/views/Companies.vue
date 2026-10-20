@@ -127,6 +127,7 @@
           <input ref="logoInput" type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style="display:none" @change="pickLogo" />
           <button type="button" class="btn sec xs" @click="$refs.logoInput.click()"><Icon name="upload" :size="14" /> {{ form.logo_url || logoFile ? 'تغيير' : 'رفع شعار' }}</button>
           <button v-if="form.id && form.logo_url && !logoFile" type="button" class="btn ghost xs" title="إزالة الشعار" @click="removeLogo"><Icon name="trash" :size="14" /></button>
+          <button v-if="logoPreview || form.logo_url" type="button" class="btn ghost xs" title="يقترح اللونين الأساسي والثانوي من ألوان الشعار" @click="suggestColors"><Icon name="palette" :size="14" /> ألوان من الشعار</button>
         </div>
       </div>
     </div>
@@ -139,6 +140,7 @@
 </template>
 
 <script setup>
+import { logoColors } from '../lib/logoColors'
 import { alertBox, confirmBox, promptBox } from '../dialog'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -275,6 +277,15 @@ function pickLogo(ev) {
   const f = ev.target.files?.[0]; if (!f) return
   if (f.size > 2 * 1024 * 1024) { ui.toast('حجم الشعار يتجاوز 2MB', 'warn'); ev.target.value = ''; return }
   logoFile.value = f; logoPreview.value = URL.createObjectURL(f)
+  if (!form.value.color && !form.value.color2) suggestColors() // a new company gets colours matching its logo right away
+}
+async function suggestColors() {
+  try {
+    const c = await logoColors(logoPreview.value || form.value.logo_url)
+    if (!c) return ui.toast('تعذر استخراج ألوان من الشعار', 'warn')
+    form.value.color = c.color; form.value.color2 = c.color2
+    ui.toast('اقتُرح لونان من الشعار — يمكنك تعديلهما', 'ok')
+  } catch { ui.toast('تعذر قراءة الشعار', 'warn') }
 }
 async function removeLogo() {
   if (!await confirmBox('إزالة شعار الشركة؟')) return

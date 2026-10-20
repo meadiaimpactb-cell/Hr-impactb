@@ -60,6 +60,7 @@
   </div>
   <NewRequest v-if="newReq" @close="newReq = false" />
   <PolicyAckGate />
+  <AssistantPanel />
   <!-- Announcements that require acknowledgement block the UI until acknowledged -->
   <div v-if="acks.length" class="mo" style="z-index:calc(var(--z-modal) + 4)">
     <div class="box">
@@ -80,6 +81,7 @@ import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import NewRequest from './NewRequest.vue'
 import PolicyAckGate from './PolicyAckGate.vue'
+import AssistantPanel from './AssistantPanel.vue'
 
 const { t } = useI18n()
 const auth = useAuth()

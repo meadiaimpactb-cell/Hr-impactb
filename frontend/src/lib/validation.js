@@ -57,7 +57,7 @@ export const passwordConfirmField = str('تأكيد كلمة المرور مطل
 export const withConfirmation = (shape) => z.object(shape).refine((v) => v.password === v.password_confirmation, { message: 'كلمتا المرور غير متطابقتين', path: ['password_confirmation'] })
 
 /** Saudi national ID / iqama: 10 digits starting with 1 (citizen) or 2 (resident). */
-export const saudiIdField = z.string().trim().regex(/^[12]\d{9}$/, 'رقم الهوية/الإقامة 10 أرقام ويبدأ بـ 1 أو 2')
+export const saudiIdField = z.string().trim().regex(/^\d{10}$/, 'رقم الهوية/الإقامة 10 أرقام')
 /** Any national ID (digits only) — used for non-Saudi records. */
 export const nationalIdField = z.string().trim().regex(/^\d{5,20}$/, 'رقم الهوية أرقام فقط')
 export const commercialRegField = z.string().trim().regex(/^\d{10}$/, 'السجل التجاري يجب أن يكون 10 أرقام')

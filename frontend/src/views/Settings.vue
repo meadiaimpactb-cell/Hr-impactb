@@ -96,8 +96,8 @@ async function save() {
   if (x.type === 'list') value = x.text.split('\n').map((s) => s.trim()).filter(Boolean).map((s) => (s !== '' && !isNaN(s) ? Number(s) : s))
   if (x.type === 'json') value = Object.fromEntries(x.text.split('\n').map((l) => l.split('=')).filter((p) => p.length >= 2).map(([k, ...v]) => { const raw = v.join('=').trim(); try { return [k.trim(), raw.startsWith('{') || raw.startsWith('[') ? JSON.parse(raw) : raw] } catch { return [k.trim(), raw] } }))
   if (x.type === 'bool') value = !!value
-  await api.put('/settings', { key: x.key, value, company_id: x.company_id, reason: x.reason })
-  ui.toast('حُفظت القاعدة بنسخة جديدة', 'ok')
+  const r = await api.put('/settings', { key: x.key, value, company_id: x.company_id, reason: x.reason })
+  ui.toast(r?.pending_approval ? r.message : 'حُفظت القاعدة بنسخة جديدة', r?.pending_approval ? 'info' : 'ok', r?.pending_approval ? 6000 : undefined)
   f.value = null
   load()
   auth.loadMeta()

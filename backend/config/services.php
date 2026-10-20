@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    // In-platform assistant (owner's notes): Claude with read-only tools, within each user's permissions
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+    ],
+
 ];

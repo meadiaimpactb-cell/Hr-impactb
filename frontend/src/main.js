@@ -21,3 +21,5 @@ const app = createApp(App)
 // a lifecycle hook that hit an API refusal is not a crash (the toast already explains it); anything else is still reported
 app.config.errorHandler = (err, _vm, info) => { if (err && [401, 403, 404, 422].includes(err.status)) return; console.error(err, info) }
 app.component('Icon', Icon).component('Avatar', Avatar).component('DateInput', DateInput).directive('dt', vDt).use(createPinia()).use(router).use(i18n).mount('#app')
+// «؟» explanations next to fields, headings and columns, for every user (owner's notes)
+import('./lib/helpTips.js').then((m) => m.startHelpTips()).catch(() => {})

@@ -266,7 +266,7 @@ const empSchema = z.object({
 }).superRefine((v, ctx) => {
   if (f.email_enabled && f.create_user && !v.email) ctx.addIssue({ code: 'custom', path: ['email'], message: 'البريد الرسمي مطلوب لإرسال دعوة الدخول — أو ألغِ تفعيل البريد' })
   if (f.national_id && f.id_type === 'passport' && !/^[A-Z0-9]{5,20}$/.test(f.national_id)) ctx.addIssue({ code: 'custom', path: ['national_id'], message: 'رقم الجواز: أحرف وأرقام (5–20)' })
-  else if (f.national_id && f.id_type !== 'passport' && !/^[12]\d{9}$/.test(f.national_id)) ctx.addIssue({ code: 'custom', path: ['national_id'], message: 'رقم الهوية أو الإقامة: 10 أرقام يبدأ بـ 1 أو 2' })
+  else if (f.national_id && f.id_type !== 'passport' && !/^\d{10}$/.test(f.national_id)) ctx.addIssue({ code: 'custom', path: ['national_id'], message: 'رقم الهوية أو الإقامة: 10 أرقام' })
 })
 async function nextNo() {
   try { f.emp_no = (await api.get('/employees/next-number', { params: { company_id: f.company_id || undefined } })).emp_no } catch { /* keep manual */ }

@@ -47,6 +47,9 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('auth/me', [AuthController::class, 'me']);
+        // in-platform assistant (owner's notes)
+        Route::get('assistant', [\App\Http\Controllers\Api\AssistantController::class, 'status']);
+        Route::post('assistant', [\App\Http\Controllers\Api\AssistantController::class, 'ask'])->middleware('throttle:30,1');
         Route::post('users/{user}/photo', [\App\Http\Controllers\Api\ProfilePhotoController::class, 'store']);
         Route::delete('users/{user}/photo', [\App\Http\Controllers\Api\ProfilePhotoController::class, 'destroy']);
         Route::post('auth/logout', [AuthController::class, 'logout']);
@@ -91,6 +94,7 @@ Route::prefix('v1')->group(function () {
         // policy audit: attendance/recruitment
         Route::post('attendance/{record}/excuse', [AttendanceController::class, 'excuse'])->where('record', '[0-9]+');
         Route::post('attendance/paper', [AttendanceController::class, 'paper']);
+        Route::post('attendance/{record}/note', [AttendanceController::class, 'note'])->where('record', '[0-9]+');
         Route::get('attendance/corrections', [AttendanceController::class, 'corrections']);
         Route::get('attendance/week', [AttendanceController::class, 'week']);
         Route::post('recruitment/openings/{opening}/decide', [RecruitmentController::class, 'decideOpening']);

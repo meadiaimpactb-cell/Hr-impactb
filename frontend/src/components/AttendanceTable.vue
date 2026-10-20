@@ -23,7 +23,10 @@
         <span v-else class="pill ok">حاضر</span>
         <span v-if="r.pending" class="pill warn">للمراجعة</span><span v-if="r.corrected" class="pill info">مصحح</span><span v-if="r.geo_fail || r.out_geo_fail" class="pill bad">خارج النطاق</span>
       </td>
-      <td class="small">{{ r.note ? r.note.slice(0, 60) : '—' }}</td>
+      <td class="small" style="max-width:280px">
+        <a v-if="r.note" href="#" class="note-link" :title="r.note" @click.prevent="showNote(r)">{{ r.note.length > 60 ? r.note.slice(0, 60) + '…' : r.note }}</a><span v-else>—</span>
+        <button v-if="editable && isToday(r)" class="btn ghost xs" title="تعديل منجز اليوم" @click="editNote(r)"><Icon name="edit" :size="12" /></button>
+      </td>
       <td v-if="$slots.actions"><slot name="actions" :r="r" /></td>
     </tr></tbody>
   </table></div>
@@ -31,6 +34,18 @@
 
 <script setup>
 const dist = (m) => (m >= 1000 ? (m / 1000).toFixed(1) + ' كم' : Math.round(m) + ' م')
-import { DAYS_AR, fmtT } from '../utils'
-defineProps({ records: { type: Array, default: () => [] }, grace: { type: Number, default: 0 } })
+import { DAYS_AR, fmtT, fmtD } from '../utils'
+import api from '../api'
+import { alertBox, promptBox } from '../dialog'
+// editable: the employee's own table — today's daily achievement can be rewritten (§33)
+const props = defineProps({ records: { type: Array, default: () => [] }, grace: { type: Number, default: 0 }, editable: Boolean })
+const emit = defineEmits(['changed'])
+const isToday = (r) => String(r.work_date).slice(0, 10) === new Date().toLocaleDateString('en-CA')
+function showNote(r) { alertBox(r.note, { title: 'المنجز اليومي — ' + fmtD(r.work_date), icon: 'info' }) }
+async function editNote(r) {
+  const note = await promptBox('المنجز اليومي — اليوم', { value: r.note || '', multiline: true, minLength: 20, confirmText: 'حفظ' })
+  if (!note) return
+  try { const x = await api.post(`/attendance/${r.id}/note`, { note }); r.note = x.note; emit('changed') } catch (e) { alertBox(e.message, { icon: 'error' }) }
+}
+void props
 </script>

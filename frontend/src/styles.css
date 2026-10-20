@@ -326,3 +326,7 @@ body.scroll-locked{position:fixed;inset-inline:0;width:100%;overflow:hidden}
   .page-h .acts .btn{flex:1 1 auto}
 }
 @keyframes sheet{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+/* «؟» help icons (lib/helpTips.js) */
+.hlp{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-inline-start:5px;border-radius:50%;font-size:11px;font-weight:800;line-height:1;cursor:help;vertical-align:middle;background:var(--infobg);color:var(--brand,var(--pri));border:1px solid color-mix(in srgb,var(--brand,var(--pri)) 35%,transparent);user-select:none}
+.hlp:hover,.hlp:focus{background:var(--brand,var(--pri));color:#fff;outline:none}
+@media print{.hlp{display:none}}

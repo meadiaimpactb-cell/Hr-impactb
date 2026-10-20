@@ -29,6 +29,7 @@
 import { useUi } from '../stores/ui'
 import { exportXlsx } from '../excel'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import api from '../api'
 import { useAuth } from '../stores/auth'
@@ -37,6 +38,7 @@ import { csv, curYM, download, today } from '../utils'
 const { t } = useI18n()
 const auth = useAuth()
 const ui = useUi()
+const route = useRoute()
 const catalog = ref([]); const cur = ref(null); const res = ref(null); const busy = ref(false); const company = ref(ui.company || null) // follows the company chosen in the top bar
 const preset = ref('month'); const pickMonth = ref(curYM()); const from = ref(''); const to = ref(today()); const period = ref(curYM())
 const sorted = computed(() => [...catalog.value].sort((a, b) => (b.favorite - a.favorite)))
@@ -50,7 +52,13 @@ function applyPreset() {
   else if (preset.value === 'quarter') { from.value = p(new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1)); to.value = p(d) }
   else if (preset.value === 'year') { from.value = `${d.getFullYear()}-01-01`; to.value = p(d) }
 }
-async function load() { catalog.value = await api.get('/reports-center'); applyPreset() }
+async function load() {
+  catalog.value = await api.get('/reports-center'); applyPreset()
+  // opened from the assistant: /reports-center?key=…&from=…&to=…&period=…
+  const qy = route.query
+  const c = qy.key && catalog.value.find((x) => x.key === qy.key)
+  if (c) { if (qy.from) { preset.value = 'custom'; from.value = qy.from } if (qy.to) to.value = qy.to; if (qy.period) period.value = qy.period; run(c) }
+}
 watch(() => ui.company, (v) => { company.value = v || null; if (cur.value) run(cur.value) })
 async function run(c) { cur.value = c; busy.value = true; try { res.value = await api.get(`/reports-center/${c.key}`, { params: { from: from.value, to: to.value, period: period.value, company_id: company.value || undefined } }) } finally { busy.value = false } }
 async function fav(c) { await api.post(`/reports-center/${c.key}/favorite`); c.favorite = !c.favorite }

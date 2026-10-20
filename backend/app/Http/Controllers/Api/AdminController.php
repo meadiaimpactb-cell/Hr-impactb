@@ -224,6 +224,15 @@ class AdminController extends Controller
         if ($d['value'] === '••••••••') {
             return ['unchanged' => true]; // masked secret sent back untouched
         }
+        // advance ceilings are proposed by HR and approved by the finance manager, then the group CEO (§42, appendix 5)
+        if (in_array($d['key'], ['advanceCapSalaries', 'advanceMinAmount', 'advanceMaxInstallments'], true) && ! $request->user()->hasRole('super')) {
+            $e = $request->user()->employee;
+            abort_unless($e, 422, 'الحساب غير مرتبط بموظف لتقديم الطلب');
+            $req = \App\Services\ApprovalService::submit($e, 'policy', ['key' => $d['key'], 'value' => $d['value'], 'company_id' => $d['company_id'] ?? null, 'reason' => $d['reason']],
+                [['role' => 'fin', 'label' => 'المدير المالي (اعتماد سقف السلف)'], ['role' => 'super', 'label' => 'الرئيس التنفيذي للمجموعة']]);
+
+            return ['pending_approval' => true, 'request_id' => $req->id, 'message' => 'أُرسل التعديل لاعتماد المدير المالي ثم الرئيس التنفيذي للمجموعة (§42)'];
+        }
 
         return Settings::set($d['key'], $d['value'], $d['company_id'] ?? null, $d['reason']);
     }

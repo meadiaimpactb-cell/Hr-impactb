@@ -15,6 +15,8 @@
   <div v-else class="grid mail-grid">
     <div class="card mail-list">
       <div class="row" style="gap:6px;margin-bottom:8px;flex-wrap:nowrap"><input v-model.trim="q" class="in" placeholder="بحث بالموضوع أو المرسل…" style="min-width:0" /><label class="chk tiny" style="white-space:nowrap"><input v-model="onlyUnread" type="checkbox" /> غير المقروء</label></div>
+      <div class="row" style="gap:6px;margin-bottom:8px;flex-wrap:wrap"><select v-model="fSender" class="in" style="flex:1;min-width:140px"><option value="">كل المرسلين</option><option v-for="x in senders" :key="x" :value="x">{{ x }}</option></select>
+        <DateInput v-model="fFrom" placeholder="من تاريخ" /><DateInput v-model="fTo" placeholder="إلى تاريخ" /><button v-if="fSender || fFrom || fTo" class="btn ghost xs" @click="fSender = ''; fFrom = ''; fTo = ''">مسح</button></div>
       <div class="tabs mb"><button :class="{ on: box === 'in' }" @click="box = 'in'">المحادثات</button><button :class="{ on: box === 'drafts' }" @click="box = 'drafts'; loadDrafts()">المسودات<span v-if="drafts.length"> ({{ drafts.length }})</span></button></div>
       <template v-if="box === 'drafts'">
         <div class="notice info small">المسودة لم تُرسل بعد، ويمكنك تعديلها أو حذفها. الرسالة المرسلة لا تُحذف لأنها أصبحت سجلًا معتمدًا.</div>
@@ -73,7 +75,10 @@ const threads = ref([]); const cur = ref(null); const reply = ref(''); const fil
 const tab = ref('mine'); const q = ref(''); const onlyUnread = ref(false); const coFilter = ref('')
 const gov = ref([]); const gq = ref(''); const gFrom = ref(''); const gTo = ref('')
 const companies = computed(() => [...new Set(users.value.map((u) => u.company).filter(Boolean))])
-const shown = computed(() => threads.value.filter((t) => (!onlyUnread.value || t.unread) && (!q.value || `${t.subject} ${t.others || ''} ${t.preview || ''}`.toLowerCase().includes(q.value.toLowerCase()))))
+const fSender = ref(''); const fFrom = ref(''); const fTo = ref('')
+const senders = computed(() => [...new Set(threads.value.map((t) => t.others).filter(Boolean))].sort())
+const shown = computed(() => threads.value.filter((t) => (!onlyUnread.value || t.unread) && (!q.value || `${t.subject} ${t.others || ''} ${t.preview || ''}`.toLowerCase().includes(q.value.toLowerCase()))
+  && (!fSender.value || t.others === fSender.value) && (!fFrom.value || String(t.last_at).slice(0, 10) >= fFrom.value) && (!fTo.value || String(t.last_at).slice(0, 10) <= fTo.value)))
 async function load() { threads.value = await api.get('/mail') }
 async function loadAll() { gov.value = await api.get('/mail/all', { params: { q: gq.value || undefined, from: gFrom.value || undefined, to: gTo.value || undefined } }) }
 async function open(id) {

@@ -1,7 +1,7 @@
 <template>
   <div class="page-h">
     <div><h1>مركز التنزيل</h1><p>كل ملف تصدّره من النظام يُحفظ هنا تلقائيًا، فتعيد تنزيله في أي وقت خلال {{ keepDays }} يومًا.</p></div>
-    <div class="acts"><input v-model="month" type="month" class="in" style="width:auto" title="تصفية بالشهر" /><input v-model.trim="q" class="in" placeholder="بحث باسم الملف أو الموظف أو الشركة" style="width:240px" /></div>
+    <div class="acts"><input v-model="month" type="month" class="in" style="width:auto" title="تصفية بالشهر" /><select v-model="co" class="in" style="width:auto" title="تصفية بالشركة"><option value="">كل الشركات</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.name">{{ c.name }}</option></select><input v-model.trim="q" class="in" placeholder="بحث باسم الملف أو الموظف أو الشركة" style="width:240px" /></div>
   </div>
 
   <div class="tabs">
@@ -35,12 +35,14 @@ import { computed, onMounted, ref } from 'vue'
 import api from '../api'
 import { confirmBox } from '../dialog'
 import { useUi } from '../stores/ui'
+import { useAuth } from '../stores/auth'
 import { fmtDT } from '../utils'
 
 const ui = useUi()
+const auth = useAuth()
 const files = ref([]); const categories = ref({}); const keepDays = ref(90)
-const tab = ref(''); const q = ref(''); const month = ref(''); const loading = ref(true); const busy = ref(null)
-const shown = computed(() => files.value.filter((f) => (!tab.value || f.category === tab.value) && (!month.value || String(f.created_at).startsWith(month.value)) && (!q.value || `${f.name} ${f.kind}`.includes(q.value))))
+const tab = ref(''); const q = ref(''); const month = ref(''); const co = ref(''); const loading = ref(true); const busy = ref(null)
+const shown = computed(() => files.value.filter((f) => (!tab.value || f.category === tab.value) && (!month.value || String(f.created_at).startsWith(month.value)) && (!q.value || `${f.name} ${f.kind}`.includes(q.value)) && (!co.value || `${f.name} ${f.kind}`.includes(co.value))))
 const size = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`)
 
 async function load() {

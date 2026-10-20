@@ -210,4 +210,17 @@ class AttendanceController extends Controller
         return $e->attendance()->with('location:id,name')->whereBetween('work_date', [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()])
             ->orderByDesc('work_date')->get();
     }
+
+    /** §33: the employee can rewrite his daily achievement for today (after check-out too); earlier days stay as written. */
+    public function note(Request $request, \App\Models\AttendanceRecord $record)
+    {
+        abort_unless($record->employee_id === $request->user()->employee_id, 403);
+        abort_unless($record->work_date->isToday(), 422, 'يُعدَّل المنجز اليومي في اليوم نفسه فقط');
+        $min = (int) \App\Services\Settings::get('dailyNoteMin', $record->employee?->company_id, 20);
+        $d = $request->validate(['note' => "required|string|min:$min|max:2000"], ['note.min' => "اكتب المنجز في $min حرفًا على الأقل (§33)"]);
+        $record->update(['note' => $d['note']]);
+        \App\Services\Audit::log('attendance', $record->id, 'note');
+
+        return $record->fresh();
+    }
 }

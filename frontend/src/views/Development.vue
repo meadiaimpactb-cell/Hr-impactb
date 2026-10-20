@@ -179,7 +179,7 @@ async function load() {
   else if (tab.value === 'board') board.value = await api.get('/development', { params: { board: 1, period: boardPeriod.value, company_id: ui.company || undefined } })
   else all.value = await api.get('/development', { params: { status: status.value || undefined } })
 }
-function pickCatalog(code) { const c = (auth.meta?.lookups?.dev_catalog || []).find((x) => x.code === code); if (!c) return; f.value.program = c.name; f.value.provider = c.meta?.provider || ''; f.value.hours = Number(c.meta?.hours || 0); f.value.cost = Number(c.meta?.cost || 0) }
+function _unusedCatalog(code) { const c = (auth.meta?.lookups?.dev_catalog || []).find((x) => x.code === code); if (!c) return; f.value.program = c.name; f.value.provider = c.meta?.provider || ''; f.value.hours = Number(c.meta?.hours || 0); f.value.cost = Number(c.meta?.cost || 0) }
 async function openForm() {
   if (!mine.value && auth.emp) mine.value = await api.get('/development/mine')
   f.value = { employee_id: null, activity: activities.value[0]?.code || null, program: '', provider: '', kind: (auth.meta?.lookups?.dev_kinds || [])[0]?.code, hours: 0, cost: 0, certificate: null }

@@ -29,7 +29,7 @@
         <tbody><tr v-for="r in excuses" :key="r.id"><td class="num">{{ fmtD(r.work_date) }}</td><td class="num">{{ fmtD(r.excuse_due) }}</td><td class="small">{{ r.excuse || '—' }}</td>
           <td><button class="btn pri xs" @click="giveExcuse(r)">{{ r.excuse ? 'تعديل العذر' : 'إبداء العذر' }}</button></td></tr></tbody></table></div>
     </div>
-    <div class="card"><h3>{{ t('سجلي') }} <span class="acts"><button class="btn ghost sm" @click="corr = true">طلب تصحيح</button></span></h3><AttendanceTable :records="mine?.records || []" :grace="mine?.grace ?? grace" /></div>
+    <div class="card"><h3>{{ t('سجلي') }} <span class="acts"><button class="btn ghost sm" @click="corr = true">طلب تصحيح</button></span></h3><AttendanceTable editable :records="mine?.records || []" :grace="mine?.grace ?? grace" /></div>
   </template>
 
   <template v-else-if="tab === 'paper'">
@@ -68,7 +68,7 @@
       <Kpi icon="absent" label="لم يسجّلوا بعد" :value="today.stats.missing" :hint="`${today.stats.on_leave} في إجازة`" color="r" />
     </div>
     <div class="card"><div v-dt class="tw"><table>
-      <thead><tr><th>{{ t('الموظف') }}</th><th>{{ t('الشركة') }}</th><th>{{ t('الحضور') }}</th><th>{{ t('الانصراف') }}</th><th>{{ t('الحالة') }}</th><th>{{ t('الموقع') }}</th><th /></tr></thead>
+      <thead><tr><th>{{ t('الموظف') }}</th><th>{{ t('الشركة') }}</th><th>{{ t('الحضور') }}</th><th>{{ t('الانصراف') }}</th><th>{{ t('الحالة') }}</th><th>{{ t('الموقع') }}</th><th>المنجز اليومي</th><th /></tr></thead>
       <tbody><tr v-for="r in today?.rows || []" :key="r.employee.id">
         <td><RouterLink :to="`/employees/${r.employee.id}`">{{ r.employee.name }}</RouterLink></td><td>{{ r.company }}</td>
         <td class="num">{{ fmtT(r.record?.check_in) }}</td><td class="num">{{ r.record?.check_out ? fmtT(r.record.check_out) : '—' }}</td>
@@ -79,6 +79,7 @@
           <template v-if="r.record?.check_in"><span :class="r.record.geo_fail ? 'bad' : 'ok'">{{ r.record.geo_fail ? 'خارج النطاق' : 'داخل النطاق' }}</span><span v-if="r.record.distance_m != null" class="tiny muted num"> · {{ dist(r.record.distance_m) }}</span> <a v-if="r.record.lat" :href="`https://www.google.com/maps?q=${r.record.lat},${r.record.lng}`" target="_blank" rel="noopener" class="tiny">خريطة</a></template>
           <template v-else>—</template>
         </td>
+        <td class="small" style="max-width:260px"><a v-if="r.record?.note" href="#" :title="r.record.note" @click.prevent="alertBox(r.record.note, { title: 'المنجز اليومي — ' + r.employee.name, icon: 'info' })">{{ r.record.note.length > 50 ? r.record.note.slice(0, 50) + '…' : r.record.note }}</a><span v-else class="muted">—</span></td>
         <td class="row" style="gap:4px;flex-wrap:nowrap;justify-content:flex-end">
           <button v-if="auth.meta?.policy?.presence_check !== false && r.record?.check_in && !r.record?.check_out" class="btn sec xs" title="طلب تحضير: يصل تنبيه للموظف ليؤكد تواجده بموقعه خلال المهلة (§28)" @click="presence(r)"><Icon name="map-pin" :size="13" /> طلب تحضير</button>
           <button v-if="auth.has('super', 'hr_mgr') || r.employee.track_viewer" class="btn ghost xs" title="مسار الحركة اليوم (سري — §28)" @click="movement(r)"><Icon name="clock" :size="13" /> المسار</button>
@@ -149,7 +150,7 @@
 
 <script setup>
 import { exportXlsx } from '../excel'
-import { confirmBox, promptBox } from '../dialog'
+import { alertBox, confirmBox, promptBox } from '../dialog'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../api'

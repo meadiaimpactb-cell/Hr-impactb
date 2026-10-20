@@ -79,6 +79,7 @@
         <div class="fg"><label>الإجمالي <span class="req">*</span></label><input :value="tripTotal || f.estimate" type="number" class="in" :class="{ err: errors.estimate }" :readonly="!!tripTotal" @input="f.estimate = +$event.target.value" /><span class="e">{{ errors.estimate?.[0] }}</span></div>
       </div>
       <div class="fg"><label>عهدة نقدية مطلوبة للرحلة <span class="tiny muted">(تُسوّى خلال 10 أيام عمل من العودة — §44/§68)</span></label><input v-model.number="f.advance" type="number" min="0" class="in" /></div>
+      <div class="fg"><label>مرفقات داعمة <span class="tiny muted">(PDF أو Word أو Excel أو صورة)</span></label><input type="file" class="in" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.heic" @change="file = $event.target.files[0]" /><span class="e">{{ errors.attachment?.[0] }}</span></div>
     </template>
 
     <template v-else-if="handler === 'resignation'">
@@ -101,6 +102,12 @@
         <select v-else-if="fd.type === 'company'" v-model="f[fd.key]" class="in" :class="{ err: errors[fd.key] }"><option value="">—</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.id">{{ c.name }}</option></select>
         <input v-else v-model="f[fd.key]" class="in" :class="{ err: errors[fd.key] }" />
         <span class="e">{{ errors[fd.key]?.[0] }}</span>
+      </div>
+      <div v-if="handler === 'custody'" class="notice small" :class="myCustody.length ? 'warn' : 'info'">
+        <template v-if="myCustody.length"><b>العهد المسجلة عليك حاليًا:</b>
+          <ul style="margin:4px 0 0;padding-inline-start:18px"><li v-for="c in myCustody" :key="c.id">{{ c.ident }} — {{ c.type?.name }}<span v-if="c.type?.is_cash"> (نقدية {{ money(c.value) }} ر.س)</span> · {{ c.status_label }}</li></ul>
+          <span v-if="myCustody.some((c) => c.type?.is_cash)" class="tiny">لا تُصرف عهدة نقدية جديدة قبل تسوية العهدة النقدية السابقة (§44).</span></template>
+        <template v-else>لا توجد عهد مسجلة عليك حاليًا.</template>
       </div>
       <div v-if="def?.on_behalf" class="fg"><label>الموظف <span class="req">*</span></label><SearchSelect v-model="f.employee_id" :options="allEmpOptions" /><span class="e">{{ errors.employee_id?.[0] }}</span></div>
       <div v-if="HINTS[handler]" class="notice info small">{{ HINTS[handler] }}</div>
@@ -146,6 +153,8 @@ const HINTS = {
   transfer: 'يتم النقل بموافقة الموظف بعقد جديد أو باتفاق ثلاثي يحفظ استمرار الخدمة والأرصدة (§23).',
 }
 const allEmpOptions = ref([])
+const myCustody = ref([])
+watch(handler, async (h) => { if (h === 'custody' && auth.emp) { try { myCustody.value = (await api.get('/custody/mine')).filter((c) => !['returned', 'available'].includes(c.status)) } catch { myCustody.value = [] } } })
 const CASE_LEAVES = ['newborn', 'marriage', 'bereavement', 'sibling', 'iddah']
 const needsEvent = computed(() => CASE_LEAVES.includes(f.leave_type))
 const typeName = (code) => { const d = defs.value.find((x) => x.code === code); return d ? (ui.lang === 'en' && d.name_en ? d.name_en : d.name) : code }
