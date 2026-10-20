@@ -576,7 +576,7 @@ class ApprovalService
             'allowance', 'salary_change' => ($d['name'] ?? 'الأساسي').': '.self::humanValue($d['before'] ?? null).' → '.self::humanValue($d['after'] ?? null),
             'balance_adj', 'benefit' => self::benefitLabel($d['type'] ?? $d['benefit'] ?? '').': '.self::humanValue($d['before'] ?? null).' → '.self::humanValue($d['after'] ?? null),
             'trip' => ($d['destination'] ?? '').' · '.($d['from'] ?? '').' → '.($d['to'] ?? ''),
-            'letter' => ($d['kind'] ?? '').' — '.($d['to'] ?? ''),
+            'letter' => (\App\Models\Lookup::name('letter_kinds', (string) ($d['kind'] ?? '')) ?? ($d['kind'] ?? '')).(empty($d['to']) ? '' : ' — '.$d['to']),
             'resignation' => 'آخر يوم محسوب '.($d['computed_last'] ?? ''),
             'ticket' => ($d['destination'] ?? '').' · '.($d['travel_date'] ?? '').' · حتى '.number_format((float) ($d['approved_amount'] ?? 0)).' ر.س',
             'overtime' => ($d['hours'] ?? 0).' ساعة · '.($d['date'] ?? ''),
