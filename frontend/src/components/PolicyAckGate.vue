@@ -1,11 +1,11 @@
 <template>
   <!-- Appendix 4: the current policy version must be acknowledged before using the portal (blocking) -->
-  <div v-if="st?.required" class="mo" style="z-index:300">
+  <div v-if="st?.required" class="mo" style="z-index:calc(var(--z-modal) + 5)">
     <div class="box" style="max-width:720px">
       <div class="mh"><h3 class="row" style="gap:8px;align-items:center"><Icon name="shield" :size="18" /> نموذج إقرار الاطلاع والالتزام — الإصدار {{ st.version }}</h3></div>
       <div class="mb">
-        <p style="line-height:1.9">{{ st.text }}</p>
-        <div v-dt class="tw"><table><tbody>
+        <div class="notice info" style="line-height:1.9;font-size:15px;margin-bottom:12px">{{ st.text }}</div>
+        <div class="tw"><table class="kv"><tbody>
           <tr><th>الاسم</th><td>{{ st.employee?.name }}</td></tr><tr><th>الرقم الوظيفي</th><td class="num">{{ st.employee?.emp_no }}</td></tr>
           <tr><th>الشركة</th><td>{{ st.employee?.company || '—' }}</td></tr><tr><th>المسمى الوظيفي</th><td>{{ st.employee?.job || '—' }}</td></tr>
           <tr><th>التاريخ</th><td class="num">{{ fmtD(today()) }}</td></tr>

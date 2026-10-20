@@ -61,7 +61,7 @@
   <NewRequest v-if="newReq" @close="newReq = false" />
   <PolicyAckGate />
   <!-- Announcements that require acknowledgement block the UI until acknowledged -->
-  <div v-if="acks.length" class="mo" style="z-index:200">
+  <div v-if="acks.length" class="mo" style="z-index:calc(var(--z-modal) + 4)">
     <div class="box">
       <div class="mh"><h3 class="row" style="gap:8px;align-items:center"><img v-if="ackCo?.logo_url" :src="ackCo.logo_url" :alt="ackCo.name" style="height:28px;max-width:90px;object-fit:contain" /><Icon v-else name="megaphone" :size="18" /> {{ ackCo ? `إعلان من ${ackCo.name}` : 'إعلان يتطلب إقرارك' }}</h3></div>
       <div class="mb"><b>{{ acks[0].title }}</b><div class="tiny muted">{{ acks[0].sender }}</div><p style="white-space:pre-wrap">{{ acks[0].body }}</p></div>
