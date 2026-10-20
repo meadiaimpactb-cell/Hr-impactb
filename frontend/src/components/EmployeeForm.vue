@@ -13,6 +13,7 @@
         <div class="fg"><label>الجنسية</label><SearchSelect v-model="f.nationality" :options="countries" placeholder="اختر الدولة…" /></div>
         <F label="تاريخ الميلاد" k="birth_date" type="date" />
         <div class="fg"><label>الجنس</label><select v-model="f.gender" class="in"><option value="m">ذكر</option><option value="f">أنثى</option></select></div>
+        <div class="fg"><label>الديانة <span class="tiny muted">(لإجازة العدة فقط)</span></label><select v-model="f.religion" class="in"><option :value="null">—</option><option value="muslim">مسلم</option><option value="other">غير مسلم</option></select></div>
         <div class="fg"><label>الجوال</label><PhoneInput v-model="f.phone" :error="!!errors.phone" /><span v-if="errors.phone" class="e">{{ errors.phone[0] }}</span></div>
         <div class="fg"><label>البريد الرسمي <span v-if="f.email_enabled" class="req">*</span></label><input v-model.trim="f.email" class="in" :class="{ err: errors.email }" type="email" dir="ltr" placeholder="name@impactv.sa" @blur="checkEmail" /><span v-if="errors.email" class="e">{{ errors.email[0] }}</span></div>
       </div>
@@ -25,6 +26,8 @@
         <div class="fg"><label>الإدارة</label><SearchSelect v-model="f.dept" :options="opts.depts" :add-label="canAdd ? 'إضافة إدارة' : ''" @add="addDept" /></div>
         <div class="fg"><label>المدير المباشر</label><SearchSelect v-model="f.manager_id" :options="opts.emps" :add-label="canAdd ? 'إضافة مدير جديد' : ''" @add="openQuick('manager', $event)" /></div>
         <F label="تاريخ الالتحاق" req k="hire_date" type="date" />
+        <div class="fg" title="يحدد فئة التأمين الطبي والبدل اليومي للرحلات (المواد 5 و63 و67)"><label>المستوى الوظيفي <span class="req">*</span></label><select v-model.number="f.job_level" class="in"><option v-for="(l, k) in JOB_LEVELS" :key="k" :value="Number(k)">{{ l }}</option></select></div>
+        <div class="fg" title="مدة التجربة المنصوص عليها في العقد (المادة 20)"><label>مدة التجربة (يوم)</label><input v-model.number="f.probation_days" type="number" min="0" max="180" class="in" /></div>
         <div class="fg"><label>نوع التعاقد</label><SearchSelect v-model="f.contract_type" :options="opts.contracts" :error="!!errors.contract_type" :add-label="canAdd ? 'إضافة نوع تعاقد' : ''" @add="addContract" /></div>
         <F v-if="f.contract_type === 'part'" label="نسبة الدوام (0.5 = نصف)" k="part_ratio" type="number" />
         <div class="fg" style="grid-column:1/-1">
@@ -53,7 +56,9 @@
           <button type="button" class="btn sec xs" @click="f.allowances.push({ name: '', amount: null })"><Icon name="plus" :size="14" /> إضافة بدل</button>
           <div class="notice info small mt" style="margin-bottom:0">الراتب الإجمالي = الأساسي + البدلات: <b class="num">{{ grossPreview.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</b> ر.س <span class="tiny muted">(بدلات الباقة غير المكتوبة هنا تُضاف تلقائيًا عند الحفظ)</span></div>
         </div>
-        <div class="fg"><label>الآيبان (IBAN)</label><IbanInput v-model="f.bank_iban" :error="!!errors.bank_iban" /><span v-if="errors.bank_iban" class="e">{{ errors.bank_iban[0] }}</span></div>
+        <div class="fg"><label>الآيبان (IBAN) <span v-if="!id" class="req">*</span></label>
+          <IbanInput v-if="!id || auth.has('super')" v-model="f.bank_iban" :error="!!errors.bank_iban" /><input v-else :value="f.bank_iban || '—'" class="in" dir="ltr" readonly />
+          <span v-if="id && !auth.has('super')" class="tiny muted">يُعدَّل بطلب «تعديل الحساب البنكي» مع شهادة البنك (المادة 38)</span><span v-if="errors.bank_iban" class="e">{{ errors.bank_iban[0] }}</span></div>
       </div>
 
       <!-- inline creation panels: nothing leaves this form -->
@@ -128,7 +133,8 @@ const ui = useUi()
 const ready = ref(false)
 const busy = ref(false)
 const errors = ref({})
-const f = reactive({ id_type: 'national', contract_type: 'full', punch_required: true, punch_anywhere: false, geo_tolerance: 0, email_enabled: true, eosb_saudi: true, advances_enabled: true, flex_enabled: false, daily_note_required: false, week_pattern: '5', gender: 'm', create_user: true, location_ids: [], country: 'SA', nationality: 'SA', phone: '', email: '', dept: null })
+const JOB_LEVELS = { 1: '1 — الرئيس التنفيذي', 2: '2 — القيادات ومديرو الإدارات', 3: '3 — مديرو الأقسام والمشاريع', 4: '4 — الأخصائيون والمنسقون والمهنيون والإداريون', 5: '5 — التشغيليون والمساندة' }
+const f = reactive({ job_level: 4, probation_days: 180, religion: null, id_type: 'national', contract_type: 'full', punch_required: true, punch_anywhere: false, geo_tolerance: 0, email_enabled: true, eosb_saudi: true, advances_enabled: true, flex_enabled: false, daily_note_required: false, week_pattern: '5', gender: 'm', create_user: true, location_ids: [], country: 'SA', nationality: 'SA', phone: '', email: '', dept: null })
 const opts = reactive({ companies: [], jobs: [], emps: [], depts: [], contracts: [], schedules: [], locations: [] })
 // working hours: the schedule's hours are shown read-only; "customise" copies them into f.work_hours which then wins
 const schedules = ref([])
@@ -223,7 +229,7 @@ async function saveQuick() {
     if (q.kind === 'company') { const r = await api.post('/companies', { name: q.d.name, name_en: q.d.name_en || null, code: q.d.code, website: q.d.website || null, legal_no: q.d.legal_no || null, tax_no: q.d.tax_no || null }); await auth.loadMeta(); buildOpts(); f.company_id = r.id }
     else if (q.kind === 'job') { const r = await api.post('/lookups/job-titles', { name: q.d.name, name_en: q.d.name_en || null, code: q.d.code }); await auth.loadMeta(); buildOpts(); f.job_title_id = r.id }
     else if (q.kind === 'manager') {
-      const r = await api.post('/employees', { ...q.d, basic: q.d.basic || null, contract_type: 'full', punch_required: true, email_enabled: false, create_user: true, schedule_id: f.schedule_id })
+      const r = await api.post('/employees', { ...q.d, quick: true, job_level: 3, basic: q.d.basic || null, contract_type: 'full', punch_required: true, email_enabled: false, create_user: true, schedule_id: f.schedule_id })
       const e = r.employee || r; opts.emps.push({ value: e.id, label: e.name, sub: e.emp_no }); f.manager_id = e.id
     } else if (q.kind === 'schedule') {
       const days = Object.keys(q.d.hours).map(Number); if (!days.length) throw new Error('حدد يومًا واحدًا على الأقل')
@@ -259,7 +265,7 @@ async function save() {
   if (Object.keys(v).length) { errors.value = v; ui.toast('راجع الحقول المظللة بالأحمر', 'bad'); return }
   busy.value = true
   errors.value = {}
-  const keys = ['emp_no', 'name', 'name_en', 'company_id', 'job_title_id', 'manager_id', 'dept', 'hire_date', 'contract_type', 'part_ratio', 'punch_required', 'punch_anywhere', 'geo_tolerance', 'schedule_id', 'work_hours', 'week_pattern', 'country', 'nationality', 'national_id', 'id_type', 'birth_date', 'gender', 'phone', 'email', 'email_enabled', 'eosb_saudi', 'flex_enabled', 'daily_note_required', 'advances_enabled', 'bank_iban', 'location_ids', 'basic', 'allowances', 'create_user']
+  const keys = ['emp_no', 'name', 'name_en', 'company_id', 'job_title_id', 'manager_id', 'dept', 'hire_date', 'contract_type', 'part_ratio', 'punch_required', 'punch_anywhere', 'geo_tolerance', 'schedule_id', 'work_hours', 'week_pattern', 'country', 'nationality', 'national_id', 'id_type', 'birth_date', 'gender', 'phone', 'email', 'email_enabled', 'eosb_saudi', 'flex_enabled', 'daily_note_required', 'advances_enabled', 'bank_iban', 'location_ids', 'basic', 'allowances', 'create_user', 'job_level', 'religion', 'probation_days']
   const body = Object.fromEntries(keys.map((k) => [k, f[k] === '' ? null : f[k]]))
   body.allowances = (f.allowances || []).filter((a) => a.name?.trim() && Number(a.amount) > 0)
   body.work_hours = customHours.value && f.work_hours && Object.keys(f.work_hours).length ? f.work_hours : null

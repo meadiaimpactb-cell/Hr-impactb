@@ -1,14 +1,14 @@
 <template>
   <div class="page-h">
-    <div><h1>{{ t('الخطابات الرسمية') }}</h1><p>خطابات مرقّمة من قوالب قابلة للتحرير بمتغيرات، تُصدر من طلب معتمد أو مباشرة من الموارد البشرية، وتُوقَّع إلكترونيًا وتُطبع PDF</p></div>
-    <div class="acts"><button v-if="auth.isHr" class="btn pri sm" @click="openIssue"><Icon name="plus" :size="16" /> إصدار خطاب</button></div>
+    <div><h1>{{ t('الخطابات الرسمية') }}</h1><p>خطابات مرقّمة من قوالب قابلة للتحرير بمتغيرات، تُصدر من طلب معتمد (المشرف ثم الموارد البشرية) أو مباشرة من الموارد البشرية، وتُوقَّع إلكترونيًا وتُطبع PDF · شهادة الخدمة تصدرها الموارد البشرية مباشرة عند طلبها دون مقابل ودون مسار اعتماد (§112، §114)</p></div>
+    <div class="acts"><button v-if="auth.emp" class="btn sec sm" :class="{ loading: busy }" @click="requestService"><Icon name="signature" :size="16" /> طلب شهادة خدمة</button><button v-if="auth.isHr" class="btn sec sm" @click="openIssue('service')"><Icon name="check-circle" :size="16" /> إصدار شهادة خدمة</button><button v-if="auth.isHr" class="btn pri sm" @click="openIssue()"><Icon name="plus" :size="16" /> إصدار خطاب</button></div>
   </div>
   <div class="tabs"><button v-for="x in tabs" :key="x[0]" :class="{ on: tab === x[0] }" @click="tab = x[0]; load()">{{ x[1] }}</button></div>
 
   <div v-if="tab !== 'templates'" class="card">
     <div v-if="!rows.length" class="empty"><div class="ic"><Icon name="signature" :size="40" :stroke="1.4" /></div>لا خطابات</div>
     <div v-dt v-else class="tw"><table><thead><tr><th>الرقم</th><th v-if="tab === 'all'">الموظف</th><th>النوع</th><th>الجهة</th><th>اللغة</th><th>التاريخ</th><th>التوقيع</th><th /></tr></thead>
-      <tbody><tr v-for="l in rows" :key="l.id"><td class="num"><b>{{ l.no }}</b></td><td v-if="tab === 'all'">{{ l.employee?.name }}</td><td>{{ l.kind_name }}<span v-if="l.includes_salary" class="pill warn">يتضمن الراتب</span></td><td>{{ l.to || '—' }}</td><td>{{ l.lang === 'en' ? 'EN' : 'ع' }}</td><td class="num">{{ l.issued_at }}</td><td><span class="pill" :class="l.signed ? 'ok' : 'gray'">{{ l.signed ? 'موقَّع' : 'غير موقَّع' }}</span></td>
+      <tbody><tr v-for="l in rows" :key="l.id"><td class="num"><b>{{ l.no }}</b></td><td v-if="tab === 'all'">{{ l.employee?.name }}</td><td>{{ l.kind_name }}<span v-if="l.includes_salary" class="pill warn">يتضمن الراتب</span><span v-if="l.direct" class="pill info">دون مقابل</span><a v-if="l.has_attachment" class="btn ghost xs" href="#" @click.prevent="fileUrl(l.file)"><Icon name="download" :size="12" /> مرفق</a></td><td>{{ l.to || '—' }}</td><td>{{ l.lang === 'en' ? 'EN' : 'ع' }}</td><td class="num">{{ fmtD(l.issued_at) }}</td><td><span class="pill" :class="l.signed ? 'ok' : 'gray'">{{ l.signed ? 'موقَّع' : 'غير موقَّع' }}</span></td>
         <td class="row" style="gap:4px;flex-wrap:nowrap"><RouterLink class="btn ghost xs" :to="`/print/letter/${l.id}`"><Icon name="external" :size="14" /> عرض / طباعة</RouterLink><button v-if="auth.isHr && !l.signed" class="btn sec xs" @click="sign(l)"><Icon name="signature" :size="14" /> توقيع</button></td></tr></tbody></table></div>
   </div>
 
@@ -23,6 +23,9 @@
     <div class="fg"><label>الموظف *</label><SearchSelect v-model="isf.employee_id" :options="empOptions" /></div>
     <div class="fr"><div class="fg"><label>النوع</label><select v-model="isf.kind" class="in"><option v-for="k in kinds" :key="k.code" :value="k.code">{{ k.name }}</option></select></div><div class="fg"><label>اللغة</label><select v-model="isf.lang" class="in"><option value="ar">العربية</option><option value="en">English</option></select></div></div>
     <div class="fg"><label>الجهة الموجّه إليها</label><input v-model="isf.to" class="in" /></div>
+    <div class="fg"><label>الغرض</label><input v-model="isf.purpose" class="in" /></div>
+    <div class="fg"><label>مرفق (اختياري)</label><input type="file" class="in" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" @change="isf.file = $event.target.files[0]" /></div>
+    <p v-if="isf.kind === 'service'" class="tiny muted">شهادة الخدمة تُصدر مباشرة دون مقابل ودون ما يسيء إلى سمعة الموظف، ويُحاط المشرف المباشر علمًا (§112).</p>
     <template #foot><button class="btn sec" @click="isf = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="issue">إصدار</button></template>
   </Modal>
 
@@ -37,7 +40,9 @@
 </template>
 
 <script setup>
-import { confirmBox } from '../dialog'
+import { confirmBox, promptBox } from '../dialog'
+import { fileUrl } from '../api'
+import { fmtD } from '../utils'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../api'
@@ -69,8 +74,21 @@ async function load() {
   else if (tab.value === 'all') rows.value = await api.get('/letters')
   else templates.value = (await api.get('/letters/templates')).templates
 }
-async function openIssue() { isf.value = { employee_id: null, kind: kinds.value[0]?.code, lang: 'ar', to: '' }; if (!emps.value.length) emps.value = await api.get('/employees/options') }
-async function issue() { if (!isf.value.employee_id) return ui.toast('اختر الموظف', 'warn'); busy.value = true; try { const l = await api.post('/letters', isf.value); ui.toast(`صدر الخطاب ${l.no}`, 'ok'); isf.value = null; load() } catch (e) { ui.toast(e.message, 'bad', 6000) } finally { busy.value = false } }
+async function openIssue(kind) { isf.value = { employee_id: null, kind: kind || kinds.value[0]?.code, lang: 'ar', to: '', purpose: '', file: null }; if (!emps.value.length) emps.value = await api.get('/employees/options') }
+async function issue() {
+  if (!isf.value.employee_id) return ui.toast('اختر الموظف', 'warn')
+  busy.value = true
+  try {
+    const x = new FormData(); Object.entries(isf.value).forEach(([k, v]) => { if (k !== 'file' && v !== null && v !== '') x.append(k, v) }); if (isf.value.file) x.append('attachment', isf.value.file)
+    const l = await api.post('/letters', x); ui.toast(`صدر الخطاب ${l.no}`, 'ok'); isf.value = null; load()
+  } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad', 6000) } finally { busy.value = false }
+}
+async function requestService() {
+  const to = await promptBox('الجهة الموجّهة إليها شهادة الخدمة (اختياري):', { multiline: false, required: false })
+  if (to === null || to === undefined || to === false) return
+  busy.value = true
+  try { await api.post('/letters/service-request', { to: to || null }); ui.toast('أُرسل طلبك إلى الموارد البشرية — تُصدر الشهادة مباشرة دون مقابل', 'ok') } catch (e) { ui.toast(e.message, 'bad', 6000) } finally { busy.value = false }
+}
 async function sign(l) {
   const sig = await api.get('/signature')
   if (!sig.signature) return ui.toast('احفظ توقيعك أولًا من «ملفي»', 'warn', 5000)

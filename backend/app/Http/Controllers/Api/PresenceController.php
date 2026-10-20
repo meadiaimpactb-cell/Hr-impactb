@@ -29,6 +29,20 @@ class PresenceController extends Controller
         $u = $request->user();
         abort_unless(Settings::get('presenceCheckEnabled', $employee->company_id, true), 422, 'خاصية طلب التحضير غير مفعّلة');
         abort_unless(Access::for()->isManagerOf($employee) || ($u->isHr() && Access::for()->can('ATT', 'approve', ['employee' => $employee])) || $u->hasRole('super') || Access::for()->isCeoOf($employee->company_id), 403, 'طلب التحضير للمشرف المباشر أو الموارد البشرية');
+        // §28: only during the employee's working hours, and only once they have checked in today (and not checked out)
+        $employee->loadMissing('schedule', 'company.tier');
+        $shift = null;
+        foreach ([now(), now()->subDay()] as $day) { // a night shift that started yesterday is still running
+            $s = AttendanceService::isWorkDay($employee, $day) ? AttendanceService::shift($employee, $day) : null;
+            if ($s && now()->between($s[0], $s[1])) {
+                $shift = $s;
+                break;
+            }
+            $shift ??= $s;
+        }
+        abort_unless($shift && now()->between($shift[0], $shift[1]), 422, 'لا يُرسل طلب التحضير إلا خلال ساعات دوام الموظف'.($shift ? ' ('.$shift[0]->format('H:i').' - '.$shift[1]->format('H:i').')' : ''));
+        $rec = AttendanceRecord::where('employee_id', $employee->id)->whereDate('work_date', $shift[0]->toDateString())->first();
+        abort_unless($rec && $rec->check_in && ! $rec->check_out, 422, $rec?->check_out ? 'سجّل الموظف انصرافه اليوم — لا يُرسل طلب تحضير بعد الانصراف' : 'لم يسجّل الموظف حضوره اليوم — طلب التحضير يُرسل لمن سجّل حضوره فقط');
         $open = DB::table('presence_checks')->where('employee_id', $employee->id)->where('status', 'pending')->where('due_at', '>', now())->exists();
         abort_if($open, 422, 'يوجد طلب تحضير قائم لهذا الموظف لم تنتهِ مهلته بعد');
         $minutes = (int) Settings::get('presenceCheckMinutes', $employee->company_id, 30);
@@ -144,7 +158,9 @@ class PresenceController extends Controller
     public function movement(Request $request, Employee $employee)
     {
         $u = $request->user();
-        $allowed = $u->hasRole('super') || $u->hasRole('hr_mgr') || in_array($u->id, array_map('intval', (array) ($employee->track_viewers ?? [])), true);
+        // an HR manager limited to specific companies (users.hr_scope) sees location data only for those companies
+        $hrInScope = $u->hasRole('hr_mgr') && (! $u->hr_scope || in_array((int) $employee->company_id, array_map('intval', (array) $u->hr_scope), true));
+        $allowed = $u->hasRole('super') || $hrInScope || in_array($u->id, array_map('intval', (array) ($employee->track_viewers ?? [])), true);
         abort_unless($allowed, 403, 'بيانات الموقع سرية: للرئيس التنفيذي للمجموعة ومدير الموارد البشرية، أو لمن مُنح الاطلاع');
         $date = $request->date('date')?->toDateString() ?? now()->toDateString();
         Audit::log('location_pings', $employee->id, 'view', null, ['date' => $date]);

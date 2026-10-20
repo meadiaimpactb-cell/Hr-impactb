@@ -11,6 +11,7 @@ use App\Services\Access;
 use App\Services\Audit;
 use App\Services\Settings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /** Announcements with targeted audiences, read/ack receipts, reminders, reactions. */
@@ -60,25 +61,21 @@ class AnnouncementController extends Controller
             'audience' => 'required|array', 'audience.scope' => ['required', Rule::in(['group', 'company', 'job', 'contract', 'people'])], 'audience.companies' => 'array', 'audience.jobs' => 'array',
             'audience.contract' => 'nullable|string', 'audience.employee_ids' => 'array']);
         $a = $d['audience'];
-        // who may address whom: super/hr_mgr any; ceo & hr_staff their companies; managers only their direct reports
-        if ($u->hasRole('super', 'hr_mgr')) {
-            // any
-        } elseif ($u->hasRole('ceo', 'hr_staff') && $acc->canAny('COM', 'publish')) {
-            abort_if($a['scope'] === 'group', 403, 'إعلان المجموعة للمدير العام ومدير الموارد البشرية');
+        // §115: group CEO and group-wide HR publish to anyone; the company CEO (and the publishers he designates) and
+        // company-scoped HR publish within their companies only. Direct managers no longer publish unless designated.
+        $scope = self::publishScope($u);
+        abort_unless($scope !== null, 403, 'نشر الإعلانات للرئيس التنفيذي للمجموعة والموارد البشرية، وللرئيس التنفيذي للشركة أو من يحددهم من موظفيها (§115)');
+        if ($scope !== 'all') {
+            abort_if($a['scope'] === 'group', 403, 'إعلان المجموعة للرئيس التنفيذي للمجموعة والموارد البشرية للمجموعة');
             if ($a['scope'] === 'company') {
-                $a['companies'] = array_values(array_intersect(array_map('intval', $a['companies'] ?? []), $acc->companyIds()));
+                $a['companies'] = array_values(array_intersect(array_map('intval', $a['companies'] ?? []), $scope));
+                abort_unless($a['companies'], 403, 'لا تملك النشر لهذه الشركات');
             }
-        } else {
-            $reports = Employee::where('manager_id', $u->employee_id)->pluck('id')->all();
-            abort_unless($reports, 403, 'لا صلاحية لنشر إعلانات');
-            $a = ['scope' => 'people', 'employee_ids' => array_values(array_intersect(array_map('intval', $a['employee_ids'] ?? $reports), $reports)) ?: $reports];
         }
         $users = array_values(array_diff(self::audienceUsers($a), []));
-        if (! $u->hasRole('super', 'hr_mgr')) { // job / contract / people audiences are narrowed to the publisher's companies too
-            $allowed = User::whereIn('employee_id', Employee::whereIn('company_id', $acc->companyIds() ?: [0])->pluck('id'))->pluck('id')->all();
-            if ($u->hasRole('ceo', 'hr_staff') && $acc->canAny('COM', 'publish')) {
-                $users = array_values(array_intersect($users, $allowed));
-            }
+        if ($scope !== 'all') { // job / contract / people audiences are narrowed to the publisher's companies too
+            $allowed = User::whereIn('employee_id', Employee::whereIn('company_id', $scope ?: [0])->pluck('id'))->pluck('id')->all();
+            $users = array_values(array_intersect($users, $allowed));
         }
         abort_unless($users, 422, 'لا مستلمين لهذا الجمهور');
         $path = $request->file('attachment')?->store('announcements/'.now()->format('Y'), 'local');
@@ -91,6 +88,90 @@ class AnnouncementController extends Controller
         Audit::email($users, 'إعلان: '.$an->title, $an->title, $an->body, 'announcements', 'إعلان من '.$u->name.($an->require_ack ? ' — يتطلب تأكيد القراءة' : ''));
 
         return response()->json($this->row($an->load('sender:id,name'), null, $this->counts([$an->id])[$an->id] ?? null, $u), 201);
+    }
+
+    /**
+     * Companies the user may publish to: 'all' (group CEO / group-wide HR), a list of company ids (company CEO, HR scoped
+     * to companies, designated publishers), or null (no publishing right).
+     */
+    public static function publishScope(User $u): string|array|null
+    {
+        if ($u->hasRole('super') || ($u->hasRole('hr_mgr') && ! $u->hr_scope)) {
+            return 'all';
+        }
+        $acc = Access::for($u);
+        $ids = [];
+        if ($u->hasRole('hr_mgr')) {
+            $ids = array_map('intval', (array) $u->hr_scope);
+        }
+        if ($u->hasRole('hr_staff') && $acc->canAny('COM', 'publish')) {
+            $ids = array_merge($ids, array_map('intval', $u->perms['companies'] ?? []));
+        }
+        if ($u->hasRole('ceo') && $u->company_id) {
+            $ids[] = (int) $u->company_id;
+        }
+        if ($u->employee_id) {
+            $ids = array_merge($ids, \App\Models\Company::where('ceo_employee_id', $u->employee_id)->pluck('id')->all(),
+                DB::table('announcement_publishers')->where('employee_id', $u->employee_id)->pluck('company_id')->all());
+        }
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+
+        return $ids ?: null;
+    }
+
+    /** What the current user may publish (UI). */
+    public function canPublish(Request $request)
+    {
+        $s = self::publishScope($request->user());
+
+        return ['can' => $s !== null, 'all' => $s === 'all', 'companies' => $s === 'all' ? \App\Models\Company::pluck('id') : ($s ?? []),
+            'manage_publishers' => self::publisherCompanies($request->user())];
+    }
+
+    /** Companies whose publishers this user manages: the company CEO for his company, the group CEO / group HR for all. */
+    private static function publisherCompanies(User $u): array
+    {
+        if ($u->hasRole('super') || ($u->hasRole('hr_mgr') && ! $u->hr_scope)) {
+            return \App\Models\Company::pluck('id')->all();
+        }
+        $ids = $u->hasRole('ceo') && $u->company_id ? [(int) $u->company_id] : [];
+        if ($u->employee_id) {
+            $ids = array_merge($ids, \App\Models\Company::where('ceo_employee_id', $u->employee_id)->pluck('id')->all());
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /** §115: publishers designated by the company CEO. */
+    public function publishers(Request $request)
+    {
+        $cids = self::publisherCompanies($request->user());
+        abort_unless($cids, 403);
+
+        return DB::table('announcement_publishers as p')->join('employees as e', 'e.id', '=', 'p.employee_id')->join('companies as c', 'c.id', '=', 'p.company_id')
+            ->whereIn('p.company_id', $cids)->orderBy('c.name')->get(['p.id', 'p.company_id', 'c.name as company', 'p.employee_id', 'e.name as employee', 'e.emp_no', 'p.created_at']);
+    }
+
+    public function addPublisher(Request $request)
+    {
+        $d = $request->validate(['company_id' => 'required|exists:companies,id', 'employee_id' => 'required|exists:employees,id']);
+        abort_unless(in_array((int) $d['company_id'], self::publisherCompanies($request->user()), true), 403, 'يحدد الناشرين الرئيس التنفيذي للشركة (§115)');
+        abort_unless((int) Employee::whereKey($d['employee_id'])->value('company_id') === (int) $d['company_id'], 422, 'الناشر من موظفي الشركة نفسها');
+        DB::table('announcement_publishers')->updateOrInsert(['company_id' => $d['company_id'], 'employee_id' => $d['employee_id']], ['designated_by' => $request->user()->id, 'created_at' => now(), 'updated_at' => now()]);
+        Audit::log('announcement_publishers', $d['employee_id'], 'designate', null, $d);
+        Audit::notify(User::where('employee_id', $d['employee_id'])->value('id'), 'خُوّلت بنشر الإعلانات لشركتك', 'بتحديد من الرئيس التنفيذي للشركة (§115)', 'info', ['screen' => 'announcements']);
+
+        return $this->publishers($request);
+    }
+
+    public function removePublisher(Request $request, int $id)
+    {
+        $row = DB::table('announcement_publishers')->find($id);
+        abort_unless($row && in_array((int) $row->company_id, self::publisherCompanies($request->user()), true), 403);
+        DB::table('announcement_publishers')->where('id', $id)->delete();
+        Audit::log('announcement_publishers', $row->employee_id, 'revoke', (array) $row);
+
+        return $this->publishers($request);
     }
 
     public function read(Request $request, Announcement $announcement)

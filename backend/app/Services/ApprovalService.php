@@ -23,7 +23,8 @@ class ApprovalService
 {
     public const ROLES = [
         'mgr' => 'المدير المباشر', 'hr' => 'الموارد البشرية', 'hr_staff' => 'موظف الموارد البشرية', 'hr_mgr' => 'مدير الموارد البشرية',
-        'ceo' => 'الرئيس التنفيذي للشركة', 'fin' => 'المدير المالي', 'super' => 'الرئيس التنفيذي للمجموعة',
+        'ceo' => 'الرئيس التنفيذي للشركة', 'fin' => 'المدير المالي', 'super' => 'الرئيس التنفيذي للمجموعة', 'custodian' => 'مسؤول العهد والتقنية',
+        'board' => 'رئيس مجلس إدارة المجموعة',
     ];
 
     private static ?array $types = null;
@@ -90,7 +91,7 @@ class ApprovalService
             $req = ApprovalRequest::create([
                 'type' => $type, 'employee_id' => $e->id, 'company_id' => $e->company_id, 'data' => $data,
                 'flow' => $flow ?? self::flowFor($type, $data), 'stage' => 0, 'status' => 'pending',
-                'created_by' => auth()->id(), 'attachment_path' => $attachment,
+                'created_by' => auth()->id(), 'attachment_path' => $attachment, 'stage_entered_at' => now(),
             ]);
             $req->actions()->create(['stage' => 0, 'user_id' => auth()->id(), 'decision' => 'submit']);
             Audit::log('requests', $req->id, 'create', null, ['type' => $type, 'employee' => $e->id]);
@@ -153,8 +154,10 @@ class ApprovalService
         $e = $r->relationLoaded('employee') ? $r->employee : $r->employee()->first();
         $cid = $r->company_id;
         $ids = match ($st['role']) {
-            // direct manager, and the HR manager may also decide this stage (either one is enough)
-            'mgr' => ($e?->manager_id && ($u = User::where('employee_id', $e->manager_id)->where('active', true)->value('id'))) ? array_values(array_unique([$u, ...Access::hrManagersFor($cid)])) : self::hrApprovers($r),
+            // §12: the direct manager decides the first stage; with no (active) manager the request goes to the group CEO (§11)
+            'mgr' => ($e?->manager_id && ($u = User::where('employee_id', $e->manager_id)->where('active', true)->value('id'))) ? [$u] : Access::usersWithRole('super'),
+            'custodian' => Access::usersWithRole('custodian') ?: self::hrApprovers($r),
+            'board' => Access::usersWithRole('board'),
             'hr' => self::hrApprovers($r),
             'hr_staff' => self::hrApprovers($r, staffOnly: true) ?: Access::usersWithRole('hr_mgr'),
             'hr_mgr' => Access::hrManagersFor($cid),
@@ -166,11 +169,15 @@ class ApprovalService
         };
         $requester = User::where('employee_id', $r->employee_id)->value('id');
         $ids = array_values(array_diff($ids, [$requester]));
-        if (! $ids) { // conflict of interest → escalate
-            $ids = array_values(array_diff(Access::usersWithRole('super'), [$requester]));
+        if (! $ids) { // conflict of interest → escalate (§10); the group CEO's own matters go to the board chair, recorded by HR when no board account exists
+            $ids = array_values(array_diff(Access::usersWithRole('super'), [$requester])) ?: array_values(array_diff([...Access::usersWithRole('board'), ...Access::usersWithRole('hr_mgr')], [$requester]));
         }
+        // §11: a delegation is limited to its company, operations and amount cap
+        $amount = (float) ($r->data['amount'] ?? $r->data['estimate'] ?? 0);
         $delegates = Delegation::active()->whereIn('from_user_id', $ids)->get()
-            ->filter(fn ($d) => empty($d->ops) || in_array(self::op($r->type), $d->ops, true))->pluck('to_user_id')->all();
+            ->filter(fn ($d) => (empty($d->ops) || in_array(self::op($r->type), $d->ops, true))
+                && (empty($d->company_id) || (int) $d->company_id === (int) $r->company_id)
+                && ($d->amount_cap === null || $amount <= (float) $d->amount_cap))->pluck('to_user_id')->all();
 
         return array_values(array_diff(array_unique([...$ids, ...$delegates]), [$requester]));
     }
@@ -209,7 +216,71 @@ class ApprovalService
         return self::type($type)?->op ?? 'EMP';
     }
 
-    public static function decide(ApprovalRequest $r, string $decision, ?string $reason, User $by): ApprovalRequest
+    /**
+     * §12: an approver may change days or amounts within his authority, with a mandatory reason; the before/after values
+     * are kept in the request's history and every computed value (days, allowances, instalments) is recalculated.
+     */
+    public static function adjust(ApprovalRequest $r, array $changes, ?string $reason, User $by): void
+    {
+        if ($r->status !== 'pending' || ! in_array($by->id, self::approvers($r), true)) {
+            abort(403, 'لست ضمن معتمدي هذه المرحلة');
+        }
+        if (! $reason) {
+            throw ValidationException::withMessages(['reason' => 'اكتب سبب التعديل']);
+        }
+        $allowed = PolicyRules::adjustable($r->type);
+        $d = $r->data;
+        $before = [];
+        foreach ($changes as $k => $v) {
+            if (! isset($allowed[$k]) || $v === null || $v === '' || (string) ($d[$k] ?? '') === (string) $v) {
+                continue;
+            }
+            if ($allowed[$k] === 'number' && (! is_numeric($v) || $v < 0)) {
+                throw ValidationException::withMessages([$k => 'قيمة غير صحيحة']);
+            }
+            if ($allowed[$k] === 'date' && ! strtotime((string) $v)) {
+                throw ValidationException::withMessages([$k => 'تاريخ غير صحيح']);
+            }
+            $before[$k] = $d[$k] ?? null;
+            $d[$k] = $allowed[$k] === 'number' ? (float) $v : (string) $v;
+        }
+        if (! $before) {
+            return;
+        }
+        $e = $r->employee;
+        $handler = self::type($r->type)?->handler;
+        if (in_array($handler, ['leave', 'trip', 'flex_arrangement'], true) && ($d['to'] ?? '') < ($d['from'] ?? '')) {
+            throw ValidationException::withMessages(['to' => 'تاريخ النهاية قبل البداية']);
+        }
+        if ($handler === 'leave') {
+            $d['days'] = LeaveService::days($d['from'], $d['to'], $e->loadMissing('schedule'));
+        } elseif ($handler === 'trip') {
+            $d['days'] = Carbon::parse($d['from'])->diffInDays(Carbon::parse($d['to'])) + 1;
+            $d = array_merge($d, \App\Http\Controllers\Api\RequestController::tripRates($e, (int) $d['days']));
+        } elseif ($handler === 'advance') {
+            $d['installments'] = max(1, (int) $d['installments']);
+            $d['monthly'] = round($d['amount'] / $d['installments'], 2);
+        } elseif ($handler === 'ticket') {
+            $d['approved_amount'] = round(($d['cap'] ?? 0) > 0 ? min((float) $d['estimate'], (float) $d['cap']) : (float) $d['estimate'], 2);
+        }
+        // the HR staff limit (days / amount) of the person changing it still applies
+        if ($by->hasRole('hr_staff') && ! $by->hasRole('hr_mgr', 'super')) {
+            $op = self::op($r->type);
+            $limit = $by->perms['limits'][$op] ?? null;
+            $metric = $op === 'LVE' ? (float) ($d['days'] ?? 0) : (float) ($d['amount'] ?? 0);
+            if ($limit !== null && $limit !== '' && $metric > (float) $limit) {
+                throw ValidationException::withMessages(['changes' => 'التعديل يتجاوز حد صلاحيتك المفوضة']);
+            }
+        }
+        $after = array_intersect_key($d, $before);
+        $r->data = $d;
+        $r->save();
+        $r->actions()->create(['stage' => $r->stage, 'user_id' => $by->id, 'decision' => 'adjust', 'reason' => $reason.' — '.collect($before)->map(fn ($v, $k) => "$k: ".self::humanValue($v).' ← '.self::humanValue($after[$k] ?? null))->implode(' · ')]);
+        Audit::log('requests', $r->id, 'adjust', $before, $after, $reason);
+        Audit::notify(User::where('employee_id', $r->employee_id)->value('id'), 'عُدّل طلب '.self::label($r->type).' أثناء الاعتماد', $reason, 'info', ['screen' => 'requests']);
+    }
+
+    public static function decide(ApprovalRequest $r, string $decision, ?string $reason, User $by, ?int $returnTo = null): ApprovalRequest
     {
         if ($r->status !== 'pending') {
             throw ValidationException::withMessages(['request' => 'الطلب ليس بانتظار الاعتماد']);
@@ -222,7 +293,7 @@ class ApprovalService
             throw ValidationException::withMessages(['reason' => 'سبب الإرجاع إلزامي']);
         }
 
-        return DB::transaction(function () use ($r, $decision, $reason, $by, $approvers) {
+        return DB::transaction(function () use ($r, $decision, $reason, $by, $approvers, $returnTo) {
             // Re-read under a row lock so two approvers of the same stage cannot both advance it
             $fresh = ApprovalRequest::lockForUpdate()->find($r->id);
             if ($fresh->status !== 'pending' || $fresh->stage !== $r->stage) {
@@ -236,6 +307,7 @@ class ApprovalService
 
             if ($decision === 'approve') {
                 $r->stage++;
+                $r->stage_entered_at = now();
                 // the next stage falls to the same person only: approve it in the same step instead of asking twice
                 self::skipStages($r);
                 while ($r->stage < count($r->flow) && self::approvers($r) === [$by->id]) {
@@ -254,6 +326,13 @@ class ApprovalService
                     Audit::notify(self::approvers($r), 'طلب '.self::label($r->type).' بانتظار اعتمادك', $r->employee->name.' — '.self::summary($r), 'approval', ['screen' => 'approvals'], $r->id);
                     Audit::notify($requester, 'تقدّم طلبك إلى المرحلة التالية', self::summary($r), 'info', ['screen' => 'requests']);
                 }
+            } elseif ($returnTo !== null && $returnTo >= 0 && $returnTo < $r->stage) {
+                // §12: returned to a chosen earlier stage, which decides again
+                $r->stage = $returnTo;
+                $r->stage_entered_at = now();
+                $r->save();
+                Audit::notify(self::approvers($r), 'أُرجع إليك طلب '.self::label($r->type).' لاستكماله', $r->employee->name.' — '.$reason, 'approval', ['screen' => 'approvals'], $r->id);
+                Audit::notify($requester, 'أُرجع طلبك إلى مرحلة سابقة', $reason, 'info', ['screen' => 'requests']);
             } else {
                 $r->status = 'returned';
                 $r->decided_at = now();
@@ -299,7 +378,12 @@ class ApprovalService
                     }
                 }
                 if ($rec->check_in) {
-                    $rec->late_minutes = AttendanceService::lateMinutes($e, $rec->check_in);
+                    $abs = 0;
+                    $rec->late_minutes = AttendanceService::lateMinutes($e, $rec->check_in, $abs);
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('attendance_records', 'flex_minutes')) {
+                        $rec->flex_minutes = $abs;
+                        $rec->source = 'correction';
+                    }
                 }
                 if ($rec->check_in && $rec->check_out) {
                     $rec->early_minutes = AttendanceService::earlyMinutes($e, $rec->check_in, $rec->check_out);
@@ -332,17 +416,106 @@ class ApprovalService
                 break;
             case 'reopen': // month lock lifted for N days (one employee, or every report of the company for that period)
                 $until = now()->addDays((int) ($d['days'] ?? 2))->toDateString();
-                \App\Models\MonthlyReport::where('period', $d['period'] ?? '')->where(fn ($q) => $q->where('employee_id', $e->id)->orWhere('company_id', $e->company_id))->update(['reopen_until' => $until]);
+                // one employee's month unless the request explicitly covers the whole company
+                \App\Models\MonthlyReport::where('period', $d['period'] ?? '')->where(fn ($q) => ($d['scope'] ?? 'employee') === 'company' ? $q->where('company_id', $e->company_id) : $q->where('employee_id', $e->id))->update(['reopen_until' => $until]);
                 \App\Models\MonthlyReport::firstOrCreate(['employee_id' => $e->id, 'period' => $d['period'] ?? now()->format('Y-m')], ['company_id' => $e->company_id, 'items' => [], 'status' => 'draft', 'reopen_until' => $until]);
                 break;
             case 'policy': // approved policy change lands in the settings table with the request as its reason
                 Settings::set($d['key'], is_numeric($d['value']) ? $d['value'] + 0 : (in_array(strtolower((string) $d['value']), ['true', 'false'], true) ? $d['value'] === 'true' : $d['value']), ! empty($d['company_id']) ? (int) $d['company_id'] : null, 'طلب تعديل سياسة #'.$r->id.' — '.($d['reason'] ?? ''));
                 break;
-            case 'custody': // custodians prepare and hand the item from the custody screen
+            case 'custody': // in-kind: custodians prepare and hand it; cash: the approved amount is booked on the employee and paid to his IBAN
+                if ((float) ($d['amount'] ?? 0) > 0 && ($ct = \App\Models\CustodyType::where('is_cash', true)->where('active', true)->first())) {
+                    $item = new \App\Models\CustodyItem(['custody_type_id' => $ct->id, 'company_id' => $e->company_id, 'ident' => 'عهدة نقدية #'.$r->id.' — '.mb_substr((string) ($d['purpose'] ?? $d['kind'] ?? ''), 0, 60), 'fields' => [],
+                        'value' => (float) $d['amount'], 'employee_id' => $e->id, 'status' => 'in_use', 'history' => []]);
+                    $item->log('تسليم', 'عهدة نقدية معتمدة — تُحوَّل إلى حساب الموظف البنكي (§38/§44)', $e->id);
+                    $item->save();
+                    Audit::notify(Access::usersWithRole('fin'), 'عهدة نقدية معتمدة — حوّلها لحساب الموظف', $e->name.' — '.number_format((float) $d['amount'], 2).' ر.س', 'approval', ['screen' => 'custody']);
+                    break;
+                }
                 Audit::notify([...Access::usersWithRole('custodian'), ...Access::hrUsersFor($e->company_id, 'CUS')], 'طلب عهدة معتمد — جهّز وسلّم', $e->name.' — '.($d['kind'] ?? ''), 'approval', ['screen' => 'custody']);
                 break;
+            case 'ticket':
+                $e->addCareer('تذكرة إجازة', ($d['destination'] ?? '').' · '.($d['travel_date'] ?? '').' · حتى '.number_format((float) ($d['approved_amount'] ?? 0)).' ر.س'.(! empty($d['cash']) ? ' (بدل مالي)' : ''));
+                Audit::notify(Access::usersWithRole('fin'), 'تذكرة إجازة معتمدة', $e->name.' — '.($d['destination'] ?? '').(! empty($d['cash']) ? ' — بدل مالي يُحوَّل للآيبان' : ' — احجز على الدرجة الاقتصادية'), 'approval', ['screen' => 'requests']);
+                break;
+            case 'ticket_carry':
+                $cb = $e->custom_benefits ?? [];
+                [$ys] = PolicyRules::benefitsYear(now()->addYear());
+                $cb['ticketCarryYear'] = $ys->year;
+                $e->update(['custom_benefits' => $cb]);
+                $e->addCareer('ترحيل تذكرة إجازة', 'إلى سنة المزايا '.$ys->year.' — '.($d['reason'] ?? ''));
+                break;
+            case 'ticket_children':
+                $cb = $e->custom_benefits ?? [];
+                $cb['ticketChildren'] = (int) $d['children'];
+                $e->update(['custom_benefits' => $cb]);
+                $e->addCareer('استثناء تذاكر الأسرة', 'عدد الأبناء المستحقين: '.(int) $d['children']);
+                break;
+            case 'leave_defer': // §57: up to 3 months of the next year; days not taken by then lapse
+                LeaveLedger::create(['employee_id' => $e->id, 'year' => (int) $d['year'], 'leave_type' => 'annual', 'entry' => 'used', 'days' => -(float) $d['days'], 'note' => 'مؤجلة إلى السنة التالية (طلب #'.$r->id.')', 'request_id' => $r->id, 'occurred_on' => now()->toDateString()]);
+                LeaveLedger::create(['employee_id' => $e->id, 'year' => (int) $d['year'] + 1, 'leave_type' => 'annual', 'entry' => 'carry', 'days' => (float) $d['days'], 'note' => 'مرحّلة حتى '.$d['until'].' (§57)', 'request_id' => $r->id, 'occurred_on' => now()->toDateString()]);
+                $e->addCareer('تأجيل إجازة', (float) $d['days'].' يوم حتى '.$d['until']);
+                break;
+            case 'overtime': // §26: paid with the payroll of its month at 150% of the hourly basic wage (or compensated by paid leave)
+                if (! empty($d['leave_instead'])) {
+                    $hours = (float) Settings::get('dailyHours', $e->company_id, 8);
+                    LeaveLedger::create(['employee_id' => $e->id, 'year' => (int) substr($d['date'], 0, 4), 'leave_type' => 'annual', 'entry' => 'adjust', 'days' => round((float) $d['hours'] * (float) ($d['rate'] ?? 1.5) / max(1, $hours), 2), 'note' => 'تعويض عمل إضافي بإجازة مدفوعة (§26)', 'request_id' => $r->id, 'occurred_on' => $d['date']]);
+                }
+                $e->addCareer('عمل إضافي', ($d['hours'] ?? 0).' ساعة في '.$d['date'].(! empty($d['leave_instead']) ? ' — عُوّض بإجازة' : ''));
+                break;
+            case 'flex_arrangement':
+                $e->addCareer('ترتيب عمل مرن', ($d['kind'] ?? '').' من '.($d['from'] ?? '').' إلى '.($d['to'] ?? ''));
+                if (str_contains((string) ($d['kind'] ?? ''), 'مرونة')) {
+                    $e->update(['flex_enabled' => true]);
+                }
+                break;
+            case 'iban_change': // §38: HR verified the bank certificate, finance approved — every payment now goes to this account
+                $old = $e->bank_iban;
+                $e->forceFill(['bank_iban' => $d['iban'], 'iban_verified_at' => now()])->save();
+                Audit::log('employees', $e->id, 'iban_change', ['bank_iban' => $old], ['bank_iban' => $d['iban']], 'طلب #'.$r->id);
+                $e->addCareer('تعديل الحساب البنكي', 'حساب جديد معتمد ('.($d['bank'] ?? '').') — ينتهي بـ '.substr($d['iban'], -4));
+                break;
+            case 'expense':
+                $e->addCareer('مطالبة مصروفات', number_format((float) $d['amount'], 2).' ر.س — '.mb_substr((string) ($d['description'] ?? ''), 0, 100));
+                Audit::notify(Access::usersWithRole('fin'), 'مطالبة مصروفات معتمدة — تُصرف للآيبان', $e->name.' — '.number_format((float) $d['amount'], 2).' ر.س', 'info', ['screen' => 'payroll']);
+                break;
+            case 'probation':
+                if (str_contains($d['decision'], 'تثبيت')) {
+                    $e->forceFill(['probation_status' => 'confirmed', 'confirmed_at' => $d['effective']])->save();
+                    $e->addCareer('تثبيت بعد التجربة', $d['decision'].' من '.$d['effective']);
+                } else {
+                    $e->forceFill(['probation_status' => 'ended'])->save();
+                    $e->addCareer('إنهاء خلال التجربة', 'من '.$d['effective'].' — '.($d['notes'] ?? ''));
+                    Audit::notify(Access::hrManagersFor($e->company_id), 'إنهاء عقد خلال التجربة معتمد', $e->name.' — افتح ملف إنهاء الخدمة واستكمل الإخلاء والتسوية', 'approval', ['screen' => 'terminations']);
+                }
+                break;
+            case 'probation_shorten':
+                $e->forceFill(['probation_days' => (int) $d['days']])->save();
+                $e->addCareer('تقصير مدة التجربة', (int) $d['days'].' يومًا — '.($d['reason'] ?? ''));
+                break;
+            case 'promotion':
+                if ($d['kind'] === 'ترقية') {
+                    if (! empty($d['new_basic'])) {
+                        $e->components()->where('key', 'basic')->whereNull('valid_to')->update(['valid_to' => Carbon::parse($d['effective'])->subDay()->toDateString()]);
+                        $e->components()->create(['key' => 'basic', 'name' => 'الأجر الأساسي', 'amount' => (float) $d['new_basic'], 'source' => 'custom', 'valid_from' => $d['effective'], 'approval_request_id' => $r->id]);
+                    }
+                    $e->addCareer('ترقية', ($d['title'] ?? '').' من '.$d['effective'].(! empty($d['new_basic']) ? ' — الأساسي '.number_format((float) $d['new_basic']) : ''));
+                } else { // §22: acting allowance from the day after the third month, for at most six months
+                    $e->components()->create(['key' => 'acting', 'name' => 'بدل تكليف ('.($d['acting_pct'] ?? 15).'%)', 'amount' => (float) $d['acting_allowance'], 'source' => 'custom',
+                        'valid_from' => $d['allowance_from'], 'valid_to' => $d['allowance_to'], 'approval_request_id' => $r->id]);
+                    $e->addCareer('تكليف بوظيفة أعلى', ($d['title'] ?? '').' من '.$d['effective'].' — بدل '.number_format((float) $d['acting_allowance']).' ر.س من '.$d['allowance_from'].' إلى '.$d['allowance_to']);
+                }
+                break;
+            case 'transfer': // §23: the move takes effect on the agreed date; balances and service continue unless a new contract was chosen
+                $from = $e->company?->name;
+                $e->update(['company_id' => (int) $d['to_company']]);
+                $e->addCareer('نقل بين الشركات', $from.' ← '.($d['to_company_name'] ?? '').' من '.$d['effective'].' — '.($d['method'] ?? ''));
+                break;
             case 'letter':
-                \App\Http\Controllers\Api\LetterController::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', auth()->id(), $r->id, ['purpose' => $d['purpose'] ?? null, 'justification' => $d['justification'] ?? null]);
+                $letter = \App\Http\Controllers\Api\LetterController::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', auth()->id(), $r->id, ['purpose' => $d['purpose'] ?? null, 'justification' => $d['justification'] ?? null]);
+                if ($r->attachment_path && \Illuminate\Support\Facades\Schema::hasColumn('letters', 'attachment_path')) { // §114: the request's supporting file stays with the letter
+                    $letter->forceFill(['attachment_path' => $r->attachment_path])->save();
+                }
                 break;
             case 'trip':
                 $e->addCareer('رحلة عمل', ($d['destination'] ?? '').' · '.($d['from'] ?? '').' → '.($d['to'] ?? ''));
@@ -356,7 +529,7 @@ class ApprovalService
                 break;
             case 'bonus': // §87: the approved instant bonus is recorded in the incentives register and paid with the next payroll
                 \App\Models\Incentive::create(['employee_id' => $e->id, 'company_id' => $e->company_id, 'kind' => 'bonus', 'title' => 'مكافأة إنجاز فورية', 'detail' => $d['achievement'] ?? null,
-                    'amount' => (float) ($d['amount'] ?? 0), 'points' => 20, 'period' => now()->format('Y-m'), 'given_by' => auth()->id(), 'request_id' => $r->id]);
+                    'amount' => (float) ($d['amount'] ?? 0), 'points' => 0, 'period' => now()->format('Y-m'), 'given_by' => auth()->id(), 'request_id' => $r->id]);
                 $e->addCareer('مكافأة إنجاز', number_format((float) ($d['amount'] ?? 0)).' ر.س — '.mb_substr((string) ($d['achievement'] ?? ''), 0, 120));
                 break;
             case 'dev_program': // §80: the approved program lands in the development register as planned
@@ -394,6 +567,14 @@ class ApprovalService
             'trip' => ($d['destination'] ?? '').' · '.($d['from'] ?? '').' → '.($d['to'] ?? ''),
             'letter' => ($d['kind'] ?? '').' — '.($d['to'] ?? ''),
             'resignation' => 'آخر يوم محسوب '.($d['computed_last'] ?? ''),
+            'ticket' => ($d['destination'] ?? '').' · '.($d['travel_date'] ?? '').' · حتى '.number_format((float) ($d['approved_amount'] ?? 0)).' ر.س',
+            'overtime' => ($d['hours'] ?? 0).' ساعة · '.($d['date'] ?? ''),
+            'expense' => number_format((float) ($d['amount'] ?? 0), 2).' ر.س · '.($d['date'] ?? ''),
+            'iban_change' => 'حساب جديد ينتهي بـ '.substr((string) ($d['iban'] ?? ''), -4),
+            'leave_defer' => ($d['days'] ?? 0).' يوم حتى '.($d['until'] ?? ''),
+            'promotion' => ($d['kind'] ?? '').' · '.($d['title'] ?? ''),
+            'transfer' => 'إلى '.($d['to_company_name'] ?? '').' · '.($d['effective'] ?? ''),
+            'probation' => ($d['decision'] ?? '').' · '.($d['recommendation'] ?? ''),
             default => self::customSummary($r->type, $d),
         };
     }

@@ -52,7 +52,10 @@ class IncentiveController extends Controller
         abort_unless(Access::for()->isManagerOf($e) || Access::for()->can('PRF', 'approve', ['employee' => $e]) || $u->hasRole('super'), 403);
         abort_if($e->id === $u->employee_id, 422, 'لا يمكن تسجيل إشادة لنفسك');
         abort_if($d['kind'] === 'bonus', 422, 'المكافأة الفورية تُقدَّم طلبًا (مكافأة إنجاز فورية) وتُسجَّل هنا بعد اعتمادها');
-        $points = $d['points'] ?? ($d['kind'] === 'praise' ? 20 : 0); // §88: a documented praise = 20 excellence points
+        // §88: the points are fixed by the policy table, not by the giver — a documented praise (manager / management /
+        // external body) = 20; other register entries (instant bonus, development star) carry no excellence points.
+        unset($d['points']);
+        $points = in_array($d['kind'], BonusService::PRAISE_KINDS, true) ? 20 : 0;
         $inc = Incentive::create($d + ['company_id' => $e->company_id, 'points' => $points, 'period' => $d['period'] ?? now()->format('Y-m'), 'given_by' => $u->id]);
         $e->addCareer('إشادة / تقدير', Incentive::KINDS[$inc->kind].' — '.$inc->title);
         Audit::log('incentives', $inc->id, 'create', null, $inc->only('kind', 'title', 'points'));

@@ -24,13 +24,57 @@ class DevelopmentController extends Controller
             'budget' => $e->benefit('devBudget'), 'programs_per_month' => $e->benefit('programsPerMonth'), 'points' => \App\Services\EvaluationService::devPoints($e, $period) + ['period' => $period],
             'activities' => \App\Models\Lookup::where('group', 'dev_activities')->where('active', true)->orderBy('sort')->get(['code', 'name', 'name_en', 'meta']),
             'spent' => (float) DevRecord::where('employee_id', $e->id)->where('status', 'verified')->where('from', 'like', now()->year.'-%')->sum('cost'),
-            'committed' => (float) DevRecord::where('employee_id', $e->id)->whereNotIn('status', ['rejected', 'cancelled'])->where('from', 'like', now()->year.'-%')->sum('cost')];
+            'committed' => (float) DevRecord::where('employee_id', $e->id)->whereNotIn('status', ['rejected', 'cancelled'])->where('from', 'like', now()->year.'-%')->sum('cost'),
+            // §79: annual recognition progress and the development star of the current / previous quarter in the company
+            'recognition' => \App\Services\EvaluationService::devYear($e, (int) now()->year),
+            'stars' => $this->starsFor(Employee::where('company_id', $e->company_id)->where('status', '!=', 'terminated')->with('company:id,name')->get())];
+    }
+
+    /** Stars of the current quarter (so far) and the previous one. */
+    private function starsFor($emps): array
+    {
+        $q = (int) ceil(now()->month / 3);
+        $prevY = $q === 1 ? (int) now()->year - 1 : (int) now()->year;
+        $prevQ = $q === 1 ? 4 : $q - 1;
+
+        return ['current' => \App\Services\EvaluationService::devStars($emps, (int) now()->year, $q), 'previous' => \App\Services\EvaluationService::devStars($emps, $prevY, $prevQ)];
+    }
+
+    /**
+     * ?board=1 → §79 development leaderboard: points of the month per employee, the quarter's development stars per
+     * company, and the annual recognition (≥ 1,500 points or ≥ 6 gold months).
+     */
+    public function board(Request $request): array
+    {
+        $acc = Access::for();
+        $period = $request->input('period', now()->format('Y-m'));
+        $year = (int) $request->input('year', substr($period, 0, 4));
+        $quarter = (int) $request->input('quarter', ceil((int) substr($period, 5, 2) / 3));
+        $emps = $acc->employees()->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->get();
+        $rows = $emps->map(function ($e) use ($period, $year) {
+            $dp = \App\Services\EvaluationService::devPoints($e, $period);
+            $yr = \App\Services\EvaluationService::devYear($e, $year);
+
+            return ['employee' => $e->only('id', 'name', 'emp_no'), 'company' => $e->company?->name, 'total' => $dp['total'], 'level' => $dp['level'], 'level_label' => $dp['level_label'],
+                'year_points' => $yr['points'], 'gold_months' => $yr['gold_months'], 'annual_recognition' => $yr['qualified']];
+        })->sortByDesc('total')->values();
+
+        return ['period' => $period, 'rows' => $rows, 'stars' => \App\Services\EvaluationService::devStars($emps, $year, $quarter),
+            'recognized' => $rows->where('annual_recognition', true)->values()];
     }
 
     public function index(Request $request)
     {
         abort_unless(Access::for()->canAny('DEV', 'view'), 403);
+        if ($request->boolean('board')) {
+            return $this->board($request);
+        }
         $ids = Access::for()->employees()->pluck('id');
+        // §79: last month ended below 50 points → the manager is asked (once) to hold a guidance session
+        $prev = now()->subMonthNoOverflow()->format('Y-m');
+        foreach (Employee::whereIn('id', $ids)->where('status', '!=', 'terminated')->get() as $emp) {
+            \App\Services\EvaluationService::devGuidance($emp, $prev);
+        }
 
         return DevRecord::with('employee:id,name,emp_no,company_id,manager_id', 'employee.company:id,name')->whereIn('employee_id', $ids)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->orderByDesc('id')->limit(300)->get()->map(fn ($r) => $this->row($r));
@@ -41,13 +85,23 @@ class DevelopmentController extends Controller
         $u = $request->user();
         $d = $request->validate(['employee_id' => 'nullable|exists:employees,id', 'program' => 'required|string|max:160', 'provider' => 'nullable|string|max:120', 'kind' => 'nullable|string|max:60',
             'activity' => ['nullable', 'string', 'max:20', \Illuminate\Validation\Rule::exists('lookups', 'code')->where('group', 'dev_activities')],
-            'from' => 'nullable|date', 'to' => 'nullable|date|after_or_equal:from', 'hours' => 'nullable|numeric|min:0', 'cost' => 'nullable|numeric|min:0', 'notes' => 'nullable|string|max:1000']);
+            'from' => 'nullable|date', 'to' => 'nullable|date|after_or_equal:from', 'hours' => 'nullable|numeric|min:0', 'cost' => 'nullable|numeric|min:0', 'notes' => 'nullable|string|max:1000',
+            'applied_note' => 'nullable|string|max:2000']);
         $pf = \App\Services\EvaluationService::pointsFor($d['activity'] ?? null, isset($d['hours']) ? (float) $d['hours'] : null);
         $d['activity'] = $pf['activity'];
         $target = ! empty($d['employee_id']) && (int) $d['employee_id'] !== $u->employee_id ? Employee::findOrFail($d['employee_id']) : $u->employee;
         abort_unless($target, 422);
         $assigned = $target->id !== $u->employee_id;
         abort_unless(! $assigned || Access::for()->can('DEV', 'add', ['employee' => $target]) || Access::for()->isManagerOf($target), 403);
+        // §78: one activity counts once — the same programme on the same date for the same employee is refused
+        $date = $d['to'] ?? $d['from'] ?? null;
+        $dup = DevRecord::where('employee_id', $target->id)->where('status', '!=', 'rejected')
+            ->whereRaw('LOWER(TRIM(program)) = ?', [mb_strtolower(trim($d['program']))])
+            ->when($date, fn ($q) => $q->where(fn ($w) => $w->whereDate('from', $date)->orWhereDate('to', $date)), fn ($q) => $q->whereNull('from')->whereNull('to')->whereDate('created_at', now()->toDateString()))
+            ->exists();
+        if ($dup) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['program' => 'هذا النشاط مسجَّل مسبقًا بالتاريخ نفسه — لا يُحتسب النشاط الواحد إلا مرة واحدة (§78)']);
+        }
         if (! empty($d['cost'])) {
             $budget = (float) ($target->benefit('devBudget') ?? 0);
             $year = substr($d['from'] ?? now()->toDateString(), 0, 4);
@@ -101,7 +155,7 @@ class DevelopmentController extends Controller
 
     private function row(DevRecord $r): array
     {
-        return $r->only('id', 'program', 'provider', 'kind', 'activity', 'points', 'points_month', 'hours', 'cost', 'source', 'status', 'notes', 'verified_at') + ['from' => $r->from?->format('Y-m-d'), 'to' => $r->to?->format('Y-m-d')] + [
+        return $r->only('id', 'program', 'provider', 'kind', 'activity', 'points', 'points_month', 'hours', 'cost', 'source', 'status', 'notes', 'applied_note', 'verified_at') + ['from' => $r->from?->format('Y-m-d'), 'to' => $r->to?->format('Y-m-d')] + [
             'status_label' => DevRecord::STATUSES[$r->status] ?? $r->status, 'has_certificate' => (bool) $r->certificate_path, 'certificate_path' => $r->certificate_path,
             'employee' => $r->relationLoaded('employee') ? $r->employee?->only('id', 'name', 'emp_no', 'manager_id') : null, 'company' => $r->relationLoaded('employee') && $r->employee?->relationLoaded('company') ? $r->employee->company?->name : null,
         ];

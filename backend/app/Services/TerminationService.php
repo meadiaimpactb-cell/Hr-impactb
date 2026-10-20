@@ -80,11 +80,40 @@ class TerminationService
         foreach (Advance::where('employee_id', $e->id)->where('status', 'repaying')->get() as $a) {
             $lines[] = ['key' => 'advance', 'name' => 'رصيد سلفة متبقٍ', 'amount' => -round($a->remaining, 2), 'ref' => $a->id];
         }
-        foreach (CustodyItem::where('employee_id', $e->id)->whereIn('status', ['in_use', 'pending_ack', 'return_requested', 'inspecting', 'lost'])->get() as $c) {
+        foreach (CustodyItem::where('employee_id', $e->id)->whereIn('status', ['in_use', 'pending_ack', 'return_requested', 'inspecting', 'lost', 'damaged'])->get() as $c) {
             $lines[] = ['key' => 'custody', 'name' => 'عهدة غير مُعادة: '.$c->ident.' (تُقرر بقرار)', 'amount' => 0, 'ref' => $c->id];
         }
 
         return ['lines' => $lines, 'total' => round(array_sum(array_column($lines, 'amount')), 2), 'version' => ($t->settlement['version'] ?? 0) + 1, 'built_at' => now()->toDateTimeString()];
+    }
+
+    /**
+     * §108 notice: the employee gives noticeDaysMonthly (30) in a monthly-paid open contract; the employer gives
+     * noticeDaysEmployer (60). Non-monthly contracts: noticeDaysOther (30) for either party. Art. 80 dismissal: none.
+     */
+    public static function noticeDays(Employee $e, string $initiatedBy, ?string $reason = null): int
+    {
+        if ($reason === 'misconduct') {
+            return 0;
+        }
+        $monthly = $e->contract_type === 'full';
+        if (! $monthly) {
+            return (int) Settings::get('noticeDaysOther', $e->company_id, 30);
+        }
+
+        return $initiatedBy === 'employee' ? (int) Settings::get('noticeDaysMonthly', $e->company_id, 30) : (int) Settings::get('noticeDaysEmployer', $e->company_id, 60);
+    }
+
+    /** Leaders (appendix 5 "تعيين مدير إدارة أو إنهاء خدمته"): employees with direct reports, or a company CEO. */
+    public static function isLeader(Employee $e): bool
+    {
+        return Employee::where('manager_id', $e->id)->where('status', '!=', 'terminated')->exists() || \App\Models\Company::where('ceo_employee_id', $e->id)->exists();
+    }
+
+    /** A fresh approval chain record. */
+    public static function newFlow(string $key): array
+    {
+        return ['chain' => Termination::FLOWS[$key], 'stage' => 0, 'approvals' => [], 'done' => false];
     }
 
     public static function clearanceTasks(): array

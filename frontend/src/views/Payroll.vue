@@ -1,13 +1,13 @@
 <template>
   <div class="page-h">
-    <div><h1>الرواتب والقسائم</h1><p>تجميع آلي ← مراجعة أخصائي ← اعتماد مدير الموارد ← اعتماد الرئيس التنفيذي للمجموعة ← قسيمة تحتاج اعتماد المدير والموارد لتُنشر</p></div>
+    <div><h1>الرواتب والقسائم</h1><p>تجميع آلي ← مراجعة أخصائي الموارد ← اعتماد مدير الموارد ← اعتماد المدير المالي ← اعتماد الرئيس التنفيذي للمجموعة ← صرف بنكي على حساب الموظف الموثّق · لا يجمع شخص واحد مرحلتين · تُنشر القسيمة للموظف بعد الاعتماد ويُبلَّغ المدير المباشر للعلم</p></div>
   </div>
   <div class="tabs"><button v-for="x in tabs" :key="x[0]" :class="{ on: tab === x[0] }" @click="tab = x[0]; load()">{{ x[1] }}</button></div>
 
   <!-- mine: my payslips + my advances -->
   <template v-if="tab === 'mine'">
     <div class="card">
-      <h3>قسائمي <span class="sub">تظهر بعد اكتمال اعتماد المدير والموارد البشرية</span></h3>
+      <h3>قسائمي <span class="sub">تظهر بعد مراجعة المسير واعتماده</span></h3>
       <div v-if="!mySlips.length" class="empty"><div class="ic"><Icon name="money" :size="40" :stroke="1.4" /></div>لا قسائم منشورة بعد</div>
       <div v-dt v-else class="tw"><table>
         <thead><tr><th>الشهر</th><th>الإجمالي</th><th>الاستقطاعات</th><th>الصافي</th><th /></tr></thead>
@@ -64,11 +64,10 @@
       <h3>قسائم {{ fmtYM(period) }} <span class="sub">{{ slips.filter((s) => s.published).length }} منشورة من {{ slips.length }}</span></h3>
       <div v-if="!slips.length" class="empty">لا قسائم — تُولَّد بعد اعتماد المسير نهائيًا</div>
       <div v-dt v-else class="tw"><table>
-        <thead><tr><th>الموظف</th><th>الصافي</th><th>اعتماد المدير</th><th>اعتماد الموارد</th><th>الحالة</th><th /></tr></thead>
+        <thead><tr><th>الموظف</th><th>الصافي</th><th>مراجعة الموارد</th><th>الحالة</th><th /></tr></thead>
         <tbody><tr v-for="s in slips" :key="s.id">
           <td>{{ s.employee.name }}<span class="tiny muted">{{ s.employee.emp_no }}</span></td>
           <td class="num">{{ money(s.net) }}</td>
-          <td><span class="pill" :class="s.mgr_approved ? 'ok' : 'warn'">{{ s.mgr_approved ? 'معتمد' : 'بانتظار' }}</span></td>
           <td><span class="pill" :class="s.hr_approved ? 'ok' : 'warn'">{{ s.hr_approved ? 'معتمد' : 'بانتظار' }}</span></td>
           <td><span class="pill" :class="s.published ? 'ok' : 'gray'">{{ s.published ? 'منشورة' : 'مسودة' }}</span></td>
           <td><button class="btn ghost xs" @click="openSlip = s.id">فتح</button></td>
@@ -129,7 +128,7 @@ const openRun = ref(null)
 const tabs = computed(() => [auth.emp && ['mine', 'قسائمي وسلَفي'], canManage.value && ['runs', 'مسير الرواتب'], canManage.value && ['slips', 'القسائم'], canManage.value && ['advances', 'السلف']].filter(Boolean))
 const tab = ref('')
 
-const statusColor = (s) => ({ draft: 'gray', hr_review: 'warn', hr_approved: 'info', approved: 'ok' }[s] || 'gray')
+const statusColor = (s) => ({ draft: 'gray', hr_review: 'warn', hr_approved: 'info', fin_approved: 'info', approved: 'ok' }[s] || 'gray')
 
 async function checkScope() {
   const companies = await api.get('/payroll/companies')

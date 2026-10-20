@@ -20,7 +20,7 @@
         <td>{{ r.company }}</td>
         <td>{{ r.status === 'pending' ? `${r.stage + 1}/${r.flow.length} — ${r.stage_label}` : '—' }}</td>
         <td>{{ r.waiting_for?.length ? r.waiting_for.join('، ') : '—' }}</td>
-        <td class="num">{{ fmtD(r.created_at) }}<span v-if="r.status === 'pending'" class="tiny" :class="{ bad: r.age_days >= sla }"> · {{ r.age_days }} يوم</span></td>
+        <td class="num">{{ fmtD(r.created_at) }}<span v-if="r.status === 'pending'" class="tiny" :class="{ bad: r.overdue }" title="أيام العمل منذ وصول الطلب للمرحلة الحالية (المهلة 3 أيام عمل — §12)"> · {{ r.stage_days ?? r.age_days }} يوم عمل</span></td>
         <td><button class="btn ghost xs" @click="openId = r.id">تفاصيل</button></td>
       </tr></tbody>
     </table></div>
@@ -39,7 +39,7 @@
         <td>{{ r.company }}</td>
         <td>{{ r.stage + 1 }}/{{ r.flow.length }} — {{ r.stage_label }}</td>
         <td>{{ fmtD(r.created_at) }}</td>
-        <td><span :class="{ 'pill bad': r.age_days >= sla }">{{ r.age_days }} يوم</span></td>
+        <td><span :class="r.overdue ? 'pill bad' : 'pill gray'" title="أيام العمل منذ وصول الطلب إليك (المهلة 3 أيام عمل — §12)">{{ r.stage_days ?? r.age_days }} يوم عمل</span></td>
         <td><button class="btn okb xs" @click="openId = r.id">{{ t('تفاصيل') }} / {{ t('اعتماد') }}</button></td>
       </tr></tbody>
     </table></div>

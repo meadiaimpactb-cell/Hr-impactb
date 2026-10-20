@@ -74,6 +74,14 @@ class Employee extends Model
     }
 
     /** Benefit value: employee-specific exception first, then company tier. */
+    /** §63: insurance class by job level (1 CEO · 2 leaders · 3–4 managers/specialists · 5 operations) and the company tier. */
+    public function insuranceClass(): ?string
+    {
+        $key = match ((int) $this->job_level) { 1 => 'insuranceCeo', 2 => 'insuranceLeaders', 3, 4 => 'insuranceMgrs', default => 'insuranceClass' };
+
+        return $this->benefit($key) ?? $this->benefit('insuranceClass');
+    }
+
     public function benefit(string $key): mixed
     {
         if (is_array($this->custom_benefits) && array_key_exists($key, $this->custom_benefits)) {

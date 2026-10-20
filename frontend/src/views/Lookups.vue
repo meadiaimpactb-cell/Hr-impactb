@@ -112,6 +112,10 @@
         </tr></tbody>
       </table></div>
       <div class="row"><label class="chk"><input v-model="f.flex" type="checkbox" /> يسمح بالساعة المرنة</label><label class="chk"><input v-model="f.cross_midnight" type="checkbox" /> وردية عابرة لمنتصف الليل</label></div>
+      <div class="fr mt"><div class="fg"><label>فترة الراحة اليومية (دقيقة)</label><input v-model.number="f.break_minutes" type="number" min="0" max="180" class="in" /></div>
+        <div class="fg"><label>مجموع ساعات الأسبوع</label><div class="in" :class="{ bad: weekHours > 48 }" style="background:transparent">{{ weekHours }} ساعة <span class="tiny muted">(الحد الأعلى 48)</span></div></div></div>
+      <p class="tiny muted">اللائحة §24: لا يتجاوز الجدول 48 ساعة في الأسبوع، وتُخفَّض في رمضان للمسلمين إلى 6 ساعات يوميًا (الإعدادات ramadanFrom / ramadanTo). §25: لا يبقى الموظف في مكان العمل أكثر من 12 ساعة يوميًا، ولا يعمل أكثر من 5 ساعات متصلة دون راحة لا تقل عن 30 دقيقة، ولا تُحسب الراحة من ساعات العمل المطلوبة.</p>
+      <div v-if="errors.hours" class="notice bad small">{{ [].concat(errors.hours).join(' · ') }}</div>
     </template>
 
     <template v-else>
@@ -262,9 +266,17 @@ function open(r) {
   else if (kind.value === 'schedules') {
     const days = {}
     for (let d = 0; d < 7; d++) days[d] = { on: (x.week_days || [0, 1, 2, 3, 4]).includes(d), from: x.hours?.[d]?.[0] || '09:00', to: x.hours?.[d]?.[1] || '17:00' }
-    f.value = { flex: false, cross_midnight: false, ...x, days }
+    f.value = { flex: false, cross_midnight: false, break_minutes: 30, ...x, days }
   } else f.value = { scope: 'point', radius: 150, company_id: ui.company || auth.emp?.company_id || null, is_main: false, address: '', map_url: '', ...x } // the current company by default
 }
+
+// §24: weekly total of the schedule being edited (a shift ending before it starts crosses midnight)
+const weekHours = computed(() => {
+  if (kind.value !== 'schedules' || !f.value?.days) return 0
+  const m = (t) => { const [h, mi] = (t || '0:0').split(':').map(Number); return h * 60 + mi }
+  const tot = Object.values(f.value.days).filter((d) => d.on).reduce((s, d) => { const a = m(d.from); const b = m(d.to); return s + (b > a ? b - a : b + 1440 - a) }, 0)
+  return Math.round(tot / 6) / 10
+})
 
 function payload() {
   const x = f.value
@@ -275,7 +287,7 @@ function payload() {
   }
   if (kind.value === 'schedules') {
     const on = Object.entries(x.days).filter(([, v]) => v.on)
-    return { name: x.name, flex: !!x.flex, cross_midnight: !!x.cross_midnight, week_days: on.map(([d]) => +d), hours: Object.fromEntries(on.map(([d, v]) => [d, [v.from, v.to]])) }
+    return { name: x.name, flex: !!x.flex, cross_midnight: !!x.cross_midnight, break_minutes: x.break_minutes ?? 30, week_days: on.map(([d]) => +d), hours: Object.fromEntries(on.map(([d, v]) => [d, [v.from, v.to]])) }
   }
   const { id, created_at, updated_at, company, employees_count, ...rest } = x
   return rest
@@ -302,9 +314,9 @@ async function save() {
   }
   busy.value = true
   try {
-    if (f.value.id) await api.put(`/lookups/${kind.value}/${f.value.id}`, payload())
-    else await api.post(`/lookups/${kind.value}`, payload())
+    const res = f.value.id ? await api.put(`/lookups/${kind.value}/${f.value.id}`, payload()) : await api.post(`/lookups/${kind.value}`, payload())
     ui.toast('تم الحفظ', 'ok')
+    if (res?.check?.warnings?.length) ui.toast(res.check.warnings.join(' · '), 'warn', 8000)
     f.value = null
     load()
     auth.loadMeta()

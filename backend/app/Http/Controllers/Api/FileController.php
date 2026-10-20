@@ -25,6 +25,9 @@ class FileController extends Controller
         } elseif (! $ok && str_starts_with($path, 'requests/')) {
             $r = ApprovalRequest::where('attachment_path', $path)->first();
             $ok = $r && ($r->employee_id === $u->employee_id || in_array($u->id, \App\Services\ApprovalService::approvers($r), true) || \App\Services\Access::for()->canSeeEmployee($r->employee));
+        } elseif (! $ok && str_starts_with($path, 'letters/')) {
+            $l = \App\Models\Letter::where('attachment_path', $path)->first();
+            $ok = $l && ($l->employee_id === $u->employee_id || \App\Services\Access::for()->canSeeEmployee($l->employee));
         } elseif (! $ok && str_starts_with($path, 'mail/')) {
             $ok = MailThread::whereHas('messages', fn ($q) => $q->where('attachment_path', $path))->whereJsonContains('participants', $u->id)->exists();
         } elseif (! $ok && str_starts_with($path, 'announcements/')) {

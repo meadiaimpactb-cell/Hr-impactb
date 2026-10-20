@@ -18,7 +18,8 @@
       <button v-if="!disabled" type="button" class="btn ghost xs x" title="حذف اليوم (يصبح إجازة أسبوعية)" @click="remove(r.d)"><Icon name="x" :size="15" /></button>
     </div>
     <button v-if="!disabled && rows.length < 7" type="button" class="link-btn" @click="add">إضافة</button>
-    <div class="tiny muted mt">الأيام غير المضافة إجازة أسبوعية.</div>
+    <div class="tiny muted mt">الأيام غير المضافة إجازة أسبوعية. مجموع الأسبوع: <b :class="{ bad: total > 48 }">{{ total }} ساعة</b> (الحد الأعلى 48 — المادة 24)</div>
+    <div v-if="longDays.length" class="tiny bad">يتجاوز البقاء في مكان العمل 12 ساعة يوميًا (المادة 25): {{ longDays.join('، ') }}</div>
   </div>
 </template>
 
@@ -37,6 +38,9 @@ const PRESETS = [
 ]
 const val = () => props.modelValue || {}
 const rows = computed(() => ORDER.filter((d) => Array.isArray(val()[String(d)])).map((d) => ({ d, t: val()[String(d)] })))
+const mins = (t) => { const a = t[0].split(':').map(Number); const b = t[1].split(':').map(Number); const x = a[0] * 60 + a[1]; const y = b[0] * 60 + b[1]; return y > x ? y - x : y + 1440 - x }
+const total = computed(() => Math.round(rows.value.reduce((s, r) => s + mins(r.t), 0) / 6) / 10)
+const longDays = computed(() => rows.value.filter((r) => mins(r.t) > 720).map((r) => DAYS_AR[r.d]))
 const used = (d) => Array.isArray(val()[String(d)])
 const lastTimes = () => (rows.value.length ? [...rows.value[rows.value.length - 1].t] : ['10:00', '19:00'])
 const put = (v) => emit('update:modelValue', v)

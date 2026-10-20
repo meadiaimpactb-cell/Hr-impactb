@@ -13,7 +13,7 @@ class AttendanceRecord extends Model
         return [
             'work_date' => 'date:Y-m-d', 'check_in' => 'datetime', 'check_out' => 'datetime', 'client_time' => 'datetime',
             'offline' => 'boolean', 'geo_fail' => 'boolean', 'low_accuracy' => 'boolean', 'pending' => 'boolean',
-            'corrected' => 'boolean', 'note_required' => 'boolean', 'lat' => 'float', 'lng' => 'float',
+            'corrected' => 'boolean', 'note_required' => 'boolean', 'remote' => 'boolean', 'excuse_due' => 'datetime', 'excuse_at' => 'datetime', 'lat' => 'float', 'lng' => 'float',
         ];
     }
 

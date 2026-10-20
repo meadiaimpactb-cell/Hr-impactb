@@ -10,7 +10,7 @@ class JobOpening extends Model
 
     protected function casts(): array
     {
-        return ["public" => "boolean"];
+        return ["public" => "boolean", "in_plan" => "boolean", "approvals" => "array"];
     }
 
     public function company() { return $this->belongsTo(Company::class); }

@@ -67,8 +67,9 @@ class EvaluationController extends Controller
         abort_unless($p || Access::for()->can('PRF', 'view', ['employee' => $employee]), 404);
 
         return ['employee' => $employee->only('id', 'name', 'emp_no'), 'period' => $period, 'computed' => EvaluationService::compute($employee, $period), 'published' => $p,
-            'can_object' => $p && $employee->id === $u->employee_id && $p->objection_status === 'none' && $p->published_at->addDays((int) Settings::get('objectionDays', $employee->company_id, 7))->isFuture(),
-            'can_decide_objection' => $p && $p->objection_status === 'open' && $u->isHr() && Access::for()->can('PRF', 'approve', ['employee' => $employee]),
+            'can_object' => $p && $employee->id === $u->employee_id && $p->objection_status === 'none' && self::objectionDeadline($p)->isFuture(),
+            'can_decide_objection' => $p && $p->objection_status === 'open' && self::canDecide($u, $p),
+            'objection' => $p ? self::objectionInfo($p) : null,
             'can_rate' => ! $p && $employee->id !== $u->employee_id && (Access::for()->isManagerOf($employee) || Access::for()->can('PRF', 'edit', ['employee' => $employee]) || $u->hasRole('super', 'hr_mgr')),
             'rating' => self::rating($employee, $period)];
     }
@@ -115,7 +116,13 @@ class EvaluationController extends Controller
         abort_unless($e, 404);
         $rows = Evaluation::where('employee_id', $e->id)->where('type', 'monthly')->orderByDesc('period')->limit(24)->get();
 
-        return ['monthly' => $rows, 'annual' => EvaluationService::annual($e, (int) now()->year), 'template' => EvaluationService::templateFor($e)->only('name', 'weights', 'pass_score', 'grades'),
+        // §76: published annual evaluations (fiscal / contract) can be objected to as well
+        $annualRows = Evaluation::where('employee_id', $e->id)->where('type', 'annual')->orderByDesc('period')->limit(6)->get()
+            ->map(fn ($a) => $a->toArray() + ['kind' => str_ends_with($a->period, '99') ? 'contract' : 'fiscal', 'year' => (int) substr($a->period, 0, 4), 'objection' => self::objectionInfo($a),
+                'can_object' => $a->objection_status === 'none' && self::objectionDeadline($a)->isFuture()]);
+        $rows = $rows->map(fn ($r) => $r->toArray() + ['objection' => self::objectionInfo($r), 'can_object' => $r->objection_status === 'none' && self::objectionDeadline($r)->isFuture()]);
+
+        return ['monthly' => $rows, 'annual_published' => $annualRows, 'annual' => EvaluationService::annual($e, (int) now()->year), 'template' => EvaluationService::templateFor($e)->only('name', 'weights', 'pass_score', 'grades'),
             'badges' => self::badges($e), 'kudos' => \Illuminate\Support\Facades\DB::table('kudos')->join('users', 'users.id', '=', 'kudos.from_user_id')->where('kudos.employee_id', $e->id)->orderByDesc('kudos.id')->limit(10)->get(['kudos.text', 'kudos.period', 'users.name as from'])];
     }
 
@@ -128,7 +135,8 @@ class EvaluationController extends Controller
         $months = collect(range(0, 2))->map(fn ($i) => now()->subMonthsNoOverflow($i)->format('Y-m'));
         $clean = $months->filter(fn ($m) => \App\Models\Evaluation::where('employee_id', $e->id)->where('period', $m)->whereJsonContains('details->attend->absent', 0)->whereJsonContains('details->attend->late', 0)->exists())->count();
         if ($clean) { $out[] = ['code' => 'full_discipline', 'label' => 'انضباط كامل', 'count' => $clean, 'points' => $clean * 15]; }
-        $streak = $months->every(fn ($m) => \App\Models\DevRecord::where('employee_id', $e->id)->where('status', 'verified')->where(fn ($q) => $q->where('to', 'like', "$m-%")->orWhere('from', 'like', "$m-%"))->exists());
+        // §79: the development target (100 points) reached in EACH of the last three months
+        $streak = $months->every(fn ($m) => EvaluationService::devPoints($e, $m)['total'] >= 100);
         if ($streak) { $out[] = ['code' => 'dev_streak', 'label' => 'تطوير 3 أشهر متتالية', 'count' => 1, 'points' => 30]; }
         $k = \Illuminate\Support\Facades\DB::table('kudos')->where('employee_id', $e->id)->count();
         if ($k) { $out[] = ['code' => 'kudos', 'label' => 'إشادات الزملاء', 'count' => $k, 'points' => $k * 5]; }
@@ -145,11 +153,26 @@ class EvaluationController extends Controller
 
         $kind = $request->input('kind', 'fiscal') === 'contract' ? 'contract' : 'fiscal';
         $withBonus = $request->user()->hasRole('super', 'hr_mgr', 'fin') || $acc->canAny('PAY', 'view');
+        // ?publish=1: HR publishes the annual results of the list (each employee notified; opens the §76 objection window)
+        $publish = $request->boolean('publish');
+        abort_if($publish && ! $acc->canAny('PRF', 'publish'), 403);
 
-        return $emps->map(function ($e) use ($year, $kind, $withBonus) {
+        return $emps->map(function ($e) use ($year, $kind, $withBonus, $publish, $acc, $request) {
+            if ($publish && $acc->can('PRF', 'publish', ['employee' => $e])) {
+                $before = Evaluation::where('employee_id', $e->id)->where('type', 'annual')->where('period', $year.'-'.($kind === 'contract' ? '99' : '00'))->value('published_at');
+                $ev = EvaluationService::publishAnnual($e, $year, $kind, $request->user()->id);
+                if ($ev && (string) $ev->published_at !== (string) $before) {
+                    Audit::notify(User::where('employee_id', $e->id)->value('id'), 'نُشر تقييمك السنوي', "$year — الدرجة {$ev->score} ({$ev->grade})", 'ok', ['screen' => 'evaluation']);
+                    Audit::log('evaluations', $ev->id, 'publish_annual', null, ['score' => $ev->score]);
+                }
+            }
             $an = EvaluationService::annual($e, $year, $kind);
 
+            $pub = ($an['published'] ?? null) ? Evaluation::find($an['published']['id']) : null;
+
             return ['employee' => $e->only('id', 'name', 'emp_no'), 'company' => $e->company?->name, 'annual' => $an,
+                'objection' => $pub && $pub->objection_status !== 'none' ? ['id' => $pub->id, 'status' => $pub->objection_status, 'text' => $pub->objection_text, 'decision' => $pub->objection_decision,
+                    'can_decide' => $pub->objection_status === 'open' && self::canDecide($request->user(), $pub)] + self::objectionInfo($pub) : null,
                 'bonus' => $withBonus && $kind === 'fiscal' ? \App\Services\BonusService::annualBonus($e->load('company.tier'), $year, $an) : null];
         })->values();
     }
@@ -166,6 +189,10 @@ class EvaluationController extends Controller
         $ev = Evaluation::updateOrCreate(['employee_id' => $employee->id, 'period' => $key, 'type' => 'goals'], ['company_id' => $employee->company_id, 'score' => $d['score'], 'grade' => $isCeo ? 'approved' : 'proposed',
             'grade_label' => $isCeo ? 'معتمد من الرئيس التنفيذي' : 'مقترح المشرف', 'axes' => [], 'weights' => [], 'details' => ['note' => $d['note'] ?? null, 'by' => $u->name], 'published_at' => $isCeo ? now() : null, 'published_by' => $u->id]);
         Audit::log('evaluations', $ev->id, 'goals', null, ['score' => $d['score'], 'status' => $ev->grade], $d['note'] ?? null);
+        if (! $isCeo) {
+            $ceo = $employee->company?->ceo_employee_id ? User::where('employee_id', $employee->company->ceo_employee_id)->value('id') : null;
+            Audit::notify($ceo ?: Access::usersWithRole('super'), 'تقييم أهداف سنوية بانتظار اعتمادك', $employee->name.' — '.$d['year'], 'approval', ['screen' => 'evaluation']);
+        }
 
         return ['score' => $ev->score, 'status' => $ev->grade, 'status_label' => $ev->grade_label, 'annual' => EvaluationService::annual($employee, (int) $d['year'], $d['kind'] ?? 'fiscal')];
     }
@@ -173,12 +200,16 @@ class EvaluationController extends Controller
     public function object(Request $request, Evaluation $evaluation)
     {
         $u = $request->user();
-        abort_unless($evaluation->employee_id === $u->employee_id && $evaluation->objection_status === 'none', 403);
+        abort_unless($evaluation->employee_id === $u->employee_id && $evaluation->objection_status === 'none' && in_array($evaluation->type, ['monthly', 'annual'], true) && $evaluation->published_at, 403);
         $days = (int) Settings::get('objectionDays', $evaluation->company_id, 7);
-        abort_unless($evaluation->published_at->addDays($days)->isFuture(), 422, "انتهت مهلة الاعتراض ($days أيام)");
+        abort_unless(self::objectionDeadline($evaluation)->isFuture(), 422, "انتهت مهلة الاعتراض ($days أيام عمل من النشر — §76)");
         $d = $request->validate(['text' => 'required|string|max:2000']);
         $evaluation->update(['objection_status' => 'open', 'objection_text' => $d['text'], 'objection_at' => now()]);
-        Audit::notify(Access::hrUsersFor($evaluation->company_id, 'PRF'), 'اعتراض على تقييم', $evaluation->employee->name.' — '.$evaluation->period, 'approval', ['screen' => 'evaluation']);
+        $actors = self::actors($evaluation);
+        $deciders = array_values(array_diff(Access::hrUsersFor($evaluation->company_id, 'PRF'), $actors));
+        $label = $evaluation->type === 'annual' ? 'التقييم السنوي '.substr($evaluation->period, 0, 4) : $evaluation->period;
+        Audit::notify($deciders ?: Access::usersWithRole('super'), 'اعتراض على تقييم — يُبت فيه خلال 10 أيام عمل', $evaluation->employee->name.' — '.$label, 'approval', ['screen' => 'evaluation']);
+        Audit::notify(Access::usersWithRole('super'), 'اعتراض على تقييم (للعلم)', $evaluation->employee->name.' — '.$label, 'info', ['screen' => 'evaluation']);
 
         return $evaluation;
     }
@@ -186,7 +217,8 @@ class EvaluationController extends Controller
     public function decideObjection(Request $request, Evaluation $evaluation)
     {
         $u = $request->user();
-        abort_unless($u->isHr() && Access::for()->can('PRF', 'approve', ['employee' => $evaluation->employee]) && $evaluation->objection_status === 'open', 403);
+        abort_unless($evaluation->objection_status === 'open', 403);
+        abort_unless(self::canDecide($u, $evaluation), 403, 'يبت في الاعتراض جهة لم تعتمد التقييم محل الاعتراض ولم تراجعه (§76)');
         $d = $request->validate(['decision' => 'required|in:accepted,rejected', 'note' => 'required|string|max:1000', 'score' => 'nullable|numeric|min:0|max:100']);
         $upd = ['objection_status' => $d['decision'], 'objection_decision' => $d['note'], 'objection_by' => $u->id];
         if ($d['decision'] === 'accepted' && isset($d['score'])) {
@@ -198,5 +230,59 @@ class EvaluationController extends Controller
         Audit::notify(User::where('employee_id', $evaluation->employee_id)->value('id'), $d['decision'] === 'accepted' ? 'قُبل اعتراضك على التقييم' : 'رُفض اعتراضك على التقييم', $d['note'], $d['decision'] === 'accepted' ? 'ok' : 'bad', ['screen' => 'evaluation']);
 
         return $evaluation;
+    }
+    /** §76: the objection window — 7 WORKING days (objectionDays) from publication, by the employee's week pattern. */
+    public static function objectionDeadline(Evaluation $ev): \Illuminate\Support\Carbon
+    {
+        $days = (int) Settings::get('objectionDays', $ev->company_id, 7);
+
+        return EvaluationService::addWorkDays($ev->employee, $ev->published_at ?? now(), $days);
+    }
+
+    /** Deadline + decision due date (10 working days from filing — objectionDecisionDays). */
+    public static function objectionInfo(Evaluation $ev): array
+    {
+        $decide = (int) Settings::get('objectionDecisionDays', $ev->company_id, 10);
+        $due = $ev->objection_at ? EvaluationService::addWorkDays($ev->employee, $ev->objection_at, $decide) : null;
+
+        return ['deadline' => $ev->published_at ? self::objectionDeadline($ev)->toDateString() : null, 'decision_due' => $due?->toDateString(),
+            'decision_overdue' => $due && $ev->objection_status === 'open' && $due->isPast(), 'decision_days' => $decide];
+    }
+
+    /** Users who reviewed / approved / published the evaluation under objection (they may not decide it). */
+    public static function actors(Evaluation $ev): array
+    {
+        $ids = [$ev->published_by];
+        if ($ev->type === 'monthly') {
+            $rep = \App\Models\MonthlyReport::where('employee_id', $ev->employee_id)->where('period', $ev->period)->first();
+            if ($rep) {
+                $ids = array_merge($ids, [$rep->mgr_by, $rep->hr_by, $rep->ceo_by]);
+            }
+        } elseif ($ev->type === 'annual') {
+            $ids[] = Evaluation::where('employee_id', $ev->employee_id)->where('type', 'goals')->where('period', $ev->period)->value('published_by');
+        }
+        // the direct manager rated the employee, the company CEO approved the month: neither decides the objection
+        $e = $ev->employee;
+        if ($e?->manager_id) {
+            $ids[] = User::where('employee_id', $e->manager_id)->value('id');
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', array_filter($ids)))));
+    }
+
+    /**
+     * §76 / appendix 5: decided by a higher body or committee that did NOT approve the evaluation — HR (manager or staff,
+     * within scope) who did not act on it; the group CEO (super) always may.
+     */
+    public static function canDecide(User $u, Evaluation $ev): bool
+    {
+        if ($u->hasRole('super')) {
+            return true;
+        }
+        if ($u->employee_id && $u->employee_id === $ev->employee_id) {
+            return false;
+        }
+
+        return $u->hasRole('hr_mgr', 'hr_staff') && Access::for($u)->canSeeEmployee($ev->employee) && ! in_array($u->id, self::actors($ev), true);
     }
 }

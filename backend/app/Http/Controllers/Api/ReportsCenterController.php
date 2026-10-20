@@ -31,15 +31,66 @@ class ReportsCenterController extends Controller
         'lv_moves' => ['حركات الإجازات', 'LVE', 'range'], 'payroll' => ['الرواتب', 'PAY', 'month'], 'custody' => ['العهد', 'CUS', 'none'], 'docs' => ['الوثائق غير السارية', 'DOC', 'none'],
         'evals' => ['التقييمات المنشورة', 'PRF', 'range'], 'weekly' => ['التقارير الأسبوعية', 'PRF', 'range'], 'dev' => ['التطوير والتدريب', 'DEV', 'range'], 'alloc' => ['توزيع الموظفين', 'EMP', 'none'],
         'viol' => ['المخالفات', 'VIO', 'range'], 'turnover' => ['معدل الدوران', 'EMP', 'range'], 'requests' => ['الطلبات والاعتمادات', 'EMP', 'range'],
+        'fines' => ['سجل الغرامات (§106)', 'VIO', 'range'],
     ];
+
+    /** §117: financial reports — the only ones a finance user (without an HR / CEO role) may run, print and export. */
+    public const FINANCIAL = ['payroll', 'fines', 'custody'];
+
+    /**
+     * §117 print / export scope: group CEO every report; company CEO his company's employees; HR its scope; finance the
+     * financial reports; a manager his own team (the employee scope itself comes from Access::employees()).
+     */
+    private static function allowed(string $key): bool
+    {
+        $u = auth()->user();
+        if (! $u) {
+            return false;
+        }
+        $financeOnly = $u->hasRole('fin') && ! $u->hasRole('super', 'hr_mgr', 'hr_staff', 'ceo') && ! Access::for()->isCeoOf($u->employee?->company_id);
+
+        return ! $financeOnly || in_array($key, self::FINANCIAL, true);
+    }
+
+    /** View right on a report: its operation, or PAY for the fines register (finance keeps it with HR, §106). */
+    private static function canView(string $key): bool
+    {
+        $acc = Access::for();
+        $op = self::CATALOG[$key][1];
+
+        return $acc->canAny($op, 'view') || ($key === 'fines' && $acc->canAny('PAY', 'view'));
+    }
+
+    private static function scopeLabel(): string
+    {
+        $u = auth()->user();
+
+        return match (true) {
+            $u->hasRole('super') => 'الرئيس التنفيذي للمجموعة — كل الشركات',
+            $u->hasRole('hr_mgr', 'hr_staff') => 'الموارد البشرية — نطاق صلاحيتك',
+            $u->hasRole('ceo') || (bool) \App\Models\Company::where('ceo_employee_id', $u->employee_id)->exists() => 'الرئيس التنفيذي للشركة — موظفو شركتك',
+            $u->hasRole('fin') => 'المالية — التقارير المالية',
+            default => 'فريقك المباشر',
+        };
+    }
+
+    /** Print / export trail (§117: export is controlled and traceable). */
+    public function exported(Request $request, string $key)
+    {
+        abort_unless(isset(self::CATALOG[$key]) && self::allowed($key) && self::canView($key), 403);
+        $d = $request->validate(['kind' => 'required|in:print,excel', 'from' => 'nullable|string|max:10', 'to' => 'nullable|string|max:10', 'period' => 'nullable|string|max:7', 'company_id' => 'nullable|integer']);
+        \App\Services\Audit::log('reports_center', $key, 'export_'.$d['kind'], null, $d);
+
+        return ['ok' => true];
+    }
 
     public function catalog(Request $request)
     {
         $acc = Access::for();
         $fav = DB::table('report_favorites')->where('user_id', $request->user()->id)->pluck('key')->all();
 
-        return collect(self::CATALOG)->filter(fn ($c, $k) => $acc->canAny($c[1], 'view') || ($c[1] === 'EMP' && $acc->canAny('EMP', 'view')))
-            ->map(fn ($c, $k) => ['key' => $k, 'name' => $c[0], 'op' => $c[1], 'period' => $c[2], 'favorite' => in_array($k, $fav, true)])->values();
+        return collect(self::CATALOG)->filter(fn ($c, $k) => self::canView($k) && self::allowed($k))
+            ->map(fn ($c, $k) => ['key' => $k, 'name' => $c[0], 'op' => $c[1], 'period' => $c[2], 'favorite' => in_array($k, $fav, true), 'can_export' => true, 'scope' => self::scopeLabel()])->values();
     }
 
     public function favorite(Request $request, string $key)
@@ -55,7 +106,7 @@ class ReportsCenterController extends Controller
     {
         $c = self::CATALOG[$key] ?? abort(404);
         $acc = Access::for();
-        abort_unless($acc->canAny($c[1], 'view'), 403);
+        abort_unless(self::canView($key) && self::allowed($key), 403, 'هذا التقرير خارج نطاق صلاحيتك (§117)');
         $from = $request->input('from', now()->startOfMonth()->toDateString());
         $to = $request->input('to', now()->toDateString());
         $period = $request->input('period', now()->format('Y-m'));
@@ -98,9 +149,11 @@ class ReportsCenterController extends Controller
 
                 return [['الشركة', 'النشطون', 'التحق', 'غادر', 'معدل الدوران %'], $rows];
             })(),
+            'fines' => [['الموظف', 'الشركة', 'نوع المخالفة', 'تاريخ الواقعة', 'الفترة', 'الأجر الأساسي اليومي', 'الغرامة'], Violation::whereIn('employee_id', $ids)->where('status', 'active')->where('amount', '>', 0)
+                ->whereBetween('period', [substr($from, 0, 7), substr($to, 0, 7)])->orderBy('period')->get()->map(fn ($v) => [$name($v->employee_id), $emps->firstWhere('id', $v->employee_id)?->company?->name, Lookup::name('violation_types', $v->type), $v->occurred_on->toDateString(), $v->period, $v->basis, $v->amount])],
             'requests' => [['الموظف', 'النوع', 'الملخص', 'الحالة', 'المرحلة', 'التاريخ'], ApprovalRequest::whereIn('employee_id', $ids)->whereBetween('created_at', [$from, $to.' 23:59:59'])->orderByDesc('id')->limit(2000)->get()->map(fn ($r) => [$name($r->employee_id), \App\Services\ApprovalService::label($r->type), \App\Services\ApprovalService::summary($r), $r->status, $r->flow[$r->stage]['label'] ?? '—', $r->created_at->toDateString()])],
         };
 
-        return ['key' => $key, 'name' => $c[0], 'columns' => $cols, 'rows' => collect($rows)->values(), 'generated_at' => now()->toDateTimeString(), 'params' => compact('from', 'to', 'period')];
+        return ['key' => $key, 'name' => $c[0], 'columns' => $cols, 'rows' => collect($rows)->values(), 'generated_at' => now()->toDateTimeString(), 'params' => compact('from', 'to', 'period'), 'scope' => self::scopeLabel(), 'can_export' => true];
     }
 }

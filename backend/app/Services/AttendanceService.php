@@ -68,34 +68,198 @@ class AttendanceService
 
     public static function isWorkDay(Employee $e, Carbon $d): bool
     {
+        // official holidays (and the tier's extra Eid / bridge days) are never working days, so never absence
+        if (class_exists(\App\Models\Holiday::class) && method_exists(\App\Models\Holiday::class, 'isHoliday') && \App\Models\Holiday::isHoliday($e, $d)) {
+            return false;
+        }
+
         return $e->isWorkDay($d->dayOfWeek);
     }
 
-    public static function lateMinutes(Employee $e, Carbon $in): int
+    /** §24: Ramadan period (settings ramadanFrom / ramadanTo) applies to Muslim employees. */
+    public static function inRamadan(Employee $e, Carbon $d): bool
     {
-        $h = $e->hoursFor($in->dayOfWeek);
+        if (isset($e->muslim) && ! $e->muslim) {
+            return false;
+        }
+        $from = (string) Settings::get('ramadanFrom', $e->company_id, '');
+        $to = (string) Settings::get('ramadanTo', $e->company_id, '');
+        if ($from === '' || $to === '') {
+            return false;
+        }
+        $ds = $d->toDateString();
+
+        return $ds >= $from && $ds <= $to;
+    }
+
+    /**
+     * Expected shift of the day: [start, end] as datetimes. A shift ending before it starts crosses midnight.
+     * During Ramadan the expected end is capped at start + ramadanDailyHours (6 h, i.e. 36 h a week) — §24.
+     *
+     * @return array{0:Carbon,1:Carbon}|null
+     */
+    public static function shift(Employee $e, Carbon $day): ?array
+    {
+        $h = $e->hoursFor($day->dayOfWeek);
         if (! $h) {
+            return null;
+        }
+        $start = $day->copy()->startOfDay()->setTimeFromTimeString($h[0]);
+        $end = $day->copy()->startOfDay()->setTimeFromTimeString($h[1]);
+        if ($end->lte($start)) {
+            $end->addDay();
+        }
+        if (self::inRamadan($e, $day)) {
+            $cap = $start->copy()->addMinutes((int) round((float) Settings::get('ramadanDailyHours', $e->company_id, 6) * 60));
+            if ($end->gt($cap)) {
+                $end = $cap;
+            }
+        }
+
+        return [$start, $end];
+    }
+
+    /** First day (Saturday) of the policy week that contains $d. */
+    public static function weekStart(Carbon $d): Carbon
+    {
+        return $d->copy()->startOfDay()->startOfWeek(Carbon::SATURDAY);
+    }
+
+    /** §29/30: the flex allowance is a weekly budget of minutes (tier benefit flexMinutes), not a daily one. */
+    public static function flexBudget(Employee $e): int
+    {
+        return $e->flex_enabled ? (int) ($e->benefit('flexMinutes') ?? Settings::get('flexMinutes', $e->company_id, 0)) : 0;
+    }
+
+    /** Flex minutes already absorbed this week, the given day excluded. */
+    public static function flexUsed(Employee $e, Carbon $d): int
+    {
+        $ws = self::weekStart($d);
+
+        return (int) AttendanceRecord::where('employee_id', $e->id)->whereBetween('work_date', [$ws->toDateString(), $ws->copy()->addDays(6)->toDateString()])
+            ->whereDate('work_date', '!=', $d->toDateString())->sum('flex_minutes');
+    }
+
+    /**
+     * Late minutes left after the weekly flex budget. $absorbed receives the minutes the budget covered; they must be
+     * made up within the same week (see weekly()).
+     */
+    public static function lateMinutes(Employee $e, Carbon $in, ?int &$absorbed = null): int
+    {
+        $absorbed = 0;
+        $s = self::shift($e, $in);
+        if (! $s) {
             return 0;
         }
-        $start = $in->copy()->setTimeFromTimeString($h[0]);
-        $flex = $e->flex_enabled ? (int) ($e->benefit('flexMinutes') ?? Settings::get('flexMinutes', $e->company_id, 0)) : 0;
-        $late = (int) floor($start->diffInMinutes($in, false));
+        $late = max(0, (int) floor($s[0]->diffInMinutes($in, false)));
+        if ($late > 0 && ($budget = self::flexBudget($e)) > 0) {
+            $absorbed = min($late, max(0, $budget - self::flexUsed($e, $in)));
+        }
 
-        return max(0, $late - $flex);
+        return $late - $absorbed;
     }
 
     public static function earlyMinutes(Employee $e, Carbon $in, Carbon $out): int
     {
-        $h = $e->hoursFor($in->dayOfWeek);
-        if (! $h) {
+        $s = self::shift($e, $in);
+        if (! $s) {
             return 0;
         }
-        $end = $in->copy()->setTimeFromTimeString($h[1]);
-        if ($e->crossesMidnight($in->dayOfWeek) && $end->lte($in->copy()->startOfDay()->setTimeFromTimeString($h[0]))) {
-            $end->addDay();
+
+        return max(0, (int) floor($out->diffInMinutes($s[1], false)));
+    }
+
+    /** §30: athar-tier employees with flex enabled get one remote working day a week. */
+    public static function remoteEligible(Employee $e): bool
+    {
+        return (bool) $e->flex_enabled && (int) ($e->benefit('remote') ?? 0) >= 1;
+    }
+
+    public static function remoteUsed(Employee $e, Carbon $d): bool
+    {
+        $ws = self::weekStart($d);
+
+        return AttendanceRecord::where('employee_id', $e->id)->where('remote', true)->whereBetween('work_date', [$ws->toDateString(), $ws->copy()->addDays(6)->toDateString()])
+            ->whereDate('work_date', '!=', $d->toDateString())->exists();
+    }
+
+    /**
+     * Weekly balance (§29/30): required minutes of the week's working days so far vs. minutes actually worked. Flex
+     * minutes absorbed must be made up within the same week, so any shortfall is reported.
+     */
+    public static function weekly(Employee $e, ?Carbon $any = null): array
+    {
+        $any ??= now();
+        $ws = self::weekStart($any);
+        $we = $ws->copy()->addDays(6);
+        $today = now()->toDateString();
+        $recs = AttendanceRecord::where('employee_id', $e->id)->whereBetween('work_date', [$ws->toDateString(), $we->toDateString()])->get()->keyBy(fn ($r) => $r->work_date->toDateString());
+        $required = $worked = $flexUsed = 0;
+        $days = [];
+        for ($d = $ws->copy(); $d->lte($we); $d->addDay()) {
+            $ds = $d->toDateString();
+            $r = $recs[$ds] ?? null;
+            $flexUsed += (int) ($r->flex_minutes ?? 0);
+            if ($ds > $today || ($e->hire_date && $d->lt($e->hire_date)) || ! self::isWorkDay($e, $d) || $r?->status === 'leave' || self::onLeave($e->id, $ds)) {
+                continue;
+            }
+            $s = self::shift($e, $d);
+            if (! $s || ($ds === $today && ! $r?->check_out)) {
+                continue; // today counts once the day is closed
+            }
+            $req = (int) $s[0]->diffInMinutes($s[1]);
+            $w = $r && $r->check_in && $r->check_out && $r->status !== 'absent' ? (int) $r->check_in->diffInMinutes($r->check_out) : 0;
+            $required += $req;
+            $worked += $w;
+            $days[] = ['date' => $ds, 'required' => $req, 'worked' => $w, 'flex' => (int) ($r->flex_minutes ?? 0), 'remote' => (bool) ($r->remote ?? false)];
+        }
+        $budget = self::flexBudget($e);
+
+        return ['from' => $ws->toDateString(), 'to' => $we->toDateString(), 'required_minutes' => $required, 'worked_minutes' => $worked,
+            'shortfall_minutes' => max(0, $required - $worked), 'flex_budget' => $budget, 'flex_used' => $flexUsed, 'flex_left' => max(0, $budget - $flexUsed),
+            'remote_eligible' => self::remoteEligible($e), 'remote_used' => $recs->contains(fn ($r) => (bool) $r->remote), 'ramadan' => self::inRamadan($e, $any), 'days' => $days];
+    }
+
+    /** Working days strictly after $from up to $to (the employee's own working days when given, else Sunday–Thursday). */
+    public static function workingDaysBetween(Carbon $from, Carbon $to, ?Employee $e = null): int
+    {
+        $n = 0;
+        for ($d = $from->copy()->startOfDay()->addDay(); $d->lte($to); $d->addDay()) {
+            if ($e ? self::isWorkDay($e, $d) : ! in_array($d->dayOfWeek, [Carbon::FRIDAY, Carbon::SATURDAY], true)) {
+                $n++;
+            }
         }
 
-        return max(0, (int) floor($out->diffInMinutes($end, false)));
+        return $n;
+    }
+
+    /** §27: a correction filed more than correctionDays working days after the day concerned is late (flag only, never blocked). */
+    public static function correctionLate(string $date, Carbon|string|null $filedAt = null, ?Employee $e = null): bool
+    {
+        $limit = (int) Settings::get('correctionDays', $e?->company_id, 3);
+
+        return self::workingDaysBetween(Carbon::parse($date), Carbon::parse($filedAt ?? now()), $e) > $limit;
+    }
+
+    /** §27: entry from the alternative paper register (platform unavailable), logged with source = paper. */
+    public static function paperEntry(Employee $e, string $date, ?string $in, ?string $out, ?string $note): AttendanceRecord
+    {
+        $rec = AttendanceRecord::firstOrNew(['employee_id' => $e->id, 'work_date' => $date]);
+        $before = $rec->exists ? $rec->toArray() : null;
+        $checkIn = $in ? Carbon::parse("$date $in") : $rec->check_in;
+        $checkOut = $out ? Carbon::parse("$date $out") : $rec->check_out;
+        if ($checkIn && $checkOut && $checkOut->lte($checkIn)) {
+            $checkOut->addDay(); // night shift
+        }
+        $absorbed = 0;
+        $late = $checkIn ? self::lateMinutes($e, $checkIn, $absorbed) : 0;
+        $rec->fill(['status' => 'present', 'check_in' => $checkIn, 'check_out' => $checkOut, 'source' => 'paper', 'pending' => false, 'geo_fail' => false, 'out_geo_fail' => false,
+            'late_minutes' => $late, 'flex_minutes' => $absorbed, 'early_minutes' => $checkIn && $checkOut ? self::earlyMinutes($e, $checkIn, $checkOut) : 0,
+            'reviewed_by' => auth()->id(), 'note' => trim(($rec->note ? $rec->note."\n" : '').'[سجل ورقي بديل'.($note ? ': '.$note : '').']')]);
+        $rec->save();
+        Audit::log('attendance', $rec->id, 'paper', $before, $rec->only('work_date', 'check_in', 'check_out', 'source'), $note);
+
+        return $rec;
     }
 
     /** Check-in or check-out (toggles). Server time is authoritative. */
@@ -113,8 +277,21 @@ class AttendanceService
         $noteRequired = $e->daily_note_required || Settings::get('dailyNoteEnabled', $e->company_id, false);
 
         if (! $rec->check_in) {
+            // §30: an eligible employee (athar tier + flex) may work one day a week remotely — a punch from outside the
+            // site is then recorded as that week's remote day instead of going to review
+            $remote = false;
+            if (! $geo['ok'] && ($in['remote'] ?? true) && self::remoteEligible($e)) {
+                if (! self::remoteUsed($e, $now)) {
+                    $remote = true;
+                    $geo = ['ok' => true, 'location_id' => null, 'msg' => 'يوم عمل عن بُعد (يوم واحد أسبوعيًا)', 'dist' => $geo['dist']];
+                } else {
+                    $geo['msg'] .= ' — استُخدم يوم العمل عن بُعد لهذا الأسبوع';
+                }
+            }
+            $absorbed = 0;
+            $late = self::lateMinutes($e, $now, $absorbed);
             $rec->fill([
-                'status' => 'present', 'check_in' => $now, 'late_minutes' => self::lateMinutes($e, $now),
+                'status' => 'present', 'check_in' => $now, 'late_minutes' => $late, 'flex_minutes' => $absorbed, 'remote' => $remote, 'source' => 'app',
                 'location_id' => $geo['location_id'], 'lat' => $in['lat'] ?? null, 'lng' => $in['lng'] ?? null,
                 'accuracy' => $in['accuracy'] ?? null, 'distance_m' => $geo['dist'], 'device' => substr((string) ($in['device'] ?? request()->userAgent()), 0, 190),
                 'offline' => $offline, 'geo_fail' => ! $geo['ok'], 'low_accuracy' => $lowAcc,
@@ -127,6 +304,9 @@ class AttendanceService
             $min = (int) Settings::get('dailyNoteMin', $e->company_id, 20);
             if ($noteRequired && mb_strlen($note) < $min) {
                 throw ValidationException::withMessages(['note' => "المنجز اليومي إلزامي ({$min} حرفًا على الأقل)"]);
+            }
+            if ($rec->remote && ! $geo['ok']) {
+                $geo = ['ok' => true, 'location_id' => null, 'msg' => 'يوم عمل عن بُعد', 'dist' => $geo['dist']];
             }
             // check-out is measured too: leaving from outside the site is flagged for review like an outside check-in
             $rec->fill([

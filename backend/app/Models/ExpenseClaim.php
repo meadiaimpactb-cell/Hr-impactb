@@ -8,11 +8,14 @@ class ExpenseClaim extends Model
 {
     protected $guarded = ['id'];
 
-    public const STATUSES = ['pending_finance' => 'بانتظار اعتماد المالية', 'settled' => 'مسوّاة', 'to_salary' => 'حُوّل الباقي لخصم من الراتب', 'returned' => 'مُرجَعة'];
+    /** §44 finance decisions: (1) settle & close, (2) return for documents, (3) close with refund to the company account, or deduct from next salary. */
+    public const STATUSES = ['pending_finance' => 'بانتظار اعتماد المالية', 'settled' => 'مسوّاة ومُقفلة', 'refunded' => 'أُقفلت برد المتبقي لحساب الشركة',
+        'to_salary' => 'أُقفلت بخصم المتبقي من الراتب', 'returned' => 'مُرجَعة لاستكمال المستندات'];
 
     protected function casts(): array
     {
-        return ['invoices' => 'array', 'claimed' => 'float', 'settled' => 'float', 'decided_at' => 'datetime'];
+        return ['invoices' => 'array', 'claimed' => 'float', 'settled' => 'float', 'decided_at' => 'datetime',
+            'refund_amount' => 'float', 'refund_date' => 'date', 'salary_amount' => 'float'];
     }
 
     public function item() { return $this->belongsTo(CustodyItem::class, 'custody_item_id'); }

@@ -11,8 +11,9 @@
       <p v-if="a.purpose" class="small muted">الغرض: {{ a.purpose }}</p>
       <div class="tw"><table>
         <thead><tr><th>الشهر</th><th>القسط</th><th>الحالة</th></tr></thead>
-        <tbody><tr v-for="s in a.schedule" :key="s.period">
-          <td>{{ fmtYM(s.period) }}</td><td class="num">{{ money(s.amount) }}</td>
+        <tbody><tr v-for="(s, i) in a.schedule" :key="i">
+          <td>{{ fmtYM(s.period) }}<span v-if="s.deferred_from" class="tiny muted">مؤجل من {{ fmtYM(s.deferred_from) }} (نصف الأجر — المادة 42)</span></td>
+          <td class="num">{{ money(s.amount) }}<span v-if="s.status === 'deducted' && s.paid_amount != null && s.paid_amount < s.amount" class="tiny muted">خُصم {{ money(s.paid_amount) }} وأُجّل {{ money(s.deferred || s.amount - s.paid_amount) }}</span></td>
           <td><span class="pill" :class="s.status === 'deducted' ? 'ok' : 'gray'">{{ s.status === 'deducted' ? 'خُصم' : 'مستحق' }}</span></td>
         </tr></tbody>
       </table></div>

@@ -59,6 +59,7 @@
     </main>
   </div>
   <NewRequest v-if="newReq" @close="newReq = false" />
+  <PolicyAckGate />
   <!-- Announcements that require acknowledgement block the UI until acknowledged -->
   <div v-if="acks.length" class="mo" style="z-index:200">
     <div class="box">
@@ -78,6 +79,7 @@ import api from '../api'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import NewRequest from './NewRequest.vue'
+import PolicyAckGate from './PolicyAckGate.vue'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -132,6 +134,8 @@ const NAV = [
     { to: '/requests', ic: 'requests', label: 'طلباتي', roles: ALL },
     { to: '/me', ic: 'user', label: 'ملفي', roles: ALL },
     { to: '/downloads', ic: 'download', label: 'مركز التنزيل', roles: ALL },
+    { to: '/guide', ic: 'info', label: 'دليل الاستخدام', roles: ALL },
+    { to: '/privacy', ic: 'eye', label: 'إشعار الخصوصية', roles: ALL },
   ] },
   { g: 'التواصل', items: [
     { to: '/notifications', ic: 'bell', label: 'مركز الإشعارات', roles: ALL },
@@ -143,7 +147,7 @@ const NAV = [
     { to: '/documents', ic: 'folder', label: 'الوثائق والتنبيهات', roles: ALL },
     { to: '/letters', ic: 'signature', label: 'الخطابات الرسمية', roles: ALL },
     { to: '/insurance', ic: 'insurance', label: 'التأمين الطبي', roles: ALL },
-    { to: '/recruitment', ic: 'user-check', label: 'التوظيف', roles: ['super', 'hr_mgr', 'hr_staff'] },
+    { to: '/recruitment', ic: 'user-check', label: 'التوظيف', roles: ['super', 'hr_mgr', 'hr_staff', 'ceo', 'fin', 'mgr'] },
   ] },
   { g: 'التشغيل اليومي', items: [
     { to: '/attendance', ic: 'clock', label: 'الحضور والانصراف', roles: ALL },
@@ -157,6 +161,7 @@ const NAV = [
     { to: '/incentives', ic: 'award', label: 'الحوافز والإشادات', roles: ALL },
     { to: '/improvement', ic: 'trend', label: 'خطط تحسين الأداء', roles: ALL },
     { to: '/terminations', ic: 'exit', label: 'إنهاء الخدمة والتصفية', approver: true },
+    { to: '/fines-register', ic: 'money', label: 'سجل الغرامات', roles: ['super', 'hr_mgr', 'hr_staff', 'fin', 'ceo'] },
     { to: '/projects', ic: 'kanban', label: 'المشاريع', roles: ALL },
     { to: '/reports-center', ic: 'sheet', label: 'مركز التقارير', approver: true },
   ] },
@@ -174,6 +179,7 @@ const NAV = [
     { to: '/integrations', ic: 'plug', label: 'التكامل مع أودو', roles: ['super', 'hr_mgr'] },
     { to: '/settings', ic: 'settings', label: 'الإعدادات والسياسات', roles: ['super', 'hr_mgr'] },
     { to: '/audit', ic: 'audit', label: 'سجل التدقيق', roles: ['super', 'hr_mgr'] },
+    { to: '/policy-acks', ic: 'shield', label: 'إقرارات اللائحة', roles: ['super', 'hr_mgr', 'hr_staff'] },
   ] },
 ]
 const nav = computed(() => NAV.map((g) => ({ ...g, items: g.items.filter((i) => (i.approver ? auth.isApprover : auth.has(...i.roles))) })).filter((g) => g.items.length))

@@ -42,11 +42,33 @@
         </div>
       </div>
 
+      <template v-if="d.type.is_cash && d.employee">
+        <h4 style="margin:14px 0 6px">مواعيد التسوية (المادة 44)</h4>
+        <div class="row small">
+          <span>الصرف: <b>{{ fmtD(d.disbursed_at) }}</b></span>
+          <span>· انتهاء الغرض: <b>{{ d.purpose_end ? fmtD(d.purpose_end) : 'لم يُحدَّد' }}</b></span>
+          <span v-if="d.settle_due">· آخر موعد للتسوية: <b>{{ fmtD(d.settle_due) }}</b></span>
+          <span v-if="d.overdue" class="pill bad">متأخرة التسوية</span>
+          <span v-if="d.overspend_approved" class="pill info">موافقة مسبقة على تجاوز القيمة{{ d.overspend_limit ? ` حتى ${money(d.overspend_limit)}` : '' }}</span>
+        </div>
+        <p class="tiny muted">تُسوّى خلال 10 أيام عمل من انتهاء الغرض أو العودة من المهمة، وبحد أقصى 30 يومًا من الصرف. التأخر يوقف صرف أي عهدة أو سلفة جديدة.</p>
+        <div class="row">
+          <button v-if="d.can_purpose_end" class="btn ghost sm" @click="purposeOpen = true"><Icon name="calendar" :size="14" /> تحديد انتهاء الغرض</button>
+          <button v-if="d.can_overspend" class="btn ghost sm" @click="overOpen = true">{{ d.overspend_approved ? 'تعديل موافقة التجاوز' : 'موافقة مسبقة على تجاوز القيمة' }}</button>
+        </div>
+      </template>
+
+      <template v-if="d.ack_at || (isMine && d.status === 'pending_ack' && d.ack_text)">
+        <h4 style="margin:14px 0 6px">إقرار الاستلام والتعهد (المادة 43)</h4>
+        <div class="notice" :class="d.ack_at ? 'ok' : 'warn'">{{ d.ack_text }}</div>
+        <p v-if="d.ack_at" class="tiny muted">وافق عليه الموظف في {{ fmtDT(d.ack_at) }}<span v-if="d.ack_device"> · الجهاز: {{ d.ack_device }}</span><span v-if="d.ack_ip"> · IP {{ d.ack_ip }}</span></p>
+      </template>
+
       <template v-if="d.claims?.length">
         <h4 style="margin:14px 0 6px">تسويات العهدة المالية</h4>
         <div class="tw"><table>
           <thead><tr><th>التاريخ</th><th>المصروف</th><th>الحالة</th><th>ملاحظة القرار</th></tr></thead>
-          <tbody><tr v-for="c in d.claims" :key="c.id"><td>{{ fmtD(c.created_at) }}</td><td class="num">{{ money(c.claimed) }}</td><td>{{ CLAIM_STATUS[c.status] }}</td><td class="small">{{ c.decision_note || '—' }}</td></tr></tbody>
+          <tbody><tr v-for="c in d.claims" :key="c.id"><td>{{ fmtD(c.created_at) }}</td><td class="num">{{ money(c.claimed) }}</td><td>{{ CLAIM_STATUS[c.status] || c.status }}<div v-if="c.refund_amount" class="tiny muted">رُدّ {{ money(c.refund_amount) }} في {{ fmtD(c.refund_date) }}</div><div v-if="c.salary_amount" class="tiny muted">يُخصم من الراتب {{ money(c.salary_amount) }}</div></td><td class="small">{{ c.decision_note || '—' }}</td></tr></tbody>
         </table></div>
       </template>
     </template>
@@ -54,7 +76,7 @@
     <template #foot>
       <button class="btn sec" @click="$emit('close')">إغلاق</button>
       <!-- employee actions -->
-      <button v-if="isMine && d?.status === 'pending_ack'" class="btn okb" :class="{ loading: busy }" @click="act('ack')"><Icon name="check-circle" :size="15" /> أقرّ بالاستلام</button>
+      <button v-if="isMine && d?.status === 'pending_ack'" class="btn okb" :class="{ loading: busy }" @click="doAck"><Icon name="check-circle" :size="15" /> أقرّ بالاستلام</button>
       <button v-if="isMine && d?.status === 'in_use' && !d.type.is_cash" class="btn sec" :class="{ loading: busy }" @click="act('request-return')">طلب استرداد</button>
       <button v-if="isMine && d?.status === 'in_use' && d.type.is_cash && !hasPendingClaim" class="btn pri" @click="claimOpen = true"><Icon name="money" :size="15" /> رفع فواتير التسوية</button>
       <!-- keeper actions -->
@@ -70,14 +92,27 @@
 
   <Modal v-if="pick" :title="pick === 'hand' ? 'تسليم العهدة لموظف' : 'نقل العهدة'" size="narrow" @close="pick = null">
     <div class="fg"><label>الموظف *</label><SearchSelect v-model="pickEmp" :options="empOptions" /></div>
+    <div v-if="pick === 'hand' && d.type.is_cash" class="fg"><label>تاريخ انتهاء الغرض (اختياري)</label><input v-model="pickEnd" type="date" class="in" /><span class="tiny muted">يبدأ منه احتساب مهلة التسوية (10 أيام عمل)، وبحد أقصى 30 يومًا من الصرف.</span></div>
     <p class="tiny muted">{{ d.type.requires_ack ? 'يصل الموظف طلب إقرار استلام قبل أن تصبح قيد الاستخدام.' : 'تصبح قيد الاستخدام مباشرة.' }}</p>
     <template #foot><button class="btn sec" @click="pick = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="doPick">تأكيد</button></template>
   </Modal>
 
   <Modal v-if="closeOpen" title="نتيجة الفحص" size="narrow" @close="closeOpen = false">
-    <div class="fg"><label>النتيجة</label><select v-model="closeResult" class="in"><option value="ok">سليمة — تعود للمخزون</option><option value="lost">مفقودة / تالفة — تُعالج وفق السياسة (لا خصم آلي)</option></select></div>
+    <div class="fg"><label>النتيجة</label><select v-model="closeResult" class="in"><option value="ok">سليمة — تعود للمخزون</option><option value="lost">مفقودة — تُعالج وفق اللائحة (لا خصم آلي)</option><option value="damaged">تالفة — تُعالج وفق اللائحة (لا خصم آلي)</option></select></div>
     <div class="fg"><label>ملاحظة الفحص *</label><textarea v-model="closeNote" class="in" /></div>
     <template #foot><button class="btn sec" @click="closeOpen = false">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="doClose">حفظ</button></template>
+  </Modal>
+
+  <Modal v-if="purposeOpen" title="تاريخ انتهاء الغرض / العودة من المهمة" size="narrow" @close="purposeOpen = false">
+    <div class="fg"><label>التاريخ *</label><input v-model="purposeDate" type="date" class="in" /></div>
+    <template #foot><button class="btn sec" @click="purposeOpen = false">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="doPurpose">حفظ</button></template>
+  </Modal>
+
+  <Modal v-if="overOpen" title="موافقة مسبقة على تجاوز قيمة العهدة" size="narrow" @close="overOpen = false">
+    <label class="chk mb"><input v-model="overApproved" type="checkbox" /> أوافق على أن تتجاوز الفواتير قيمة العهدة</label>
+    <div v-if="overApproved" class="fg"><label>الحد الأعلى للتجاوز (ر.س، اختياري)</label><input v-model.number="overLimit" type="number" min="0" step="0.01" class="in" /></div>
+    <div class="fg"><label>المبرر *</label><textarea v-model="overNote" class="in" /></div>
+    <template #foot><button class="btn sec" @click="overOpen = false">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="doOverspend">حفظ</button></template>
   </Modal>
 
   <Modal v-if="revealOpen" title="كشف السر — يُسجَّل باسمك" size="narrow" @close="revealOpen = false">
@@ -92,6 +127,7 @@
   </Modal>
 
   <Modal v-if="claimOpen" title="تسوية العهدة المالية — الفواتير" @close="claimOpen = false">
+    <div v-if="invoiceTotal > d.value && !d.overspend_approved" class="notice bad mb">مجموع الفواتير يتجاوز قيمة العهدة — لا يجوز إلا بموافقة مسبقة من المدير المالي (المادة 44).</div>
     <div class="notice info">قيمة العهدة: <b class="num">{{ money(d.value) }}</b> · مجموع الفواتير الحالي: <b class="num">{{ money(invoiceTotal) }}</b> · الباقي: <b class="num">{{ money(d.value - invoiceTotal) }}</b></div>
     <div v-for="(inv, i) in invoices" :key="i" class="row mb" style="flex-wrap:nowrap">
       <input v-model="inv.name" class="in" placeholder="وصف الفاتورة" />
@@ -107,6 +143,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import api from '../api'
+import { confirmBox } from '../dialog'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import { fmtD, fmtDT, money } from '../utils'
@@ -134,8 +171,15 @@ const claimOpen = ref(false)
 const claimDetails = ref('')
 const invoices = ref([{ name: '', amount: 0 }])
 
-const STATUS_COLOR = { available: 'gray', pending_ack: 'warn', in_use: 'ok', return_requested: 'warn', inspecting: 'info', lost: 'bad' }
-const CLAIM_STATUS = { pending_finance: 'بانتظار المالية', settled: 'مسوّاة', to_salary: 'حُوّل الباقي للراتب', returned: 'مُرجَعة' }
+const STATUS_COLOR = { available: 'gray', pending_ack: 'warn', in_use: 'ok', return_requested: 'warn', inspecting: 'info', lost: 'bad', damaged: 'bad' }
+const CLAIM_STATUS = { pending_finance: 'بانتظار المالية', settled: 'مسوّاة ومُقفلة', refunded: 'أُقفلت برد المتبقي لحساب الشركة', to_salary: 'أُقفلت بخصم المتبقي من الراتب', returned: 'مُرجَعة لاستكمال المستندات' }
+const pickEnd = ref('')
+const purposeOpen = ref(false)
+const purposeDate = ref('')
+const overOpen = ref(false)
+const overApproved = ref(true)
+const overLimit = ref(null)
+const overNote = ref('')
 const isMine = computed(() => d.value && auth.emp && d.value.employee?.id === auth.emp.id)
 const hasPendingClaim = computed(() => (d.value?.claims || []).some((c) => c.status === 'pending_finance'))
 const invoiceTotal = computed(() => invoices.value.reduce((s, i) => s + (Number(i.amount) || 0), 0))
@@ -150,8 +194,23 @@ async function run(fn, msg) {
 const act = (action) => run(() => api.post(`/custody/${props.id}/${action}`), 'تم')
 async function doPick() {
   if (!pickEmp.value) return ui.toast('اختر الموظف', 'warn')
-  await run(() => api.post(`/custody/${props.id}/${pick.value}`, { employee_id: pickEmp.value }), 'تم')
-  pick.value = null
+  await run(() => api.post(`/custody/${props.id}/${pick.value}`, { employee_id: pickEmp.value, purpose_end: (pick.value === 'hand' && pickEnd.value) || undefined }), 'تم')
+  pick.value = null; pickEnd.value = ''
+}
+async function doAck() {
+  const text = d.value.ack_text || ''
+  if (!await confirmBox(text, { title: 'إقرار الاستلام والتعهد', confirmText: 'أوافق وأقرّ بالاستلام' })) return
+  await run(() => api.post(`/custody/${props.id}/ack`, { agree: true }), 'سُجّل إقرارك')
+}
+async function doPurpose() {
+  if (!purposeDate.value) return ui.toast('اختر التاريخ', 'warn')
+  await run(() => api.post(`/custody/${props.id}/purpose-end`, { purpose_end: purposeDate.value }), 'حُدّث موعد التسوية')
+  purposeOpen.value = false
+}
+async function doOverspend() {
+  if (!overNote.value.trim()) return ui.toast('المبرر إلزامي', 'warn')
+  await run(() => api.post(`/custody/${props.id}/overspend`, { approved: overApproved.value, limit: overApproved.value && overLimit.value ? overLimit.value : null, note: overNote.value }), 'تم الحفظ')
+  overOpen.value = false; overNote.value = ''
 }
 async function doClose() {
   if (!closeNote.value.trim()) return ui.toast('ملاحظة الفحص إلزامية', 'warn')

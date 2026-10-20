@@ -77,7 +77,11 @@ class RequestController extends Controller
 
         $data = match ($rt->handler) {
             'leave' => $this->leaveData($request, $e, $request->hasFile('attachment')),
-            'correction' => $request->validate(['date' => 'required|date|before_or_equal:today', 'kind' => 'required|string|max:80', 'time' => 'nullable|date_format:H:i', 'reason' => 'required|string|max:1000']),
+            'correction' => (function () use ($request, $e) { // §27: filed within 3 working days of the issue — later ones are accepted with evidence and flagged
+                $v = $request->validate(['date' => 'required|date|before_or_equal:today', 'kind' => 'required|string|max:80', 'time' => 'nullable|date_format:H:i', 'reason' => 'required|string|max:1000']);
+
+                return $v + ['late' => method_exists(\App\Services\AttendanceService::class, 'correctionLate') && \App\Services\AttendanceService::correctionLate($v['date'], now(), $e)];
+            })(),
             'advance' => $this->advanceData($request, $e),
             'letter' => $request->validate(['kind' => 'required|string|max:80', 'to' => 'nullable|string|max:150', 'lang' => 'in:ar,en', 'purpose' => 'required|string|max:500', 'justification' => 'nullable|string|max:1000']),
             'bonus' => $request->validate(['amount' => 'required|numeric|min:500|max:50000', 'achievement' => 'required|string|max:2000']),
@@ -93,8 +97,13 @@ class RequestController extends Controller
         } elseif (! $rt->self_service) {
             abort(403, 'هذا النوع لا يُقدَّم ذاتيًا');
         }
+        $data = \App\Services\PolicyRules::check($rt->handler, $data, $target, $request); // policy rules per request type (§42–§59, appendix 5)
+        $request->validate(['attachment' => 'nullable|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic,doc,docx,xls,xlsx']);
+        if (in_array($rt->handler, ['iban_change', 'expense'], true) && ! $request->hasFile('attachment')) {
+            throw ValidationException::withMessages(['attachment' => $rt->handler === 'iban_change' ? 'أرفق شهادة الآيبان الصادرة من البنك (§38)' : 'أرفق الفواتير والمستندات المؤيدة (§45)']);
+        }
         $path = $request->file('attachment')?->store('requests/'.now()->format('Y/m'), 'local'); // only after validation & authorization
-        $flow = match ($rt->handler) { 'leave' => $this->leaveFlow($data), 'trip' => $this->tripFlow($data, $e), 'custody' => $this->custodyFlow($data, $target), default => null };
+        $flow = match ($rt->handler) { 'leave' => $this->leaveFlow($data), 'trip' => $this->tripFlow($data, $target), 'custody' => $this->custodyFlow($data, $target), default => \App\Services\PolicyRules::flow($rt->handler, $data, $target) };
         $req = ApprovalService::submit($target, $type, $data, $flow, $path);
 
         return response()->json($this->row($req->load('company:id,name')), 201);
@@ -102,8 +111,14 @@ class RequestController extends Controller
 
     public function decide(Request $request, ApprovalRequest $approvalRequest)
     {
-        $data = $request->validate(['decision' => 'required|in:approve,return', 'reason' => 'nullable|string|max:1000']);
-        $r = ApprovalService::decide($approvalRequest->load('employee'), $data['decision'], $data['reason'] ?? null, $request->user());
+        $data = $request->validate(['decision' => 'required|in:approve,return', 'reason' => 'nullable|string|max:1000', 'return_to' => 'nullable|integer|min:-1',
+            'changes' => 'nullable|array']);
+        $r = $approvalRequest->load('employee');
+        if (! empty($data['changes']) && $data['decision'] === 'approve') { // §12: an approver may change days / amounts within his authority, with a reason
+            ApprovalService::adjust($r, $data['changes'], $data['reason'] ?? null, $request->user());
+            $r->refresh()->load('employee');
+        }
+        $r = ApprovalService::decide($r, $data['decision'], $data['reason'] ?? null, $request->user(), $data['return_to'] ?? null);
 
         return $this->row($r);
     }
@@ -136,7 +151,8 @@ class RequestController extends Controller
     {
         $v = $request->validate([
             'leave_type' => 'required|exists:leave_types,code', 'from' => 'required|date', 'to' => 'required|date|after_or_equal:from',
-            'substitute_id' => 'nullable|exists:employees,id', 'delegate' => 'boolean', 'handover' => 'nullable|string|max:2000',
+            'substitute_id' => 'nullable|exists:employees,id', 'delegate' => 'boolean', 'handover' => 'nullable|string|max:2000', 'event_date' => 'nullable|date',
+            'exception' => 'boolean',
         ]);
         $lt = LeaveType::where('code', $v['leave_type'])->first();
         $days = LeaveService::days($v['from'], $v['to'], $e->loadMissing('schedule'));
@@ -154,7 +170,8 @@ class RequestController extends Controller
         if ($overlap) {
             throw ValidationException::withMessages(['from' => 'يوجد طلب إجازة متداخل مع هذه الفترة']);
         }
-        if ($lt->deducts && $lt->quota_key) {
+        $special = \App\Services\PolicyRules::specialLeave($lt, $v, $days, $e); // §59–61 rules of the special leave types
+        if ($lt->deducts && $lt->quota_key && $lt->code !== 'sick') {
             $b = LeaveService::balance($e, $lt, (int) substr($v['from'], 0, 4)); // the balance of the year the leave falls in
             if ($b['available'] < $days && ! Settings::get('leaveAdvanceAllowed', $e->company_id, false)) {
                 throw ValidationException::withMessages(['to' => "الرصيد المتاح {$b['available']} يوم أقل من المطلوب ({$days})"]);
@@ -170,9 +187,9 @@ class RequestController extends Controller
         $teamOff = $e->manager_id ? Employee::where('manager_id', $e->manager_id)->where('id', '!=', $e->id)->get(['id', 'name'])
             ->filter(fn ($x) => ApprovalRequest::where('employee_id', $x->id)->where('type', 'leave')->whereIn('status', ['pending', 'approved'])
                 ->where('data->from', '<=', $v['to'])->where('data->to', '>=', $v['from'])->exists())->pluck('name')->values()->all() : [];
-        $maxAbsent = (int) Settings::get('maxAbsentPerTeam', $e->company_id, 0);
+        $maxAbsent = (int) Settings::get('maxAbsentPerTeam', $e->company_id, 2); // §61: more than two of one team at once needs HR
 
-        return ['type' => $lt->code, 'type_name' => $lt->name, 'from' => $v['from'], 'to' => $v['to'], 'days' => $days,
+        return $special + ['type' => $lt->code, 'type_name' => $lt->name, 'from' => $v['from'], 'to' => $v['to'], 'days' => $days, 'unit' => LeaveService::unit($e), 'event_date' => $v['event_date'] ?? null,
             'substitute_id' => $v['substitute_id'] ?? null, 'delegate' => (bool) ($v['delegate'] ?? false), 'handover' => $v['handover'] ?? null,
             'team_off' => $teamOff, 'coverage_exceeded' => $maxAbsent > 0 && count($teamOff) >= $maxAbsent,
             'extra_approval' => $lt->extra_approval ?: []];
@@ -189,6 +206,9 @@ class RequestController extends Controller
                 $roles[] = $role;
             }
         }
+        if (! empty($data['needs_super']) && ! in_array('super', $roles, true)) {
+            $flow[] = ['role' => 'super', 'label' => $data['needs_super']];
+        }
         if (! empty($data['coverage_exceeded']) && ! in_array('hr', $roles, true) && ! in_array('hr_mgr', $roles, true)) {
             $flow = ApprovalService::insertBeforeFinal($flow, ['role' => 'hr', 'label' => 'اعتماد استثنائي — تجاوز حد الغياب في الفريق']);
         }
@@ -202,11 +222,13 @@ class RequestController extends Controller
      */
     private function tripData(Request $request, Employee $e): array
     {
-        $v = $request->validate(['destination' => 'required|string|max:120', 'purpose' => 'required|string|max:1000', 'scope' => 'required|in:domestic,intl',
+        $v = $request->validate(['destination' => 'required|string|max:120', 'purpose' => 'required|string|max:1000', 'scope' => 'required|in:domestic,intl', 'outside_city' => 'accepted_if:scope,domestic',
+            'outputs' => 'required|string|max:1000',
             'from' => 'required|date', 'to' => 'required|date|after_or_equal:from', 'estimate' => 'nullable|numeric|min:0', 'advance' => 'nullable|numeric|min:0',
             'cost_flight' => 'nullable|numeric|min:0', 'cost_lodging' => 'nullable|numeric|min:0', 'cost_allowance' => 'nullable|numeric|min:0', 'cost_transport' => 'nullable|numeric|min:0', 'cost_fees' => 'nullable|numeric|min:0']);
         $days = Carbon::parse($v['from'])->diffInDays(Carbon::parse($v['to'])) + 1;
         $calc = self::tripRates($e, $days);
+        $calc['long_trip'] = $days > 10; // §68: a mission longer than 10 days needs its plan and allowances reviewed before extension
         $items = array_filter(array_intersect_key($v, array_flip(['cost_flight', 'cost_lodging', 'cost_allowance', 'cost_transport', 'cost_fees'])), fn ($x) => $x !== null && $x !== '');
         $estimate = $items ? array_sum(array_map('floatval', $items)) : (float) ($v['estimate'] ?? 0);
         if ($estimate <= 0) {
@@ -219,21 +241,39 @@ class RequestController extends Controller
         return array_merge($v, ['estimate' => round($estimate, 2), 'days' => $days], $calc);
     }
 
-    /** Per-diem by level (ceo / director / manager / specialist / staff) and hotel cap, from the tier benefits (§66–67). */
+    /**
+     * Per-diem by the employee's job level (§5 levels 1–5 → ceo / director / manager / specialist / staff) and the hotel cap
+     * from the tier benefits (§66–67). Tier 1 has no per-diem: actual receipts up to its cap are reimbursed.
+     */
     public static function tripRates(Employee $e, int $days): array
     {
-        $u = User::where('employee_id', $e->id)->first();
-        $isCeo = \App\Models\Company::where('ceo_employee_id', $e->id)->exists() || ($u && $u->hasRole('super', 'ceo'));
-        $level = $isCeo ? 'Ceo' : (($u && $u->hasRole('hr_mgr', 'fin')) ? 'Dir' : (($u && $u->hasRole('mgr')) || Employee::where('manager_id', $e->id)->exists() ? 'Mgr' : 'Staff'));
-        $perDiem = (float) ($e->benefit('perDiem'.$level) ?? 0);
+        $lvl = (int) ($e->job_level ?: 0);
+        if (! $lvl) { // not set yet: infer from the role
+            $u = User::where('employee_id', $e->id)->first();
+            $lvl = \App\Models\Company::where('ceo_employee_id', $e->id)->exists() || ($u && $u->hasRole('super', 'ceo')) ? 1 : (($u && $u->hasRole('hr_mgr', 'fin')) ? 2 : (Employee::where('manager_id', $e->id)->exists() ? 3 : 4));
+        }
+        $level = [1 => 'Ceo', 2 => 'Dir', 3 => 'Mgr', 4 => 'Spec', 5 => 'Staff'][$lvl] ?? 'Staff';
+        $perDiem = (float) ($e->benefit('perDiem'.$level) ?? $e->benefit('perDiemStaff') ?? 0);
+        $actual = (float) ($e->benefit('livingActualCap') ?? 0);
         $hotel = (float) ($e->benefit('hotelCap') ?? 0);
+        $receipts = $perDiem <= 0 && $actual > 0; // tier 1: actual cost with receipts up to the cap per day
 
-        return ['level' => $level, 'per_diem' => $perDiem, 'allowance_total' => round($perDiem * $days, 2), 'hotel_cap' => $hotel, 'hotel_total_cap' => round($hotel * max(0, $days - 1), 2)];
+        return ['level' => $level, 'job_level' => $lvl, 'per_diem' => $receipts ? 0 : $perDiem, 'actual_cap' => $receipts ? $actual : null,
+            'allowance_total' => round(($receipts ? $actual : $perDiem) * $days, 2), 'allowance_basis' => $receipts ? 'receipts' : 'per_diem',
+            'hotel_cap' => $hotel, 'hotel_total_cap' => round($hotel * max(0, $days - 1), 2)];
     }
 
     /** Trip flow (§65): domestic = manager → HR → finance; international adds the company CEO after the manager and the group CEO last. */
     private function tripFlow(array $data, Employee $e): array
     {
+        // §66 / appendix 5: no chief executive approves his own travel — a company CEO goes HR → finance → group CEO;
+        // the group CEO's travel goes to finance and then the chair of the group board
+        if (\App\Models\Company::where('ceo_employee_id', $e->id)->exists() && ! User::where('employee_id', $e->id)->first()?->hasRole('super')) {
+            return [['role' => 'hr_mgr', 'label' => 'الموارد البشرية'], ['role' => 'fin', 'label' => 'المدير المالي'], ['role' => 'super', 'label' => 'الرئيس التنفيذي للمجموعة (سفر رئيس تنفيذي)']];
+        }
+        if (User::where('employee_id', $e->id)->first()?->hasRole('super')) {
+            return [['role' => 'fin', 'label' => 'المدير المالي'], ['role' => 'board', 'label' => 'رئيس مجلس إدارة المجموعة']];
+        }
         $flow = ApprovalService::flowFor('trip', $data);
         $roles = array_column($flow, 'role');
         if (($data['scope'] ?? 'domestic') === 'intl') {
@@ -259,9 +299,13 @@ class RequestController extends Controller
             return $flow;
         }
         $open = \App\Models\CustodyItem::where('employee_id', $e->id)->whereIn('status', ['in_use', 'pending_ack', 'return_requested'])
-            ->whereHas('type', fn ($q) => $q->where('is_cash', true))->exists();
+            ->whereHas('type', fn ($q) => $q->where('is_cash', true))->exists()
+            || ApprovalRequest::where('employee_id', $e->id)->where('type', 'custody')->where('status', 'pending')->where('data->amount', '>', 0)->exists();
         if ($open) {
             throw ValidationException::withMessages(['amount' => 'لا تُصرف عهدة نقدية جديدة قبل تسوية العهدة النقدية السابقة (اللائحة §44)']);
+        }
+        if (\App\Services\PolicyRules::overdueCustody($e)) {
+            throw ValidationException::withMessages(['amount' => 'تأخرت في تسوية عهدة نقدية — لا تُصرف عهدة أو سلفة جديدة حتى التسوية (§44)']);
         }
         $flow = [['role' => 'mgr', 'label' => 'المشرف المباشر'], ['role' => 'fin', 'label' => 'المدير المالي (اعتماد العهدة النقدية)']];
         $cap = (float) Settings::get('custodyCashCap', $e->company_id, 3000);
@@ -277,7 +321,8 @@ class RequestController extends Controller
     {
         abort_unless($approvalRequest->employee_id === $request->user()->employee_id && $approvalRequest->type === 'trip' && $approvalRequest->status === 'approved', 403);
         $d = $request->validate(['report' => 'required|string|max:5000']);
-        $approvalRequest->update(['data' => $approvalRequest->data + ['report' => $d['report'], 'report_at' => now()->toDateTimeString()]]);
+        $late = ! empty($approvalRequest->data['to']) && \App\Services\WorkCalendar::between($approvalRequest->employee, $approvalRequest->data['to']) > (int) Settings::get('tripReportDays', $approvalRequest->company_id, 3);
+        $approvalRequest->update(['data' => array_merge($approvalRequest->data, ['report' => $d['report'], 'report_at' => now()->toDateTimeString(), 'report_late' => $late])]);
         $mgr = $approvalRequest->employee->manager_id ? \App\Models\User::where('employee_id', $approvalRequest->employee->manager_id)->value('id') : null;
         \App\Services\Audit::notify($mgr, 'تقرير رحلة عمل', $approvalRequest->employee->name.' — '.($approvalRequest->data['destination'] ?? ''), 'info', ['screen' => 'requests']);
 
@@ -290,19 +335,27 @@ class RequestController extends Controller
             throw ValidationException::withMessages(['amount' => 'خاصية السلف غير مفعّلة لحسابك']);
         }
         // §42: not during probation (180 days) and not while a previous advance is still being repaid — the group CEO may except
-        $probation = (int) Settings::get('probationDays', $e->company_id, 180);
-        if ($e->hire_date && $e->hire_date->copy()->addDays($probation)->gt(now()) && ! $request->user()->hasRole('super')) {
-            throw ValidationException::withMessages(['amount' => 'لا تُمنح السلفة خلال فترة التجربة إلا باستثناء من الرئيس التنفيذي للمجموعة (اللائحة §42)']);
+        // an exception request goes to the group CEO, who is already the final approver of every advance (appendix 5)
+        $exception = $request->boolean('exception') && $request->filled('exception_reason');
+        $probation = (int) ($e->probation_days ?: Settings::get('probationDays', $e->company_id, 180));
+        $inProbation = $e->hire_date && $e->hire_date->copy()->addDays($probation)->gt(now()) && $e->probation_status !== 'confirmed';
+        if ($inProbation && ! $exception && ! $request->user()->hasRole('super')) {
+            throw ValidationException::withMessages(['amount' => 'لا تُمنح السلفة خلال فترة التجربة إلا باستثناء من الرئيس التنفيذي للمجموعة (اللائحة §42) — فعّل «طلب استثناء» واكتب السبب']);
         }
-        if (\App\Models\Advance::where('employee_id', $e->id)->where('status', 'repaying')->exists() && ! $request->user()->hasRole('super')) {
-            throw ValidationException::withMessages(['amount' => 'لا تُمنح سلفة جديدة قبل سداد السلفة السابقة كاملة (اللائحة §42)']);
+        $outstanding = \App\Models\Advance::where('employee_id', $e->id)->where('status', 'repaying')->exists()
+            || ApprovalRequest::where('employee_id', $e->id)->where('type', 'advance')->where('status', 'pending')->exists();
+        if ($outstanding && ! $exception && ! $request->user()->hasRole('super')) {
+            throw ValidationException::withMessages(['amount' => 'لا تُمنح سلفة جديدة قبل سداد السلفة السابقة كاملة (اللائحة §42) — يمكن طلب استثناء من الرئيس التنفيذي للمجموعة']);
+        }
+        if (\App\Services\PolicyRules::overdueCustody($e)) {
+            throw ValidationException::withMessages(['amount' => 'لديك عهدة نقدية متأخرة التسوية — يوقف صرف أي سلفة أو عهدة جديدة حتى تسويتها (اللائحة §44)']);
         }
         $max = (int) Settings::get('advanceMaxInstallments', $e->company_id, 12);
         $min = (int) Settings::get('advanceMinAmount', $e->company_id, 100);
         $cap = Settings::get('advanceCapSalaries', $e->company_id, 2) * $e->monthlyGross();
         $v = $request->validate(['amount' => "required|numeric|min:$min|max:$cap", 'installments' => "required|integer|min:1|max:$max", 'purpose' => 'required|string|max:300']);
 
-        return $v + ['monthly' => round($v['amount'] / $v['installments'], 2)];
+        return $v + ['monthly' => round($v['amount'] / $v['installments'], 2), 'exception' => $exception ? ['probation' => $inProbation, 'outstanding' => $outstanding, 'reason' => $request->input('exception_reason')] : null];
     }
 
     private function resignationData(Request $request, Employee $e): array
@@ -340,7 +393,7 @@ class RequestController extends Controller
             $k = $f['key'];
             $labels[$k] = $f['label'] ?? $k;
             $rules[$k] = [! empty($f['required']) ? 'required' : 'nullable', ...match ($f['type'] ?? 'text') {
-                'number' => ['numeric'], 'date' => ['date'], 'bool' => ['boolean'], 'employee' => ['exists:employees,id'],
+                'number' => ['numeric'], 'date' => ['date'], 'bool' => ['boolean'], 'employee' => ['exists:employees,id'], 'company' => ['exists:companies,id'],
                 'select' => [Rule::in($f['options'] ?? [])], 'lookup' => [Rule::in(Lookup::names($f['group'] ?? ''))],
                 'textarea' => ['string', 'max:4000'], default => ['string', 'max:500'],
             }];
@@ -349,6 +402,9 @@ class RequestController extends Controller
         foreach ($rt->form ?? [] as $f) {
             if (($f['type'] ?? '') === 'employee' && ! empty($v[$f['key']])) {
                 $v[$f['key'].'_name'] = Employee::find($v[$f['key']])?->name;
+            }
+            if (($f['type'] ?? '') === 'company' && ! empty($v[$f['key']])) {
+                $v[$f['key'].'_name'] = \App\Models\Company::find($v[$f['key']])?->name;
             }
         }
 
@@ -368,6 +424,10 @@ class RequestController extends Controller
             'company' => $r->relationLoaded('company') ? $r->company?->name : null,
             'has_attachment' => (bool) $r->attachment_path,
             'created_at' => $r->created_at?->toIso8601String(), 'age_days' => (int) $r->created_at?->diffInDays(now()),
+            // §12: each approver decides within 3 working days of the request reaching him — late requests show in red
+            'stage_days' => $r->status === 'pending' ? \App\Services\WorkCalendar::between(null, $r->stage_entered_at ?? $r->updated_at ?? $r->created_at) : null,
+            'overdue' => $r->status === 'pending' && \App\Services\WorkCalendar::between(null, $r->stage_entered_at ?? $r->updated_at ?? $r->created_at) > (int) Settings::get('approvalSlaDays', $r->company_id, 3),
+            'can_adjust' => \App\Services\PolicyRules::adjustable($r->type),
         ];
     }
 }

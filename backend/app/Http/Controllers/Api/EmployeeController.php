@@ -95,6 +95,14 @@ class EmployeeController extends Controller
         $data['schedule_id'] ??= Company::whereKey($data['company_id'])->value('default_schedule_id'); // the company's working hours by default
         $extra = $request->validate(['basic' => 'nullable|numeric|min:0', 'allowances' => 'nullable|array|max:30', 'allowances.*.name' => 'required|string|max:80', 'allowances.*.amount' => 'required|numeric|min:0']);
         abort_unless($acc->can('EMP', 'add', ['company_id' => $data['company_id']]), 403);
+        if (! $request->boolean('quick')) { // §17: the employee is registered with complete data at hiring
+            $missing = array_filter(['manager_id' => (int) ($data['job_level'] ?? 0) === 1 ? 'x' : ($data['manager_id'] ?? null), 'job_title_id' => $data['job_title_id'] ?? null,
+                'schedule_id' => $data['schedule_id'] ?? null, 'national_id' => $data['national_id'] ?? null, 'bank_iban' => $data['bank_iban'] ?? null], fn ($v) => ! $v);
+            $names = ['manager_id' => 'المشرف المباشر', 'job_title_id' => 'المسمى الوظيفي', 'schedule_id' => 'جدول الدوام', 'national_id' => 'رقم الهوية أو الإقامة أو الجواز', 'bank_iban' => 'الآيبان'];
+            if ($missing) {
+                throw \Illuminate\Validation\ValidationException::withMessages(array_map(fn ($k) => $names[$k].' إلزامي عند التعيين (§17)', array_combine(array_keys($missing), array_keys($missing))));
+            }
+        }
 
         $e = DB::transaction(function () use ($data, $request) {
             $basic = (float) $request->input('basic', 0);
@@ -122,7 +130,10 @@ class EmployeeController extends Controller
             foreach ($comps as $c) {
                 $e->components()->create($c + ['valid_from' => $e->hire_date]);
             }
-            $e->insurance = ['class' => $b['insuranceClass'] ?? 'C', 'dependents' => 0, 'card' => null];
+            $e->insurance = ['class' => $e->insuranceClass() ?? 'C', 'dependents' => 0, 'card' => null];
+            if ($e->bank_iban) {
+                $e->iban_verified_at = now(); // §38: registered at hiring from the bank's IBAN certificate
+            }
             $e->save();
             $e->career()->create(['type' => 'تعيين', 'detail' => $e->company->name.' · '.($e->jobTitle?->name).' · '.\App\Models\Lookup::name('contract_types', $e->contract_type) ?? $e->contract_type, 'occurred_on' => $e->hire_date, 'user_id' => auth()->id()]);
             if ($request->boolean('create_user')) {
@@ -149,6 +160,14 @@ class EmployeeController extends Controller
         $data = $this->validated($request, $employee);
         if (! $request->user()->isHr()) { // direct managers may only touch operational fields, never contract/payroll identity
             $data = array_intersect_key($data, array_flip(['dept', 'phone', 'email', 'name_en', 'schedule_id', 'location_ids', 'flex_enabled', 'daily_note_required']));
+        }
+        if (array_key_exists('bank_iban', $data) && strtoupper(preg_replace('/\s+/', '', (string) $data['bank_iban'])) !== strtoupper((string) $employee->bank_iban)) {
+            // §38: after hiring the account changes only through a request with the bank certificate (HR verifies, finance approves)
+            abort_unless($request->user()->hasRole('super'), 422, 'يُعدَّل الحساب البنكي بطلب «تعديل الحساب البنكي» مع شهادة البنك (§38)');
+            $data['iban_verified_at'] = now();
+        }
+        if (array_key_exists('religion', $data) && \Illuminate\Support\Facades\Schema::hasColumn('employees', 'muslim')) {
+            $data['muslim'] = $data['religion'] !== 'other'; // Ramadan hours (§24) follow the same field
         }
         $labels = ['job_title_id' => 'تغيير الوظيفة', 'manager_id' => 'تغيير المدير المباشر', 'company_id' => 'نقل بين الشركات', 'contract_type' => 'تغيير نوع الدوام', 'dept' => 'نقل بين الإدارات'];
         $before = $employee->only(array_keys($data));
@@ -182,7 +201,8 @@ class EmployeeController extends Controller
         return $r->validate([
             'emp_no' => [$e ? 'required' : 'nullable', 'string', 'max:30', Rule::unique('employees')->ignore($e?->id)],
             'name' => 'required|string|max:150', 'name_en' => 'nullable|string|max:150',
-            'company_id' => 'required|exists:companies,id', 'job_title_id' => 'nullable|exists:job_titles,id',
+            'company_id' => 'required|exists:companies,id', 'job_title_id' => 'nullable|exists:job_titles,id', 'job_level' => 'nullable|integer|between:1,5',
+            'religion' => 'nullable|in:muslim,other', 'probation_days' => 'nullable|integer|min:0|max:180',
             'manager_id' => ['nullable', 'exists:employees,id', Rule::notIn([$e?->id])],
             'dept' => 'nullable|string|max:100', 'hire_date' => 'required|date',
             'contract_type' => ['required', Rule::exists('lookups', 'code')->where('group', 'contract_types')->where('active', true)], 'part_ratio' => 'nullable|numeric|min:0.1|max:1',

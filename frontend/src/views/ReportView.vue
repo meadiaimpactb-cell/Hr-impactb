@@ -7,6 +7,9 @@
         <p class="row" style="gap:6px;flex-wrap:wrap">
           <span class="pill" :class="STATUS_COLOR[rv.status]">{{ rv.status_label }}</span>
           <span v-if="rv.late" class="pill bad">متأخر</span>
+          <span v-if="rv.preview?.parts?.report?.after_month_end" class="pill bad">رُفع بعد نهاية الشهر (−10)</span>
+          <span v-if="rv.first_submitted_at" class="tiny muted">أول رفع {{ fmtDT(rv.first_submitted_at) }}</span>
+          <span v-if="rv.preview?.parts?.disc?.coop_pending" class="pill warn">التعاون بانتظار تقدير المشرف</span>
           <span v-if="rv.can_review" class="pill info">مرحلتك: {{ ROLE[rv.review_role] }}</span>
           <span class="tiny muted">رقم الموظف {{ rv.employee?.emp_no }} · {{ rv.items_total }} مهام</span>
         </p>
@@ -48,14 +51,30 @@
       </div>
     </div>
 
+    <div v-if="empOwn.length && (rv.can_review && rv.review_role === 'mgr' || empOwn.some((i) => i.mgr_approved != null))" class="card">
+      <h3>البنود الشخصية للموظف <span class="sub">حتى 3 بنود لا يزيد وزن كل منها على 15، ولا تُحتسب إلا بموافقة المشرف المباشر (§35)</span></h3>
+      <div class="tw"><table><thead><tr><th>البند</th><th>الوزن</th><th>نسبة الموظف</th><th>قرار المشرف</th></tr></thead>
+        <tbody><tr v-for="it in empOwn" :key="it.id"><td><b>{{ it.title }}</b></td><td class="num">{{ it.weight }}</td><td class="num">{{ it.pct ?? '—' }}%</td>
+          <td><select v-if="rv.can_review && rv.review_role === 'mgr'" v-model="it.approved" class="in" style="min-height:30px;padding:2px 6px"><option :value="null" disabled>اختر…</option><option :value="true">موافقة — يُحتسب</option><option :value="false">رفض — لا يُحتسب</option></select>
+            <span v-else class="pill" :class="it.mgr_approved ? 'ok' : it.mgr_approved === false ? 'bad' : 'gray'">{{ it.mgr_approved ? 'موافق عليه' : it.mgr_approved === false ? 'مرفوض' : 'بانتظار المشرف' }}</span></td></tr></tbody></table></div>
+    </div>
+
+    <div v-if="rv.can_review && rv.review_role === 'mgr'" class="card">
+      <h3>المستهدفات <span class="sub">للمشرف المباشر تعديل المستهدف المرحَّل لهذا الشهر ومستهدفات الشهر القادم التي تنتقل تلقائيًا للتقرير التالي (§35)</span></h3>
+      <div class="tw"><table><thead><tr><th>البند</th><th>مستهدف هذا الشهر</th><th>مستهدفات الشهر القادم</th></tr></thead>
+        <tbody><tr v-for="it in rv.items" :key="it.id"><td><b>{{ it.title }}</b><span v-if="it.carried_from" class="pill gray tiny">مرحَّل</span></td>
+          <td><textarea v-model="it.target" class="in" rows="1" /></td><td><textarea v-model="it.next_target" class="in" rows="1" /></td></tr></tbody></table></div>
+    </div>
+
     <div v-if="rv.can_review" class="card review-box">
       <h3>المراجعة — {{ ROLE[rv.review_role] }}</h3>
       <div class="fr">
-        <div v-if="rv.review_role === 'mgr'" class="fg"><label>التعاون (0–{{ rv.limits.coop }})</label><input v-model.number="rvf.coop" type="number" min="0" :max="rv.limits.coop" class="in" /></div>
+        <div v-if="rv.review_role === 'mgr'" class="fg"><label>التعاون (0–{{ rv.limits.coop }}) * <span class="tiny muted">تقدير المشرف من وقائع موثقة (§71)</span></label><input v-model.number="rvf.coop" type="number" min="0" :max="rv.limits.coop" step="0.5" class="in" /></div>
         <template v-if="rv.review_role === 'hr'">
           <div class="fg"><label>تقدير الموارد البشرية للتطوير (0–{{ rv.limits.hr_score }})</label><input v-model.number="rvf.hr_score" type="number" min="0" :max="rv.limits.hr_score" class="in" /></div>
           <div class="fg"><label>التفاعل (0–{{ rv.limits.interaction }})</label><input v-model.number="rvf.interaction" type="number" min="0" :max="rv.limits.interaction" class="in" /></div>
-          <div class="fg"><label>نقاط إضافية (0–10)</label><input v-model.number="rvf.hr_bonus" type="number" min="0" max="10" class="in" /></div>
+          <div class="fg"><label>درجات إضافية لإنجاز استثنائي (0–10)</label><input v-model.number="rvf.hr_bonus" type="number" min="0" max="10" class="in" /></div>
+          <div v-if="rvf.hr_bonus > 0" class="fg" style="grid-column:1/-1"><label>سبب الإضافة * <span class="tiny muted">إنجاز استثنائي موثق بتوصية المشرف المباشر (§71)</span></label><input v-model="rvf.bonus_reason" class="in" /></div>
         </template>
         <div v-if="rv.review_role === 'ceo'" class="fg"><label>جودة المخرجات (0–{{ rv.limits.quality }})</label><input v-model.number="rvf.quality" type="number" min="0" :max="rv.limits.quality" class="in" /></div>
         <div class="fg" style="grid-column:1/-1"><label>ملاحظة / سبب الإرجاع</label><textarea v-model="rvf.note" class="in" rows="2" /></div>
@@ -74,7 +93,7 @@
 <script setup>
 // One monthly report on its own page (easier to read than a dialog): grouped achievements, scores,
 // the reviewer's form for the current stage, post-approval adjustment, Excel download and print.
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import Kpi from '../components/Kpi.vue'
@@ -93,17 +112,25 @@ const rv = ref(null); const rvf = ref({}); const adj = ref({ hr_bonus: 0, reason
 async function load() {
   rv.value = await api.get(`/reports/monthly/${props.id}`)
   adj.value = { hr_bonus: rv.value.hr_bonus || 0, reason: '' }
-  rvf.value = { coop: rv.value.coop ?? rv.value.limits.coop, hr_score: rv.value.dev?.hr_score ?? 0, interaction: rv.value.dev?.interaction ?? 0, hr_bonus: rv.value.hr_bonus || 0, quality: rv.value.quality ?? Math.round(rv.value.limits.quality * 0.8), note: '' }
+  rv.value.items.forEach((i) => { if (i.source === 'emp') i.approved = i.mgr_approved ?? null })
+  rvf.value = { coop: rv.value.coop ?? null, hr_score: rv.value.dev?.hr_score ?? 0, interaction: rv.value.dev?.interaction ?? 0, hr_bonus: rv.value.hr_bonus || 0, bonus_reason: rv.value.hr_bonus ? (rv.value.adjust_reason || '') : '', quality: rv.value.quality ?? Math.round(rv.value.limits.quality * 0.8), note: '' }
 }
+const empOwn = computed(() => (rv.value?.items || []).filter((i) => i.source === 'emp'))
 async function review(action) {
   if (action === 'return' && !rvf.value.note?.trim()) return ui.toast('سبب الإرجاع إلزامي', 'warn')
-  if (action === 'approve' && rv.value.review_role === 'mgr' && rv.value.items.some((i) => i.mgr_score != null && i.mgr_score !== i.pct && !i.mgr_note?.trim())) return ui.toast('اكتب ملاحظة لكل مهمة اختلف فيها تقييمك عن تقييم الموظف', 'warn', 5000)
+  if (action === 'approve' && rv.value.review_role === 'mgr') {
+    if (rv.value.items.some((i) => i.mgr_score != null && i.mgr_score !== i.pct && !i.mgr_note?.trim())) return ui.toast('اكتب ملاحظة لكل مهمة اختلف فيها تقييمك عن تقييم الموظف', 'warn', 5000)
+    if (rvf.value.coop == null || rvf.value.coop === '') return ui.toast('تقدير التعاون إلزامي', 'warn')
+    if (empOwn.value.some((i) => i.approved == null)) return ui.toast('وافق على كل بند شخصي أو ارفضه', 'warn')
+  }
+  if (action === 'approve' && rv.value.review_role === 'hr' && rvf.value.hr_bonus > 0 && !rvf.value.bonus_reason?.trim()) return ui.toast('سبب الدرجات الإضافية إلزامي', 'warn')
   busy.value = true
   try {
-    await api.post(`/reports/monthly/${rv.value.id}/review`, { action, ...rvf.value, items: rv.value.items.map((i) => ({ id: i.id, mgr_score: i.mgr_score, mgr_note: i.mgr_note })) })
+    const items = rv.value.items.map((i) => ({ id: i.id, mgr_score: i.mgr_score, mgr_note: i.mgr_note, ...(rv.value.review_role === 'mgr' ? { target: i.target ?? null, next_target: i.next_target ?? null } : {}), ...(i.source === 'emp' && i.approved != null ? { approved: i.approved } : {}) }))
+    await api.post(`/reports/monthly/${rv.value.id}/review`, { action, ...rvf.value, items })
     ui.toast(action === 'approve' ? 'تم الاعتماد' : 'أُرجع التقرير للموظف', 'ok')
     router.push('/reports')
-  } finally { busy.value = false }
+  } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad', 6000) } finally { busy.value = false }
 }
 async function adjust() {
   if (!adj.value.reason?.trim()) return ui.toast('سبب التعديل إلزامي', 'warn')

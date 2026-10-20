@@ -142,13 +142,40 @@ class LetterController extends Controller
     {
         $u = $request->user();
         $d = $request->validate(['employee_id' => 'required|exists:employees,id', 'kind' => ['required', Rule::in(array_column(Lookup::grouped()['letter_kinds'] ?? [], 'code'))], 'to' => 'nullable|string|max:160', 'lang' => 'in:ar,en',
-            'purpose' => 'nullable|string|max:500', 'justification' => 'nullable|string|max:1000']);
-        $e = Employee::findOrFail($d['employee_id']);
-        abort_unless($u->isHr() && Access::for()->can('EMP', 'edit', ['employee' => $e]), 403);
+            'purpose' => 'nullable|string|max:500', 'justification' => 'nullable|string|max:1000', 'attachment' => 'nullable|file|max:10240|mimes:pdf,jpg,jpeg,png,doc,docx']);
+        $e = Employee::withTrashed()->findOrFail($d['employee_id']);
+        // §112 / §114: the service certificate is issued by HR directly on request, free of charge, with no approval chain
+        abort_unless($u->isHr() && (Access::for()->can('EMP', 'edit', ['employee' => $e]) || ($d['kind'] === 'service' && Access::for()->canSeeEmployee($e))), 403);
         $tpl = LetterTemplate::where('kind', $d['kind'])->first();
         abort_if($tpl?->includes_salary && ! Access::for()->canSeeSalary($e), 403, 'خطاب الراتب يتطلب صلاحية الاطلاع على الرواتب');
+        $path = $request->file('attachment')?->store('letters/'.now()->format('Y'), 'local');
+        $letter = self::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', $u->id, null, ['purpose' => $d['purpose'] ?? null, 'justification' => $d['justification'] ?? null]);
+        if ($path) {
+            $letter->update(['attachment_path' => $path]);
+        }
+        if ($d['kind'] === 'service' && $e->manager_id) {
+            Audit::notify(User::where('employee_id', $e->manager_id)->value('id'), 'صدرت شهادة خدمة لأحد موظفيك', $e->name.' — '.$letter->no, 'info', ['screen' => 'letters']); // appendix 5: the manager is informed
+        }
 
-        return response()->json($this->row(self::issue($e, $d['kind'], $d['to'] ?? null, $d['lang'] ?? 'ar', $u->id, null, ['purpose' => $d['purpose'] ?? null, 'justification' => $d['justification'] ?? null])->load('employee:id,name,emp_no', 'company:id,name')), 201);
+        return response()->json($this->row($letter->load('employee:id,name,emp_no', 'company:id,name')), 201);
+    }
+
+    /** §112: the employee (or a former employee through HR) asks for a service certificate — HR issues it directly, free of charge. */
+    public function requestService(Request $request)
+    {
+        $u = $request->user();
+        $e = $u->employee;
+        abort_unless($e, 404);
+        $d = $request->validate(['to' => 'nullable|string|max:160', 'lang' => 'nullable|in:ar,en', 'note' => 'nullable|string|max:500']);
+        $already = Letter::where('employee_id', $e->id)->where('kind', 'service')->where('issued_at', '>=', now()->subDays(1)->toDateString())->exists();
+        abort_if($already, 422, 'صدرت لك شهادة خدمة اليوم — تجدها في «خطاباتي»');
+        Audit::log('letters', $e->id, 'service_requested', null, $d);
+        Audit::notify(Access::hrUsersFor($e->company_id, 'EMP') ?: Access::hrManagersFor($e->company_id), 'طلب شهادة خدمة', $e->name.($d['to'] ?? null ? ' — إلى: '.$d['to'] : '').($d['note'] ?? null ? ' · '.$d['note'] : '').' (تُصدر مباشرة دون مقابل — §112)', 'approval', ['screen' => 'letters']);
+        if ($e->manager_id) {
+            Audit::notify(User::where('employee_id', $e->manager_id)->value('id'), 'طلب شهادة خدمة من أحد موظفيك', $e->name, 'info', ['screen' => 'letters']);
+        }
+
+        return ['ok' => true];
     }
 
     // ---------- e-signature ----------
@@ -192,6 +219,7 @@ class LetterController extends Controller
     {
         return $l->only('id', 'kind', 'to', 'lang', 'no', 'title', 'body', 'includes_salary', 'issued_at', 'request_id', 'hash', 'signed_doc_id') + [
             'kind_name' => Lookup::name('letter_kinds', $l->kind), 'employee' => $l->relationLoaded('employee') ? $l->employee?->only('id', 'name', 'emp_no') : null,
-            'company' => $l->relationLoaded('company') ? $l->company?->name : null, 'issued_by' => $l->relationLoaded('issuer') ? $l->issuer?->name : null, 'signed' => (bool) $l->signed_doc_id];
+            'company' => $l->relationLoaded('company') ? $l->company?->name : null, 'issued_by' => $l->relationLoaded('issuer') ? $l->issuer?->name : null, 'signed' => (bool) $l->signed_doc_id,
+            'has_attachment' => (bool) $l->attachment_path, 'file' => $l->attachment_path, 'direct' => $l->kind === 'service'];
     }
 }

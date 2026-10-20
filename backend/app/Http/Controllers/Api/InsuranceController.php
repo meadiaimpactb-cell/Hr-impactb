@@ -26,7 +26,7 @@ class InsuranceController extends Controller
         return [
             'policies' => $policies->map(fn ($p) => $this->row($p)),
             'members' => $emps->map(fn ($e) => ['employee' => $e->only('id', 'name', 'emp_no'), 'company_id' => $e->company_id, 'company' => $e->company?->name,
-                'tier_class' => $e->benefit('insuranceClass'), 'tier_dependents' => $e->benefit('dependents'), 'insurance' => $e->insurance ?? null])->values(),
+                'tier_class' => $e->insuranceClass(), 'tier_dependents' => $e->benefit('dependents'), 'insurance' => $e->insurance ?? null])->values(),
             'classes' => Lookup::grouped()['insurance_classes'] ?? [],
         ];
     }
@@ -38,7 +38,7 @@ class InsuranceController extends Controller
         $e->load('company.tier');
         $p = ! empty($e->insurance['policy_id']) ? InsurancePolicy::find($e->insurance['policy_id']) : null;
 
-        return ['insurance' => $e->insurance, 'tier_class' => $e->benefit('insuranceClass'), 'tier_dependents' => $e->benefit('dependents'), 'policy' => $p ? $this->row($p) : null];
+        return ['insurance' => $e->insurance, 'tier_class' => $e->insuranceClass(), 'tier_dependents' => $e->benefit('dependents'), 'policy' => $p ? $this->row($p) : null];
     }
 
     public function save(Request $request, ?InsurancePolicy $policy = null)
@@ -64,7 +64,7 @@ class InsuranceController extends Controller
             $employee->update(['insurance' => null]);
             $ev = 'إلغاء';
         } else {
-            $employee->update(['insurance' => ['policy_id' => $d['policy_id'] ?? null, 'class' => $d['class'] ?? $employee->benefit('insuranceClass'), 'dependents' => $d['dependents'] ?? $employee->benefit('dependents'), 'card' => $d['card'] ?? null, 'since' => now()->toDateString()]]);
+            $employee->update(['insurance' => ['policy_id' => $d['policy_id'] ?? null, 'class' => $d['class'] ?? $employee->insuranceClass(), 'dependents' => $d['dependents'] ?? $employee->benefit('dependents'), 'card' => $d['card'] ?? null, 'since' => now()->toDateString()]]);
             $ev = $old ? 'تعديل' : 'إضافة';
         }
         foreach (array_unique(array_filter([$old['policy_id'] ?? null, $d['policy_id'] ?? null])) as $pid) {

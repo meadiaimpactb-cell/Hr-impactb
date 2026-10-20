@@ -10,7 +10,7 @@ class Schedule extends Model
 
     protected function casts(): array
     {
-        return ['week_days' => 'array', 'hours' => 'array', 'flex' => 'boolean', 'cross_midnight' => 'boolean'];
+        return ['week_days' => 'array', 'hours' => 'array', 'flex' => 'boolean', 'cross_midnight' => 'boolean', 'break_minutes' => 'integer'];
     }
 
     public function employees() { return $this->hasMany(Employee::class); }

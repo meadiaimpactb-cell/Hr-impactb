@@ -11,7 +11,7 @@
     <template v-else>
       <div class="grid g4 mb">
         <Kpi label="آخر تقييم" :value="my.monthly[0]?.score ?? '—'" :hint="my.monthly[0] ? `${fmtYM(my.monthly[0].period)} · ${my.monthly[0].grade_label}` : 'لم يُنشر بعد'" :color="my.monthly[0] && my.monthly[0].score >= my.template.pass_score ? 'g' : 'r'" />
-        <Kpi label="المعدل السنوي" :value="my.annual?.score ?? '—'" :hint="my.annual ? (my.annual.insufficient ? `${my.annual.months} من ${my.annual.min_months} أشهر مطلوبة` : `${my.annual.months} أشهر · ${my.annual.grade.grade}`) : ''" color="b" />
+        <Kpi label="المعدل السنوي" :value="my.annual?.score ?? '—'" :hint="my.annual ? (my.annual.insufficient ? `${my.annual.months} من ${my.annual.min_months} أشهر مطلوبة` : `${my.annual.months} أشهر · ${my.annual.grade.grade}${my.annual.partial ? ' · من الأشهر المتاحة' : ''}`) : ''" color="b" />
         <Kpi label="حد القبول" :value="my.template.pass_score + '%'" :hint="my.template.name" color="y" />
         <Kpi label="الأوزان" :value="`${my.template.weights.achieve}/${my.template.weights.attend}/${my.template.weights.dev}/${my.template.weights.disc}`" hint="إنجاز / حضور / تطوير / انضباط" color="p" />
       </div>
@@ -23,9 +23,16 @@
         <div v-dt v-else class="tw"><table><thead><tr><th>الشهر</th><th>الإنجاز</th><th>الحضور</th><th>التطوير</th><th>الانضباط</th><th>الدرجة</th><th>التقدير</th><th>اعتراض</th><th /></tr></thead>
           <tbody><tr v-for="e in my.monthly" :key="e.id">
             <td><b>{{ fmtYM(e.period) }}</b></td><td>{{ e.axes.achieve }}</td><td>{{ e.axes.attend ?? 'معفى' }}</td><td>{{ e.axes.dev }}</td><td>{{ e.axes.disc }}</td>
-            <td><b class="num" :class="e.score >= my.template.pass_score ? 'ok' : 'bad'">{{ e.score }}</b></td><td><span class="pill" :class="e.score >= my.template.pass_score ? 'ok' : 'bad'">{{ e.grade }} · {{ e.grade_label }}</span></td>
-            <td class="small">{{ OBJ[e.objection_status] }}</td><td><button class="btn ghost xs" @click="openDetail(auth.emp.id, e.period)">كيف احتُسبت؟</button></td>
+            <td><b class="num" :class="(e.details?.pass ?? e.score >= my.template.pass_score) ? 'ok' : 'bad'">{{ e.score }}</b></td><td><span class="pill" :class="(e.details?.pass ?? e.score >= my.template.pass_score) ? 'ok' : 'bad'">{{ e.grade }} · {{ e.grade_label }}</span></td>
+            <td class="small">{{ OBJ[e.objection_status] }}<div v-if="e.can_object && e.objection?.deadline" class="tiny muted">حتى {{ fmtD(e.objection.deadline) }}</div><div v-if="e.objection_status === 'open' && e.objection?.decision_due" class="tiny" :class="e.objection.decision_overdue ? 'bad' : 'muted'">يُبت فيه حتى {{ fmtD(e.objection.decision_due) }}</div></td><td><button class="btn ghost xs" @click="openDetail(auth.emp.id, e.period)">كيف احتُسبت؟</button></td>
           </tr></tbody></table></div>
+      </div>
+      <div v-if="my.annual_published?.length" class="card">
+        <h3>تقييماتي السنوية المنشورة <span class="sub">يحق الاعتراض مرة واحدة خلال 7 أيام عمل من النشر، ويُبت فيه خلال 10 أيام عمل (§76)</span></h3>
+        <div v-dt class="tw"><table><thead><tr><th>السنة</th><th>النوع</th><th>الدرجة</th><th>التقدير</th><th>نُشر</th><th>الاعتراض</th><th /></tr></thead>
+          <tbody><tr v-for="a in my.annual_published" :key="a.id"><td class="num"><b>{{ a.year }}</b></td><td class="small">{{ a.kind === 'contract' ? 'السنة العقدية' : 'السنة المالية' }}</td><td class="num"><b>{{ a.score }}</b></td><td>{{ a.grade }} · {{ a.grade_label }}</td><td class="small">{{ fmtD(a.published_at) }}</td>
+            <td class="small">{{ OBJ[a.objection_status] }}<div v-if="a.objection_decision" class="tiny muted">{{ a.objection_decision }}</div><div v-if="a.can_object" class="tiny muted">حتى {{ fmtD(a.objection.deadline) }}</div><div v-if="a.objection_status === 'open' && a.objection?.decision_due" class="tiny muted">يُبت فيه حتى {{ fmtD(a.objection.decision_due) }}</div></td>
+            <td><button v-if="a.can_object" class="btn dan xs" @click="objectAnnual(a)">اعتراض</button></td></tr></tbody></table></div>
       </div>
     </template>
   </template>
@@ -51,17 +58,19 @@
   <template v-else-if="tab === 'annual'">
     <div class="card">
       <h3>التقييم السنوي {{ year }} <span class="sub">اللائحة §73: 70% متوسط الأشهر المنشورة (يُستبعد الشهر الذي عمل فيه أقل من 10 أيام) + 30% تقييم الأهداف السنوية · المكافأة §85: أشهر × أجر ديسمبر الشامل × نسبة الخدمة × معامل التمويل</span>
-        <span class="acts"><select v-model="annualKind" class="in" style="width:auto" @change="load"><option value="fiscal">السنة المالية (يناير–ديسمبر)</option><option value="contract">السنة العقدية (من المباشرة)</option></select></span></h3>
+        <span class="acts"><select v-model="annualKind" class="in" style="width:auto" @change="load"><option value="fiscal">السنة المالية (يناير–ديسمبر)</option><option value="contract">السنة العقدية (من المباشرة)</option></select><button v-if="canPublish" class="btn sec xs" :class="{ loading: busy }" @click="publishAnnual">نشر التقييم السنوي</button></span></h3>
       <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th>الشركة</th><th>الأشهر</th><th>إنجاز</th><th>حضور</th><th>تطوير</th><th>انضباط</th><th>الأهداف السنوية</th><th>المعدل</th><th>التقدير</th><th v-if="annualKind === 'fiscal'">المكافأة</th><th v-if="annualKind === 'fiscal'">العلاوة</th><th /></tr></thead>
         <tbody><tr v-for="r in annual" :key="r.employee.id">
           <td><b>{{ r.employee.name }}</b></td><td class="small">{{ r.company }}</td>
           <td v-if="r.annual?.insufficient" :colspan="annualKind === 'fiscal' ? 10 : 8" class="muted">{{ r.annual.months }} أشهر فقط — يلزم {{ r.annual.min_months }} لاحتساب المعدل السنوي</td>
           <template v-else-if="r.annual"><td>{{ r.annual.months }}<span v-if="r.annual.excluded?.length" class="tiny muted" :title="r.annual.excluded.join(', ')"> (استُبعد {{ r.annual.excluded.length }})</span></td><td>{{ r.annual.axes.achieve }}</td><td>{{ r.annual.axes.attend }}</td><td>{{ r.annual.axes.dev }}</td><td>{{ r.annual.axes.disc }}</td>
-            <td><span v-if="r.annual.goals" class="num">{{ r.annual.goals.score }} <span class="tiny muted">({{ r.annual.goals.published_at ? 'معتمد' : 'مقترح' }})</span></span><span v-else class="muted tiny">لم تُقيَّم</span></td>
-            <td><b class="num">{{ r.annual.score }}</b><div class="tiny muted">{{ r.annual.formula }}</div></td><td><span class="pill" :class="r.annual.grade.pass ? 'ok' : 'bad'">{{ r.annual.grade.grade }} · {{ r.annual.grade.label }}</span></td>
+            <td><span v-if="r.annual.goals" class="num">{{ r.annual.goals.score }} <span class="tiny" :class="r.annual.goals.approved ? 'muted' : 'warn'">({{ r.annual.goals.approved ? 'معتمد' : 'مقترح — لا يُحتسب قبل اعتماد الرئيس التنفيذي' }})</span></span><span v-else class="muted tiny">لم تُقيَّم</span></td>
+            <td><b class="num">{{ r.annual.score }}</b><span v-if="r.annual.partial" class="pill warn tiny">جزئي</span><div class="tiny muted">{{ r.annual.formula }}</div>
+              <div v-if="r.annual.published" class="tiny muted">منشور {{ fmtD(r.annual.published.published_at) }}<template v-if="r.annual.published.score !== r.annual.score"> ({{ r.annual.published.score }})</template></div>
+              <div v-if="r.objection" class="tiny" :class="r.objection.status === 'open' ? 'bad' : 'muted'">اعتراض: {{ OBJ[r.objection.status] }}<template v-if="r.objection.status === 'open'"> · يُبت فيه حتى {{ fmtD(r.objection.decision_due) }}</template></div></td><td><span class="pill" :class="r.annual.grade.pass ? 'ok' : 'bad'">{{ r.annual.grade.grade }} · {{ r.annual.grade.label }}</span></td>
             <td v-if="annualKind === 'fiscal'"><template v-if="r.bonus"><b class="num">{{ r.bonus.eligible ? money(r.bonus.amount, 0) : '—' }}</b><div class="tiny muted">{{ r.bonus.months }} شهر × {{ money(r.bonus.wage, 0) }} × {{ Math.round(r.bonus.service_ratio * 100) }}%{{ r.bonus.funding_factor !== 1 ? ` × ${r.bonus.funding_factor}` : '' }}</div></template><span v-else class="muted">—</span></td>
-            <td v-if="annualKind === 'fiscal'"><span v-if="r.bonus" class="small">{{ r.bonus.raise_range[0] }}–{{ r.bonus.raise_range[1] }}%{{ r.bonus.promotion_eligible ? ' · مؤهل للترشيح' : '' }}</span></td>
-            <td><button v-if="auth.isApprover" class="btn ghost xs" @click="goalsForm = { employee: r.employee, score: r.annual.goals?.score ?? 90, note: '' }">تقييم الأهداف</button></td></template>
+            <td v-if="annualKind === 'fiscal'"><span v-if="r.bonus" class="small">{{ r.bonus.raise_range[0] }}–{{ r.bonus.raise_range[1] }}%{{ r.bonus.promotion_eligible ? ' · مؤهل للترشيح' : '' }}</span><div v-if="r.bonus?.promotion_blockers?.length" class="tiny bad">لا ترشيح: {{ r.bonus.promotion_blockers.join('، ') }}</div></td>
+            <td class="row" style="gap:4px;flex-wrap:nowrap"><button v-if="auth.isApprover" class="btn ghost xs" @click="goalsForm = { employee: r.employee, score: r.annual.goals?.score ?? 90, note: '' }">تقييم الأهداف</button><button v-if="r.objection?.can_decide" class="btn dan xs" @click="annualObj = { ...r.objection, employee: r.employee, note: '', score: null }">البت في الاعتراض</button></td></template>
           <td v-else colspan="7" class="muted">لا تقييمات منشورة</td>
         </tr></tbody></table></div>
     </div>
@@ -99,6 +108,13 @@
     <template #foot><button class="btn sec" @click="goalsForm = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="saveGoals">{{ auth.has('super', 'ceo') ? 'اعتماد' : 'حفظ المقترح' }}</button></template>
   </Modal>
 
+  <Modal v-if="annualObj" :title="`اعتراض على التقييم السنوي — ${annualObj.employee.name}`" @close="annualObj = null">
+    <div class="small mb"><b>نص الاعتراض:</b> {{ annualObj.text }}</div>
+    <div class="tiny muted mb">يُبت فيه حتى {{ fmtD(annualObj.decision_due) }} (10 أيام عمل) بقرار مكتوب ومسبَّب.</div>
+    <div class="fr"><div class="fg"><label>الدرجة بعد القبول (اختياري)</label><input v-model.number="annualObj.score" type="number" min="0" max="100" class="in" /></div><div class="fg"><label>القرار المكتوب *</label><input v-model="annualObj.note" class="in" /></div></div>
+    <template #foot><button class="btn sec" @click="annualObj = null">إلغاء</button><button class="btn dan" :class="{ loading: busy }" @click="decideAnnual('rejected')">رفض الاعتراض</button><button class="btn okb" :class="{ loading: busy }" @click="decideAnnual('accepted')">قبول الاعتراض</button></template>
+  </Modal>
+
   <Modal v-if="detail" :title="`تقييم ${fmtYM(detail.period)} — ${detail.employee.name}`" size="wide" @close="detail = null">
     <div v-if="detail.computed.flag" class="notice mb" :class="FLAG[detail.computed.flag.color][0]"><b>حالة الشهر: {{ FLAG[detail.computed.flag.color][1] }}</b><span v-if="detail.computed.flag.reasons?.length"> — {{ detail.computed.flag.reasons.join(' · ') }}</span></div>
     <div class="grid g5 mb">
@@ -122,6 +138,8 @@
       <div v-if="detail.can_rate" class="row"><span class="tiny muted">يمكن التعديل حتى نشر التقييم.</span><span class="spacer" /><button class="btn pri sm" :class="{ loading: busy }" @click="saveRating"><Icon name="check" :size="14" /> حفظ تقييم المدير</button></div>
     </div>
     <div v-if="detail.published" class="notice info mt">منشور بتاريخ {{ fmtDT(detail.published.published_at) }} · الدرجة {{ detail.published.score }} ({{ detail.published.grade }}) · الاعتراض: {{ OBJ[detail.published.objection_status] }}<div v-if="detail.published.objection_text" class="small">نص الاعتراض: {{ detail.published.objection_text }}</div><div v-if="detail.published.objection_decision" class="small">القرار: {{ detail.published.objection_decision }}</div></div>
+    <div v-if="detail.objection && (detail.can_object || detail.published?.objection_status === 'open')" class="tiny muted mt">مهلة الاعتراض: 7 أيام عمل من النشر (حتى {{ fmtD(detail.objection.deadline) }})<template v-if="detail.objection.decision_due"> · يُبت فيه خلال 10 أيام عمل (حتى {{ fmtD(detail.objection.decision_due) }})</template> · يبت فيه من لم يعتمد التقييم ولم يراجعه (§76)</div>
+    <div v-if="detail.computed.parts?.disc?.coop_pending" class="notice warn small mt">التعاون لم يقدّره المشرف المباشر بعد — القيمة المعروضة مؤقتة.</div>
     <div v-if="detail.can_object" class="fg mt"><label>نص الاعتراض</label><textarea v-model="objText" class="in" rows="3" /></div>
     <div v-if="detail.can_decide_objection" class="fr mt"><div class="fg"><label>الدرجة بعد القبول (اختياري)</label><input v-model.number="objScore" type="number" min="0" max="100" class="in" /></div><div class="fg"><label>القرار المكتوب *</label><input v-model="objNote" class="in" /></div></div>
     <template #foot>
@@ -150,7 +168,7 @@
 
 <script setup>
 import { exportXlsx } from '../excel'
-import { promptBox } from '../dialog'
+import { confirmBox, promptBox } from '../dialog'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../api'
@@ -158,13 +176,14 @@ import Kpi from '../components/Kpi.vue'
 import Modal from '../components/Modal.vue'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
-import { csv, download, fmtDT, fmtYM } from '../utils'
+import { csv, download, fmtD, fmtDT, fmtYM, money } from '../utils'
 
 const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
 const AXES = ['achieve', 'attend', 'dev', 'disc']
 const AXIS = { achieve: 'الإنجاز', attend: 'الحضور', dev: 'التطوير', disc: 'الانضباط' }
 const SUB = { targets: 'المستهدفات', quality: 'جودة المخرجات', presence: 'الحضور', noLate: 'عدم التأخر', dailyNote: 'المنجز اليومي', complete: 'إكمال البرنامج', interact: 'التفاعل', apply: 'التطبيق', hrScore: 'تقدير الموارد البشرية', weekly: 'التقارير الأسبوعية', coop: 'التعاون', conduct: 'السلوك', pct: 'نسبة الإنجاز الموزونة', report_status: 'حالة التقرير', absent: 'أيام الغياب', late: 'مرات التأخر', no_late: 'عدم التأخر', daily_note: 'المنجز اليومي', hr_score: 'تقدير الموارد البشرية', records: 'أنشطة معتمدة', weeks: 'الأسابيع',
+  coop_pending: 'التعاون بانتظار المشرف', conduct_violations: 'مخالفات سلوكية', first_submitted_at: 'أول رفع', after_month_end: 'رُفع بعد نهاية الشهر', penalty: 'الخصم', red_flag: 'علامة حمراء', submitted: 'مرفوع',
   points: 'نقاط الشهر', carry: 'مرحّل من الشهر السابق', total: 'المجموع المحتسب (حد 150)', level: 'المستوى', score: 'درجة المحور' }
 const FLAG = { green: ['ok', 'أخضر — أداء جيد فأعلى'], orange: ['warn', 'برتقالي — متابعة وتوجيه'], red: ['bad', 'أحمر — غير مقبول، تبدأ المعالجة (§75)'] }
 const REP = { none: 'لا تقرير', draft: 'مسودة', submitted: 'مرفوع', mgr_reviewed: 'راجعه المدير', hr_reviewed: 'راجعته الموارد', approved: 'معتمد', returned: 'مُرجَع' }
@@ -175,7 +194,22 @@ const period = ref(prevMonth()); const year = ref(new Date().getFullYear())
 const tabs = computed(() => [auth.emp && ['my', 'تقييماتي'], auth.isApprover && ['monthly', 'التقييم الشهري'], auth.isApprover && ['annual', 'التقييم السنوي'], auth.isApprover && ['sim', 'محاكاة «ماذا لو»'], ['weights', 'الأوزان والتقديرات']].filter(Boolean))
 const tab = ref(auth.emp ? 'my' : 'monthly')
 const my = ref(null); const rows = ref([]); const annual = ref([]); const templates = ref([]); const detail = ref(null); const tplForm = ref(null)
-const annualKind = ref('fiscal'); const goalsForm = ref(null)
+const annualKind = ref('fiscal'); const goalsForm = ref(null); const annualObj = ref(null)
+async function publishAnnual() {
+  if (!await confirmBox(`نشر التقييم السنوي ${year.value} للموظفين في القائمة؟ يُشعر كل موظف وتبدأ مهلة الاعتراض (7 أيام عمل).`)) return
+  busy.value = true
+  try { annual.value = await api.get('/evaluation/annual', { params: { year: year.value, kind: annualKind.value, company_id: ui.company || undefined, publish: 1 } }); ui.toast('نُشر التقييم السنوي', 'ok') } finally { busy.value = false }
+}
+async function objectAnnual(a) {
+  const text = await promptBox(`الاعتراض على التقييم السنوي ${a.year}`, { placeholder: 'اكتب أسباب الاعتراض' })
+  if (!text) return
+  await api.post(`/evaluations/${a.id}/object`, { text }); ui.toast('قُدّم الاعتراض', 'ok'); load()
+}
+async function decideAnnual(decision) {
+  if (!annualObj.value.note?.trim()) return ui.toast('القرار المكتوب إلزامي', 'warn')
+  busy.value = true
+  try { await api.post(`/evaluations/${annualObj.value.id}/objection`, { decision, note: annualObj.value.note, score: annualObj.value.score || undefined }); ui.toast('سُجّل القرار', 'ok'); annualObj.value = null; load() } finally { busy.value = false }
+}
 async function saveGoals() {
   busy.value = true
   try { await api.post(`/evaluation/${goalsForm.value.employee.id}/goals`, { year: year.value, kind: annualKind.value, score: goalsForm.value.score, note: goalsForm.value.note }); ui.toast('حُفظ تقييم الأهداف', 'ok'); goalsForm.value = null; load() } catch (e) { ui.toast(e.message || 'تعذر الحفظ', 'bad') } finally { busy.value = false }
@@ -196,7 +230,7 @@ const rateForm = ref({ quality: null, coop: null, note: '' })
 const TAB_HELP = {
   my: 'تقييماتي: درجاتك الشهرية بعد اعتمادها ونشرها، ومعدلك السنوي، مع إمكانية الاعتراض خلال المدة المحددة. لا يظهر هنا إلا ما نُشر.',
   monthly: 'التقييم الشهري: تقييم فريقك لشهر محدد. الدرجة تُحسب آليًا من التقرير الشهري والحضور والتطوير والانضباط، ويُضيف المدير تقييم الجودة والتعاون من زر «عرض»، ثم يُنشر التقييم للموظف.',
-  annual: 'التقييم السنوي: متوسط التقييمات الشهرية المنشورة خلال السنة لكل موظف، ويُستخدم في الترقيات والمكافآت.',
+  annual: 'التقييم السنوي: 70% متوسط التقييمات الشهرية المنشورة + 30% الأهداف السنوية المعتمدة من الرئيس التنفيذي للشركة. إن نقصت الأشهر عن 6 والموظف مستوفٍ لمدة خدمة المكافأة يُحسب من الأشهر المتاحة. يُنشر ليحق للموظف الاعتراض عليه.',
   sim: 'محاكاة «ماذا لو»: تجربة أوزان مختلفة ومعرفة أثرها على درجات الفريق قبل اعتمادها، دون تغيير أي تقييم فعلي.',
   weights: 'الأوزان والتقديرات: نسب المحاور الأربعة وحد القبول وسلم التقديرات المعتمد. التعديل للمدير العام فقط ويُحفظ بنسخة جديدة.',
 }

@@ -79,13 +79,16 @@ class ReportController extends Controller
             'items.*.source' => 'in:org,emp', 'items.*.achieved' => 'nullable|string|max:20000', 'items.*.pct' => 'nullable|numeric|min:0|max:100', 'items.*.evidence' => 'nullable|string|max:500',
             'items.*.obstacles' => 'nullable|string|max:5000', 'items.*.solutions' => 'nullable|string|max:5000', 'items.*.next_target' => 'nullable|string|max:5000', 'items.*.notes' => 'nullable|string|max:5000',
             'dev' => 'nullable|array', 'dev.program' => 'nullable|string|max:200', 'dev.provider' => 'nullable|string|max:120', 'dev.completed' => 'boolean', 'dev.applied' => 'boolean', 'dev.notes' => 'nullable|string|max:1000']);
+        // §35: up to 3 own items, each weighing at most 15 (the template may be stricter, never looser)
         $empItems = array_filter($d['items'], fn ($i) => ($i['source'] ?? 'org') === 'emp');
-        if ($tpl && count($empItems) > ($tpl->allow_employee_items ? $tpl->max_employee_items : 0)) {
-            throw ValidationException::withMessages(['items' => 'تجاوزت الحد المسموح من البنود الشخصية']);
+        $maxItems = $tpl && $tpl->allow_employee_items ? min(3, (int) $tpl->max_employee_items) : 0;
+        if (count($empItems) > $maxItems) {
+            throw ValidationException::withMessages(['items' => "تجاوزت الحد المسموح من البنود الشخصية ($maxItems)"]);
         }
+        $maxW = min(15, (float) ($tpl->employee_item_weight_max ?? 15));
         foreach ($empItems as $i) {
-            if (($i['weight'] ?? 0) > ($tpl->employee_item_weight_max ?? 15)) {
-                throw ValidationException::withMessages(['items' => 'وزن البند الشخصي يتجاوز الحد']);
+            if (($i['weight'] ?? 0) > $maxW) {
+                throw ValidationException::withMessages(['items' => "وزن البند الشخصي يتجاوز الحد ($maxW)"]);
             }
         }
         // keep manager fields from previous version; employee sets self_score = pct.
@@ -104,6 +107,10 @@ class ReportController extends Controller
             if ($isOrg && $old) {
                 $merged['title'] = $old['title'];
             }
+            // an own item changed after the manager's decision goes back to the manager for approval
+            if (! $isOrg && $old && (($old['title'] ?? '') !== ($merged['title'] ?? '') || (float) ($old['weight'] ?? 0) !== (float) ($merged['weight'] ?? 0))) {
+                $merged['mgr_approved'] = null;
+            }
 
             return $merged;
         }, $d['items']);
@@ -112,12 +119,25 @@ class ReportController extends Controller
         return $this->detail($report->fresh()->load('employee:id,name,emp_no', 'template'), $u);
     }
 
-    /** A month is locked once closeDays+1 of the following month has passed, unless a reopen request lifted it. */
+    /**
+     * §36: the month is locked after the first closeDays (5) WORKING days of the following month (the employee's
+     * week pattern / company weekend), unless a reopen request lifted it.
+     */
     public static function locked(MonthlyReport $r): bool
     {
-        $close = Carbon::parse($r->period.'-01')->addMonth()->day((int) Settings::get('closeDays', $r->company_id, 5))->addDay()->endOfDay();
+        return now()->gt(self::lockAt($r)) && ! ($r->reopen_until && $r->reopen_until->gte(now()->startOfDay()));
+    }
 
-        return now()->gt($close) && ! ($r->reopen_until && $r->reopen_until->gte(now()->startOfDay()));
+    public static function lockAt(MonthlyReport $r): Carbon
+    {
+        $n = max(1, (int) Settings::get('closeDays', $r->company_id, 5));
+        $e = $r->employee;
+        $nextStart = Carbon::parse($r->period.'-01')->addMonthNoOverflow()->startOfMonth();
+        if (! $e) {
+            return $nextStart->copy()->addDays($n - 1)->endOfDay();
+        }
+
+        return EvaluationService::addWorkDays($e, $nextStart->copy()->subDay(), $n);
     }
 
     public function submit(Request $request, MonthlyReport $report)
@@ -132,7 +152,10 @@ class ReportController extends Controller
         // §35: due on day 26 of the report month itself (HR may move the day); never past the month's last day
         $start = Carbon::parse($report->period.'-01');
         $due = $start->copy()->day(min((int) Settings::get('monthlyReportDueDay', $report->company_id, 26), $start->daysInMonth));
-        $report->update(['status' => 'submitted', 'submitted_at' => now(), 'late' => now()->gt($due->endOfDay()), 'version' => $report->version + 1, 'return_note' => null]);
+        // §35: the first submission fixes lateness; a returned report that is re-submitted is not re-marked late
+        $first = $report->first_submitted_at ?? $report->submitted_at;
+        $report->update(['status' => 'submitted', 'submitted_at' => now(), 'first_submitted_at' => $first ?? now(), 'late' => $first ? (bool) $report->late : now()->gt($due->endOfDay()),
+            'version' => $report->version + 1, 'return_note' => null]);
         $mgr = $report->employee->manager_id ? User::where('employee_id', $report->employee->manager_id)->value('id') : null;
         Audit::notify($mgr ?: Access::usersWithRole('hr_mgr'), 'تقرير شهري بانتظار مراجعتك', $report->employee->name.' — '.$report->period, 'approval', ['screen' => 'reports']);
         Audit::log('monthly_reports', $report->id, 'submit');
@@ -189,9 +212,12 @@ class ReportController extends Controller
         $u = $request->user();
         $acc = Access::for();
         $e = $report->employee;
+        $sub = EvaluationService::templateFor($e)->sub;
         $d = $request->validate(['action' => 'required|in:approve,return', 'note' => 'nullable|string|max:500', 'items' => 'nullable|array', 'items.*.id' => 'required|string',
-            'items.*.mgr_score' => 'nullable|numeric|min:0|max:100', 'items.*.mgr_note' => 'nullable|string|max:500', 'coop' => 'nullable|numeric|min:0|max:10',
-            'quality' => 'nullable|numeric|min:0|max:20', 'hr_score' => 'nullable|numeric|min:0|max:10', 'hr_bonus' => 'nullable|numeric|min:0|max:10', 'interaction' => 'nullable|numeric|min:0|max:10']);
+            'items.*.mgr_score' => 'nullable|numeric|min:0|max:100', 'items.*.mgr_note' => 'nullable|string|max:500', 'items.*.approved' => 'nullable|boolean',
+            'items.*.target' => 'nullable|string|max:5000', 'items.*.next_target' => 'nullable|string|max:5000', 'coop' => 'nullable|numeric|min:0|max:'.($sub['disc']['coop'] ?? 4),
+            'quality' => 'nullable|numeric|min:0|max:20', 'hr_score' => 'nullable|numeric|min:0|max:10', 'hr_bonus' => 'nullable|numeric|min:0|max:10', 'bonus_reason' => 'nullable|string|max:500',
+            'interaction' => 'nullable|numeric|min:0|max:10']);
         $stage = $report->status;
         $isMgr = $acc->isManagerOf($e) || ($stage === 'submitted' && ! $e->manager_id && $u->isHr());
         $isHr = $u->isHr() && $acc->can('PRF', 'approve', ['employee' => $e]);
@@ -212,12 +238,53 @@ class ReportController extends Controller
                     throw ValidationException::withMessages(['items' => 'اكتب ملاحظة لكل بند اختلف فيه تقييمك عن تقدير الموظف: '.($i['title'] ?? $i['id'])]);
                 }
             }
-            $items = array_map(fn ($i) => array_merge($i, ['mgr_score' => $scores[$i['id']]['mgr_score'] ?? $i['mgr_score'] ?? $i['self_score'] ?? $i['pct'] ?? 0, 'mgr_note' => $scores[$i['id']]['mgr_note'] ?? $i['mgr_note'] ?? null]), $report->items);
-            $report->update(['items' => $items, 'coop' => $d['coop'] ?? $report->coop, 'status' => 'mgr_reviewed', 'mgr_at' => now(), 'mgr_by' => $u->id]);
+            // §71: cooperation (out of 4) is the direct manager's own rating — mandatory at this stage
+            if (! isset($d['coop'])) {
+                throw ValidationException::withMessages(['coop' => 'تقدير التعاون إلزامي في مراجعة المشرف المباشر (§71)']);
+            }
+            // §35: the employee's own items count only after the manager approves them
+            foreach ($report->items as $i) {
+                $given = $scores[$i['id']]['approved'] ?? null;
+                if (($i['source'] ?? 'org') === 'emp' && $given === null && ($i['mgr_approved'] ?? null) === null) {
+                    throw ValidationException::withMessages(['items' => 'وافق على البند الشخصي أو ارفضه: '.($i['title'] ?? $i['id'])]);
+                }
+            }
+            $items = array_map(function ($i) use ($scores) {
+                $s = $scores[$i['id']] ?? [];
+                $out = array_merge($i, ['mgr_score' => $s['mgr_score'] ?? $i['mgr_score'] ?? $i['self_score'] ?? $i['pct'] ?? 0, 'mgr_note' => $s['mgr_note'] ?? $i['mgr_note'] ?? null]);
+                if (($i['source'] ?? 'org') === 'emp' && isset($s['approved'])) {
+                    $out['mgr_approved'] = (bool) $s['approved'];
+                }
+                // §35: the manager may edit this month's (carried-over) target and the next month's targets
+                foreach (['target', 'next_target'] as $f) {
+                    if (isset($s[$f]) && trim((string) $s[$f]) !== trim((string) ($i[$f] ?? ''))) {
+                        $out[$f] = $s[$f];
+                        $out[$f.'_by_mgr'] = true;
+                    }
+                }
+
+                return $out;
+            }, $report->items);
+            $report->update(['items' => $items, 'coop' => $d['coop'], 'status' => 'mgr_reviewed', 'mgr_at' => now(), 'mgr_by' => $u->id]);
+            // carried targets: the next month's draft (if already opened) follows the manager's edit
+            $next = MonthlyReport::where('employee_id', $e->id)->where('period', Carbon::parse($report->period.'-01')->addMonthNoOverflow()->format('Y-m'))->where('status', 'draft')->first();
+            $carry = collect($items)->filter(fn ($i) => ! empty($i['next_target_by_mgr']))->keyBy('id');
+            if ($next && $carry->isNotEmpty()) {
+                $next->update(['items' => array_map(fn ($i) => isset($carry[$i['id']]) ? array_merge($i, ['target' => $carry[$i['id']]['next_target'], 'carried_from' => true]) : $i, $next->items ?? [])]);
+            }
             Audit::notify(Access::hrUsersFor($e->company_id, 'PRF'), 'تقرير شهري بانتظار مراجعة الموارد البشرية', $e->name.' — '.$report->period, 'approval', ['screen' => 'reports']);
         } elseif ($stage === 'mgr_reviewed') {
             $dev = array_merge($report->dev ?? [], array_filter(['hr_score' => $d['hr_score'] ?? null, 'interaction' => $d['interaction'] ?? null], fn ($v) => $v !== null));
-            $report->update(['dev' => $dev, 'hr_bonus' => $d['hr_bonus'] ?? $report->hr_bonus, 'status' => 'hr_reviewed', 'hr_at' => now(), 'hr_by' => $u->id]);
+            // §71: the HR exceptional addition (≤ 10) is a reasoned decision recorded on the platform
+            $bonus = (float) ($d['hr_bonus'] ?? $report->hr_bonus ?? 0);
+            $reason = trim((string) ($d['bonus_reason'] ?? ''));
+            if ($bonus > 0 && $reason === '') {
+                throw ValidationException::withMessages(['bonus_reason' => 'سبب الدرجات الإضافية إلزامي: إنجاز استثنائي موثق بتوصية المشرف (§71)']);
+            }
+            $report->update(['dev' => $dev, 'hr_bonus' => $bonus, 'adjust_reason' => $bonus > 0 ? $reason : $report->adjust_reason, 'status' => 'hr_reviewed', 'hr_at' => now(), 'hr_by' => $u->id]);
+            if ($bonus > 0) {
+                Audit::log('monthly_reports', $report->id, 'hr_bonus', null, ['hr_bonus' => $bonus], $reason);
+            }
             $ceo = $e->company?->ceo_employee_id ? User::where('employee_id', $e->company->ceo_employee_id)->value('id') : null;
             Audit::notify($ceo ?: Access::usersWithRole('super'), 'تقرير شهري بانتظار اعتماد الرئيس', $e->name.' — '.$report->period, 'approval', ['screen' => 'reports']);
         } else {
@@ -406,8 +473,8 @@ class ReportController extends Controller
         return $this->row($r) + [
             'items' => $r->items, 'dev' => $r->dev, 'quality' => $r->quality, 'coop' => $r->coop, 'hr_bonus' => $r->hr_bonus,
             'template' => $tpl?->only('id', 'name', 'allow_employee_items', 'max_employee_items', 'employee_item_weight_max', 'due_day'),
-            'limits' => ['quality' => $evalTpl->sub['achieve']['quality'], 'coop' => $evalTpl->sub['disc']['coop'], 'hr_score' => $evalTpl->sub['dev']['hrScore'], 'interaction' => $evalTpl->sub['dev']['interact']],
-            'locked' => self::locked($r), 'reopen_until' => $r->reopen_until?->toDateString(), 'adjust_reason' => $r->adjust_reason,
+            'limits' => ['quality' => $evalTpl->sub['achieve']['quality'], 'coop' => $evalTpl->sub['disc']['coop'], 'emp_items' => $tpl && $tpl->allow_employee_items ? min(3, (int) $tpl->max_employee_items) : 0, 'emp_weight' => min(15, (float) ($tpl->employee_item_weight_max ?? 15)), 'hr_score' => $evalTpl->sub['dev']['hrScore'], 'interaction' => $evalTpl->sub['dev']['interact']],
+            'locked' => self::locked($r), 'lock_at' => self::lockAt($r)->toDateString(), 'first_submitted_at' => $r->first_submitted_at, 'reopen_until' => $r->reopen_until?->toDateString(), 'adjust_reason' => $r->adjust_reason,
             'can_adjust' => $stage === 'approved' && $u->isHr() && $acc->can('PRF', 'approve', ['employee' => $e]),
             'can_edit' => $r->employee_id === $u->employee_id && in_array($stage, ['draft', 'returned'], true) && ! self::locked($r), 'can_review' => $canReview, 'review_role' => $canReview ? ['submitted' => 'mgr', 'mgr_reviewed' => 'hr', 'hr_reviewed' => 'ceo'][$stage] : null,
             'timeline' => array_values(array_filter([$r->submitted_at ? ['at' => $r->submitted_at, 'label' => 'رُفع'] : null, $r->mgr_at ? ['at' => $r->mgr_at, 'label' => 'راجعه المدير'] : null, $r->hr_at ? ['at' => $r->hr_at, 'label' => 'راجعته الموارد البشرية'] : null, $r->ceo_at ? ['at' => $r->ceo_at, 'label' => 'اعتمده الرئيس'] : null])),

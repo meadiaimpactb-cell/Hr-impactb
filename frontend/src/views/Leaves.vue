@@ -7,7 +7,7 @@
 
   <template v-if="tab === 'mine' && mine">
     <div class="grid g4 mb">
-      <Kpi v-for="b in mine.balances" :key="b.type" :icon="LT_ICON[b.type] || 'calendar'" :label="b.name" color="b" :hint="`مستهلك ${b.used} · محجوز ${b.reserved}${b.accrual === 'monthly' ? ' · مكتسب ' + b.accrued : ''}`">{{ b.available }} <span class="muted small">يوم</span></Kpi>
+      <Kpi v-for="b in mine.balances" :key="b.type" :icon="LT_ICON[b.type] || 'calendar'" :label="b.name" color="b" :hint="`مستهلك ${b.used} · محجوز ${b.reserved}${b.accrual === 'monthly' ? ' · مكتسب ' + b.accrued : ''}`">{{ b.available }} <span class="muted small">{{ b.unit_label && b.type === 'annual' ? b.unit_label : 'يوم' }}</span></Kpi>
     </div>
     <div v-if="mine?.next_year" class="notice info small">لديك إجازات محجوزة في {{ mine.next_year.year }} — تُخصم من رصيد تلك السنة: <span v-for="b in mine.next_year.balances.filter((x) => x.used || x.reserved)" :key="b.type"><b>{{ b.name }}</b> متاح {{ b.available }} (مستهلك {{ b.used }} · محجوز {{ b.reserved }}) </span></div>
     <div class="card"><h3>حركة الرصيد {{ new Date().getFullYear() }}</h3>
@@ -83,6 +83,25 @@
     <div class="row mt small"><span class="pill info">معتمدة</span><span class="pill warn">بانتظار الاعتماد</span></div>
   </div>
   <NewRequest v-if="newReq" initial="leave" @close="newReq = false" @done="load" />
+  <template v-if="tab === 'hol'">
+    <div class="card">
+      <div class="row mb" style="gap:8px;align-items:center"><h3 style="margin:0">العطلات الرسمية</h3><input v-model.number="hYear" type="number" class="in" style="width:100px" @change="load" /><span class="spacer" />
+        <button v-if="auth.has('super', 'hr_mgr')" class="btn pri sm" @click="hf = { name: '', kind: 'eid', from: '', to: '', company_id: null }"><Icon name="plus" :size="14" /> عطلة</button></div>
+      <p class="small muted">عيد الفطر 4 أيام، عيد الأضحى 4 أيام، اليوم الوطني، يوم التأسيس (§58). العطلة داخل الإجازة لا تُحتسب منها، ويُضاف لكل عيد يوم الشركة الإضافي بحسب فئتها.</p>
+      <div v-if="!hols.length" class="empty">لا عطلات مسجلة لهذه السنة</div>
+      <div v-else class="tw"><table><thead><tr><th>العطلة</th><th>النوع</th><th>من</th><th>إلى</th><th>الأيام</th><th>الشركة</th><th /></tr></thead>
+        <tbody><tr v-for="h in hols" :key="h.id"><td><b>{{ h.name }}</b></td><td class="small">{{ HKIND[h.kind] }}</td><td>{{ fmtD(h.from) }}</td><td>{{ fmtD(h.to) }}</td><td class="num">{{ h.days }}</td>
+          <td class="small">{{ h.company_id ? (auth.meta?.companies || []).find((c) => c.id === h.company_id)?.name : 'كل الشركات' }}</td>
+          <td><template v-if="auth.has('super', 'hr_mgr')"><button class="btn ghost xs" @click="hf = { ...h }"><Icon name="edit" :size="13" /></button><button class="btn ghost xs" @click="delHol(h)"><Icon name="trash" :size="13" /></button></template></td></tr></tbody></table></div>
+    </div>
+    <Modal v-if="hf" :title="hf.id ? 'تعديل عطلة' : 'عطلة رسمية'" @close="hf = null">
+      <div class="fg"><label>الاسم *</label><input v-model="hf.name" class="in" placeholder="مثال: عيد الفطر 1448" /></div>
+      <div class="fg"><label>النوع</label><select v-model="hf.kind" class="in"><option v-for="(l, k) in HKIND" :key="k" :value="k">{{ l }}</option></select></div>
+      <div class="fr"><div class="fg"><label>من *</label><DateInput v-model="hf.from" /></div><div class="fg"><label>إلى *</label><DateInput v-model="hf.to" :min="hf.from" /></div></div>
+      <div class="fg"><label>الشركة</label><select v-model="hf.company_id" class="in"><option :value="null">كل الشركات</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.id">{{ c.name }}</option></select></div>
+      <template #foot><button class="btn sec" @click="hf = null">إلغاء</button><button class="btn pri" @click="saveHol">حفظ</button></template>
+    </Modal>
+  </template>
 </template>
 
 <script setup>
@@ -97,11 +116,22 @@ import { curYM, DAYS_AR, fmtD, pad } from '../utils'
 import { alertBox, confirmBox, promptBox } from '../dialog'
 import { exportXlsx, readXlsx } from '../excel'
 import SearchSelect from '../components/SearchSelect.vue'
+import Modal from '../components/Modal.vue'
 
 const { t } = useI18n()
 const auth = useAuth()
 const ui = useUi()
-const tabs = computed(() => [auth.emp && ['mine', 'إجازاتي'], auth.isApprover && ['report', 'الأرصدة'], auth.isHr && ['past', 'إجازات سابقة'], ['cal', 'تقويم الفريق']].filter(Boolean))
+const tabs = computed(() => [auth.emp && ['mine', 'إجازاتي'], auth.isApprover && ['report', 'الأرصدة'], auth.isHr && ['past', 'إجازات سابقة'], ['cal', 'تقويم الفريق'], ['hol', 'العطلات الرسمية']].filter(Boolean))
+// §58 official holidays: not counted inside a leave; the company's extra Eid days (by tier) follow each Eid automatically
+const hols = ref([]); const hYear = ref(new Date().getFullYear()); const hf = ref(null)
+const HKIND = { official: 'رسمية', eid: 'عيد (يُضاف إليه يوم الشركة حسب الفئة)', company: 'يوم للشركة', bridge: 'يوم الوصل (للفئتين الثانية والثالثة)' }
+async function saveHol() {
+  try { await api.post('/holidays', hf.value); hf.value = null; ui.toast('حُفظت العطلة', 'ok'); hols.value = await api.get('/holidays', { params: { year: hYear.value } }) } catch (e) { ui.toast(e.message, 'bad') }
+}
+async function delHol(h) {
+  if (!(await confirmBox(`حذف «${h.name}»؟`, { confirmText: 'حذف' }))) return
+  await api.delete(`/holidays/${h.id}`); hols.value = await api.get('/holidays', { params: { year: hYear.value } })
+}
 const tab = ref(auth.emp ? 'mine' : 'report')
 const mine = ref(null)
 const report = ref(null)
@@ -121,6 +151,7 @@ async function load() {
     past.value = p
     if (st) staffOpts.value = st.map((e) => ({ value: e.id, label: e.name, sub: e.emp_no }))
   }
+  else if (tab.value === 'hol') hols.value = await api.get('/holidays', { params: { year: hYear.value } })
   else cal.value = await api.get('/leaves/calendar', { params: { month: month.value } })
 }
 // balances: edit a cell in place, or download / upload a sheet of actual balances

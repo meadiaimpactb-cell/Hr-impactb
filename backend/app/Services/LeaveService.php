@@ -17,7 +17,12 @@ class LeaveService
         $year ??= (int) now()->year;
         $quota = $lt->quota_key ? (float) ($e->benefit($lt->quota_key) ?? ($lt->code === 'annual' ? 21 : 0)) : 0; // 21 days: labour-law default when the package sets none
         if ($lt->code === 'annual' && $e->hire_date && $e->hire_date->diffInYears(Carbon::create($year, 12, 31)) >= 5) {
-            $quota = max($quota, 30); // §56: 30 days after five continuous years
+            // §56: at least 30 calendar days after five continuous years — compared in calendar-day equivalents, so a
+            // work-day package (tiers 2–3) is raised only when it is worth less than 30 calendar days
+            $quota = self::unit($e) === 'work' ? max($quota, (float) ceil(30 * 5 / 7)) : max($quota, 30);
+        }
+        if ($lt->code === 'sick') {
+            $quota = 120; // §59: 30 days full pay + 60 days at three quarters + 30 days unpaid, per year from the first sick leave
         }
         $factor = $e->contract_type === 'part' ? ($e->part_ratio ?: 0.5) : 1;
         if ($lt->accrual === 'yearly' && $e->hire_date && $e->hire_date->year === $year) {
@@ -49,8 +54,12 @@ class LeaveService
         $used = $usedLedger + $usedLive;
         $available = $lt->accrual === 'none' ? 0 : round($opening + $accrued + $adjusted - $used - $reserved, 2);
 
+        $carried = (float) $ledger->where('entry', 'carry')->sum('days');
+        $available += $lt->accrual === 'none' ? 0 : $carried;
+
         return [
-            'type' => $lt->code, 'name' => $lt->name, 'accrual' => $lt->accrual, 'quota' => $quota, 'part_factor' => $factor, 'unit' => self::unit($e),
+            'type' => $lt->code, 'name' => $lt->name, 'accrual' => $lt->accrual, 'quota' => $quota, 'part_factor' => $factor, 'unit' => self::unit($e), 'carried' => $carried,
+            'unit_label' => self::unit($e) === 'work' ? 'أيام عمل' : 'أيام تقويمية',
             'opening' => $opening, 'accrued' => $accrued, 'adjusted' => $adjusted, 'used' => $used, 'reserved' => $reserved,
             'available' => $available,
         ];
@@ -78,10 +87,12 @@ class LeaveService
     {
         $a = Carbon::parse($from)->startOfDay();
         $b = Carbon::parse($to)->startOfDay();
+        // §58: official holidays (and the company's extra Eid days) inside the leave are not counted — the leave is extended by them
+        $hol = $e ? \App\Models\Holiday::datesFor($e, $a->toDateString(), $b->toDateString()) : [];
         if ($e && self::unit($e) === 'work') { // tiers 2–3: only work days are deducted
             $n = 0;
             for ($d = $a->copy(); $d->lte($b); $d->addDay()) {
-                $n += $e->isWorkDay($d->dayOfWeek) ? 1 : 0;
+                $n += $e->isWorkDay($d->dayOfWeek) && ! isset($hol[$d->toDateString()]) ? 1 : 0;
             }
 
             return $n;
@@ -97,8 +108,9 @@ class LeaveService
                 return 0;
             }
         }
+        $inside = count(array_filter(array_keys($hol), fn ($k) => $k >= $a->toDateString() && $k <= $b->toDateString()));
 
-        return (int) $a->diffInDays($b) + 1;
+        return max(0, (int) $a->diffInDays($b) + 1 - $inside);
     }
 
     /**

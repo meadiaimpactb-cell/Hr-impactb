@@ -13,7 +13,50 @@
       <Kpi icon="late" :label="t('متأخر')" :value="mine.summary.late" :hint="`${mine.summary.late_minutes} دقيقة`" color="y" />
       <Kpi icon="absent" :label="t('غياب')" :value="mine.summary.absent" color="r" />
     </div>
+    <div v-if="mine?.week" class="card">
+      <h3>أسبوعي <span class="sub">{{ fmtD(mine.week.from) }} – {{ fmtD(mine.week.to) }} · اللائحة §29/§30: دقائق المرونة تُعوَّض خلال الأسبوع نفسه</span></h3>
+      <div class="grid g4">
+        <Kpi icon="clock" label="الساعات المطلوبة حتى الآن" :value="hm(mine.week.required_minutes)" color="n" />
+        <Kpi icon="user-check" label="الساعات المنجزة" :value="hm(mine.week.worked_minutes)" color="g" />
+        <Kpi icon="late" label="النقص المطلوب تعويضه" :value="hm(mine.week.shortfall_minutes)" :color="mine.week.shortfall_minutes ? 'r' : 'g'" />
+        <Kpi icon="calendar" label="المرونة المستخدمة" :value="`${mine.week.flex_used} / ${mine.week.flex_budget} د`" :hint="mine.week.remote_eligible ? (mine.week.remote_used ? 'استُخدم يوم العمل عن بُعد' : 'يوم عمل عن بُعد متاح هذا الأسبوع') : ''" color="y" />
+      </div>
+      <p v-if="mine.week.ramadan" class="tiny muted mt">فترة رمضان: ساعات العمل المطلوبة 6 ساعات يوميًا (§24).</p>
+    </div>
+    <div v-if="excuses.length" class="card">
+      <h3>مطلوب إبداء العذر <span class="sub">حضور من خارج النطاق لم تقبله الموارد البشرية — يُعدّ اليوم غيابًا إن لم يُقبل العذر (§27)</span></h3>
+      <div v-dt class="tw"><table><thead><tr><th>اليوم</th><th>المهلة</th><th>العذر</th><th /></tr></thead>
+        <tbody><tr v-for="r in excuses" :key="r.id"><td class="num">{{ fmtD(r.work_date) }}</td><td class="num">{{ fmtD(r.excuse_due) }}</td><td class="small">{{ r.excuse || '—' }}</td>
+          <td><button class="btn pri xs" @click="giveExcuse(r)">{{ r.excuse ? 'تعديل العذر' : 'إبداء العذر' }}</button></td></tr></tbody></table></div>
+    </div>
     <div class="card"><h3>{{ t('سجلي') }} <span class="acts"><button class="btn ghost sm" @click="corr = true">طلب تصحيح</button></span></h3><AttendanceTable :records="mine?.records || []" :grace="mine?.grace ?? grace" /></div>
+  </template>
+
+  <template v-else-if="tab === 'paper'">
+    <div class="card">
+      <h3>السجل البديل (الورقي) <span class="sub">اللائحة §27: عند تعذر استخدام المنصة يُثبت الحضور في سجل موثق بديل، ثم تُرحَّل بياناته هنا. تُسجَّل الأيام بمصدر «سجل ورقي».</span></h3>
+      <div v-dt class="tw"><table>
+        <thead><tr><th>الموظف</th><th>التاريخ</th><th>الحضور</th><th>الانصراف</th><th>ملاحظة</th><th /></tr></thead>
+        <tbody><tr v-for="(p, i) in paperRows" :key="i">
+          <td><select v-model="p.employee_id" class="in"><option :value="null">— اختر —</option><option v-for="e in empOpts" :key="e.id" :value="e.id">{{ e.name }}{{ e.emp_no ? ' · ' + e.emp_no : '' }}</option></select></td>
+          <td style="min-width:160px"><DateInput v-model="p.date" /></td>
+          <td><input v-model="p.in" type="time" class="in" /></td><td><input v-model="p.out" type="time" class="in" /></td>
+          <td><input v-model="p.note" class="in" placeholder="رقم الصفحة أو سبب التعذر" /></td>
+          <td><button class="btn ghost xs" title="حذف السطر" @click="paperRows.splice(i, 1)"><Icon name="x" :size="14" /></button></td>
+        </tr></tbody>
+      </table></div>
+      <div class="row mt" style="gap:8px"><button class="btn sec sm" @click="addPaper">إضافة سطر</button><button class="btn pri sm" :class="{ loading: busy }" :disabled="!paperRows.length" @click="savePaper">ترحيل إلى المنصة</button></div>
+    </div>
+  </template>
+
+  <template v-else-if="tab === 'corrections'">
+    <div class="card">
+      <h3>طلبات تصحيح الحضور <span class="sub">اللائحة §27: يُقدَّم الطلب خلال {{ auth.meta?.policy?.correction_days || 3 }} أيام عمل من العلم بالخلل — المتأخر يُميَّز ولا يُرفض، ويجوز قبوله بدليل</span></h3>
+      <div v-if="!corrections.length" class="empty small">لا طلبات تصحيح</div>
+      <div v-dt v-else class="tw"><table><thead><tr><th>الموظف</th><th>اليوم المعني</th><th>النوع</th><th>السبب</th><th>تاريخ التقديم</th><th>المهلة</th><th>الحالة</th></tr></thead>
+        <tbody><tr v-for="c in corrections" :key="c.id"><td>{{ c.employee?.name }}</td><td class="num">{{ fmtD(c.date) }}</td><td class="small">{{ c.kind }}</td><td class="small">{{ c.reason }}</td><td class="num">{{ fmtD(c.filed_at) }}</td>
+          <td><span v-if="c.late" class="pill warn">{{ c.late_label }}</span><span v-else class="pill ok">ضمن المهلة</span></td><td><span class="pill gray">{{ { pending: 'قيد الاعتماد', approved: 'معتمد', rejected: 'مرفوض', cancelled: 'ملغى', returned: 'مُعاد' }[c.status] || c.status }}</span></td></tr></tbody></table></div>
+    </div>
   </template>
 
   <template v-else-if="tab === 'today'">
@@ -83,13 +126,18 @@
 
   <template v-else-if="tab === 'pending'">
     <div class="card"><h3>سجلات تحتاج مراجعة <span class="sub">دون اتصال · دقة ضعيفة · خارج النطاق</span></h3>
+      <div v-if="auth.isHr" class="notice info small row" style="gap:8px;align-items:center">
+        <span>إذا كانت سجلات «خارج النطاق» بسبب إحداثيات موقع عمل غير دقيقة: صحّح الموقع من «البيانات الأساسية ← مواقع التحضير» (الصق رابط خرائط Google)، ثم أعد الفحص هنا لتُعتمد البصمات التي أصبحت داخل النطاق تلقائيًا.</span>
+        <button class="btn sec xs" :class="{ loading: rechecking }" @click="recheckGeo"><Icon name="refresh" :size="13" /> إعادة فحص النطاق</button>
+      </div>
       <div v-if="!pending.length" class="empty"><div class="ic"><Icon name="check-circle" :size="44" :stroke="1.4" /></div>لا سجلات معلّقة</div>
       <div v-dt v-else class="tw"><table>
         <thead><tr><th>{{ t('الموظف') }}</th><th>اليوم</th><th>{{ t('الحضور') }}</th><th>السبب</th><th /></tr></thead>
         <tbody><tr v-for="r in pending" :key="r.id">
-          <td>{{ r.employee?.name }}</td><td>{{ r.work_date }}</td><td class="num">{{ fmtT(r.check_in) }}</td>
-          <td class="small">{{ [r.offline && 'دون اتصال', r.geo_fail && `حضور خارج النطاق${r.distance_m != null ? ' (يبعد ' + dist(r.distance_m) + ')' : ''}`, r.out_geo_fail && `انصراف خارج النطاق${r.out_distance_m != null ? ' (يبعد ' + dist(r.out_distance_m) + ')' : ''}`, r.low_accuracy && 'دقة ضعيفة'].filter(Boolean).join(' · ') }}<div class="tiny"><a v-if="r.lat" :href="`https://www.google.com/maps?q=${r.lat},${r.lng}`" target="_blank" rel="noopener">موقع الحضور على الخريطة</a><a v-if="r.out_lat" :href="`https://www.google.com/maps?q=${r.out_lat},${r.out_lng}`" target="_blank" rel="noopener" style="margin-inline-start:8px">موقع الانصراف</a></div></td>
-          <td><template v-if="auth.has('hr_mgr', 'hr_staff')"><button class="btn okb xs" @click="review(r, true)">قبول</button> <button class="btn dan xs" @click="review(r, false)">رفض</button></template><span v-else class="tiny muted">يراجعه مدير الموارد البشرية</span></td>
+          <td>{{ r.employee?.name }}</td><td class="num">{{ fmtD(r.work_date) }}</td><td class="num">{{ fmtT(r.check_in) }}</td>
+          <td class="small">{{ [r.offline && 'دون اتصال', r.geo_fail && `حضور خارج النطاق${r.distance_m != null ? ' (يبعد ' + dist(r.distance_m) + ')' : ''}`, r.out_geo_fail && `انصراف خارج النطاق${r.out_distance_m != null ? ' (يبعد ' + dist(r.out_distance_m) + ')' : ''}`, r.low_accuracy && 'دقة ضعيفة'].filter(Boolean).join(' · ') }}
+            <div v-if="r.status === 'excuse_requested'" class="mt"><span class="pill warn">بانتظار عذر الموظف حتى {{ fmtD(r.excuse_due) }}</span><div v-if="r.excuse" class="tiny">العذر: {{ r.excuse }}</div></div><div class="tiny"><a v-if="r.lat" :href="`https://www.google.com/maps?q=${r.lat},${r.lng}`" target="_blank" rel="noopener">موقع الحضور على الخريطة</a><a v-if="r.out_lat" :href="`https://www.google.com/maps?q=${r.out_lat},${r.out_lng}`" target="_blank" rel="noopener" style="margin-inline-start:8px">موقع الانصراف</a></div></td>
+          <td><template v-if="auth.has('hr_mgr', 'hr_staff')"><button class="btn okb xs" @click="review(r, true)">قبول</button> <button class="btn dan xs" :title="r.status === 'excuse_requested' ? 'احتساب اليوم غيابًا' : 'يُطلب من الموظف إبداء عذره أولًا (§27)'" @click="review(r, false)">{{ r.status === 'excuse_requested' ? 'احتساب غياب' : 'رفض وطلب عذر' }}</button></template><span v-else class="tiny muted">يراجعه مدير الموارد البشرية</span></td>
         </tr></tbody>
       </table></div>
     </div>
@@ -101,7 +149,7 @@
 
 <script setup>
 import { exportXlsx } from '../excel'
-import { promptBox } from '../dialog'
+import { confirmBox, promptBox } from '../dialog'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../api'
@@ -112,12 +160,39 @@ import Modal from '../components/Modal.vue'
 import PunchModal from '../components/PunchModal.vue'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
-import { csv, curYM, download, fmtT, today as today_ } from '../utils'
+import { csv, curYM, download, fmtD, fmtT, today as today_ } from '../utils'
 
 const { t } = useI18n()
+const rechecking = ref(false)
+async function recheckGeo() {
+  rechecking.value = true
+  try { const r = await api.post('/attendance/recheck-geo'); ui.toast(`اعتُمد ${r.cleared} سجلًا أصبح داخل النطاق · بقي ${r.still_pending} للمراجعة`, 'ok'); load() } finally { rechecking.value = false }
+}
 const auth = useAuth()
 const ui = useUi()
-const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.isApprover && ['today', 'اليوم'], auth.isApprover && ['month', 'ملخص الشهر'], auth.isApprover && ['pending', 'خارج النطاق للمراجعة']].filter(Boolean))
+const isHr = computed(() => auth.has('super', 'hr_mgr', 'hr_staff'))
+const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.isApprover && ['today', 'اليوم'], auth.isApprover && ['month', 'ملخص الشهر'], auth.isApprover && ['pending', 'خارج النطاق للمراجعة'],
+  auth.isApprover && ['corrections', 'طلبات التصحيح'], isHr.value && ['paper', 'السجل البديل']].filter(Boolean))
+const hm = (m) => `${Math.floor((m || 0) / 60)}:${String((m || 0) % 60).padStart(2, '0')}`
+const excuses = computed(() => (mine.value?.records || []).filter((r) => r.status === 'excuse_requested'))
+async function giveExcuse(r) {
+  const text = await promptBox(`عذرك عن حضور يوم ${fmtD(r.work_date)} من خارج النطاق`, { value: r.excuse || '' })
+  if (!text) return
+  try { await api.post(`/attendance/${r.id}/excuse`, { excuse: text }); ui.toast('أُرسل العذر إلى الموارد البشرية', 'ok'); load() } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') }
+}
+const corrections = ref([])
+const empOpts = ref([]); const paperRows = ref([]); const busy = ref(false)
+function addPaper() { const last = paperRows.value[paperRows.value.length - 1]; paperRows.value.push({ employee_id: null, date: last?.date || today_(), in: last?.in || '', out: last?.out || '', note: '' }) }
+async function savePaper() {
+  const rows = paperRows.value.filter((p) => p.employee_id && p.date).map((p) => ({ employee_id: p.employee_id, date: p.date, in: p.in || null, out: p.out || null, note: p.note || null }))
+  if (!rows.length) return ui.toast('أدخل الموظف والتاريخ لكل سطر', 'warn')
+  busy.value = true
+  try {
+    const r = await api.post('/attendance/paper', { rows })
+    ui.toast(`رُحّل ${r.saved} سطر${r.errors.length ? ' — ' + r.errors.join(' · ') : ''}`, r.errors.length ? 'warn' : 'ok', 6000)
+    if (!r.errors.length) paperRows.value = []
+  } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') } finally { busy.value = false }
+}
 const tab = ref(auth.isApprover ? 'today' : 'mine') // managers and HR open on today's log
 const todayStr = today_()
 const day = ref(todayStr)
@@ -161,13 +236,18 @@ async function load() {
   if (tab.value === 'mine') mine.value = await api.get('/attendance/me', { params: { period: period.value } })
   else if (tab.value === 'today') { loadChecks(); today.value = await api.get('/attendance/today', { params: { ...cp(), date: day.value } }) }
   else if (tab.value === 'month') month.value = await api.get('/attendance/month', { params: { period: period.value, ...cp() } })
+  else if (tab.value === 'corrections') corrections.value = await api.get('/attendance/corrections')
+  else if (tab.value === 'paper') { if (!empOpts.value.length) empOpts.value = await api.get('/employees/options', { params: cp() }); if (!paperRows.value.length) addPaper() }
   else pending.value = await api.get('/attendance/pending')
 }
 async function review(r, accept) {
-  const reason = accept ? null : await promptBox('سبب الرفض')
+  const final = r.status === 'excuse_requested'
+  const reason = accept ? null : await promptBox(final ? 'سبب احتساب اليوم غيابًا' : 'سبب عدم القبول (يُطلب من الموظف إبداء عذره)')
   if (!accept && !reason) return
-  await api.post(`/attendance/${r.id}/review`, { accept, reason })
-  ui.toast(accept ? 'قُبل السجل' : 'رُفض السجل', 'ok')
+  try {
+    await api.post(`/attendance/${r.id}/review`, { accept, reason })
+    ui.toast(accept ? 'قُبل السجل' : final ? 'احتُسب اليوم غيابًا' : 'طُلب من الموظف إبداء عذره', 'ok')
+  } catch (e) { ui.toast(e.message || 'تعذر الحفظ', 'bad') }
   load()
 }
 function exportMonth() {

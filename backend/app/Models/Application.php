@@ -10,7 +10,7 @@ class Application extends Model
 
     protected function casts(): array
     {
-        return ["history" => "array"];
+        return ["history" => "array", "interviewers" => "array", "offer" => "array"];
     }
 
     public function opening() { return $this->belongsTo(JobOpening::class, "opening_id"); }

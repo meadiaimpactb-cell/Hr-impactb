@@ -14,8 +14,11 @@ class MonthlyReport extends Model
     protected function casts(): array
     {
         return ['items' => 'array', 'dev' => 'array', 'quality' => 'float', 'coop' => 'float', 'hr_bonus' => 'float', 'late' => 'boolean',
-            'submitted_at' => 'datetime', 'reopen_until' => 'date:Y-m-d', 'mgr_at' => 'datetime', 'hr_at' => 'datetime', 'ceo_at' => 'datetime'];
+            'submitted_at' => 'datetime', 'first_submitted_at' => 'datetime', 'reopen_until' => 'date:Y-m-d', 'mgr_at' => 'datetime', 'hr_at' => 'datetime', 'ceo_at' => 'datetime'];
     }
+
+    /** Statuses of a report that has been submitted at least once (a returned one was submitted, then sent back). */
+    public const SUBMITTED = ['submitted', 'mgr_reviewed', 'hr_reviewed', 'approved', 'returned'];
 
     public function employee() { return $this->belongsTo(Employee::class); }
     public function company() { return $this->belongsTo(Company::class); }

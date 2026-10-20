@@ -250,8 +250,8 @@ class UserController extends Controller
         $this->authorizeAdmin($request);
         $d = $request->validate([
             'companies' => 'array', 'companies.*' => 'integer|exists:companies,id',
-            'ops' => 'array', 'limits' => 'array', 'valid_to' => 'nullable|date', 'reason' => 'nullable|string|max:300',
-        ]);
+            'ops' => 'array', 'limits' => 'array', 'valid_to' => 'nullable|date', 'reason' => 'required|string|max:300',
+        ], ['reason.required' => 'اكتب سبب التفويض (§7)']);
         $ops = [];
         foreach ($d['ops'] ?? [] as $op => $actions) {
             if (! isset(Access::OPS[$op]) || in_array($op, Access::NON_DELEGABLE, true)) {
@@ -289,7 +289,7 @@ class UserController extends Controller
         $d = $request->validate([
             'from_user_id' => 'nullable|exists:users,id', 'to_user_id' => 'required|exists:users,id|different:from_user_id',
             'ops' => 'array', 'ops.*' => Rule::in(array_keys(Access::OPS)), 'valid_from' => 'required|date', 'valid_to' => 'required|date|after_or_equal:valid_from',
-            'reason' => 'required|string|max:300',
+            'reason' => 'required|string|max:300', 'company_id' => 'nullable|exists:companies,id', 'amount_cap' => 'nullable|numeric|min:0',
         ]);
         $from = $d['from_user_id'] ?? $u->id;
         abort_unless($from === $u->id || $u->hasRole('super', 'hr_mgr'), 403);
@@ -297,7 +297,7 @@ class UserController extends Controller
             throw ValidationException::withMessages(['to_user_id' => 'لا يمكن التفويض للنفس']);
         }
         $del = Delegation::create(['from_user_id' => $from, 'to_user_id' => $d['to_user_id'], 'ops' => array_values(array_diff($d['ops'] ?? [], Access::NON_DELEGABLE)),
-            'valid_from' => $d['valid_from'], 'valid_to' => $d['valid_to'], 'reason' => $d['reason']]);
+            'valid_from' => $d['valid_from'], 'valid_to' => $d['valid_to'], 'reason' => $d['reason'], 'company_id' => $d['company_id'] ?? null, 'amount_cap' => $d['amount_cap'] ?? null]);
         Audit::log('delegations', $del->id, 'create', null, $del->toArray(), $d['reason']);
         Audit::notify($d['to_user_id'], 'فُوّضت بالاعتمادات', 'من '.User::find($from)->name.' حتى '.$d['valid_to'], 'info', ['screen' => 'approvals']);
 
@@ -338,6 +338,10 @@ class UserController extends Controller
             'reason' => 'required|string|max:300',
         ]);
         $before = $rt->flow;
+        // §12 / §118: the HR manager keeps the flows aligned with appendix 5; changing the order of the stages is the group CEO's decision
+        if (array_column($before ?? [], 'role') !== array_column($d['stages'], 'role') && ! $request->user()->hasRole('super')) {
+            abort(403, 'تغيير ترتيب مراحل الاعتماد أو أدوارها بقرار من الرئيس التنفيذي للمجموعة (§12) — يمكنك تعديل التسميات فقط');
+        }
         $rt->update(['flow' => array_map(fn ($s) => array_filter($s), $d['stages']), 'version' => $rt->version + 1]);
         Audit::log('request_types', $rt->code, 'flow', $before, $rt->flow, $d['reason']);
         ApprovalService::flushTypes();

@@ -14,7 +14,8 @@
         <span v-if="rep.late" class="pill bad">متأخر عن موعد الرفع (يوم {{ rep.template?.due_day }})</span>
         <span class="small muted">القالب: {{ rep.template?.name }}</span>
         <span v-if="rep.return_note" class="notice bad" style="margin:0">سبب الإرجاع: {{ rep.return_note }}</span>
-        <span v-if="rep.locked" class="pill bad">الشهر مقفل — اطلب فتحه من «طلب جديد ← فتح شهر مقفل»</span><span v-else-if="rep.reopen_until" class="pill warn">مفتوح استثنائيًا حتى {{ rep.reopen_until }}</span>
+        <span v-if="rep.locked" class="pill bad">الشهر مقفل — اطلب فتحه من «طلب جديد ← فتح شهر مقفل»</span><span v-else-if="rep.reopen_until" class="pill warn">مفتوح استثنائيًا حتى {{ fmtD(rep.reopen_until) }}</span><span v-else-if="rep.lock_at" class="tiny muted">يُقفل الشهر بنهاية {{ fmtD(rep.lock_at) }} (أول 5 أيام عمل من الشهر التالي)</span>
+        <span v-if="rep.first_submitted_at" class="tiny muted">أول رفع: {{ fmtDT(rep.first_submitted_at) }}</span>
       </div>
       <div v-if="rep.preview" class="grid g5 mb">
         <Kpi label="الإنجاز" :value="rep.preview.axes.achieve" :hint="`من ${rep.preview.weights.achieve}`" color="b" />
@@ -31,9 +32,9 @@
       </div>
       <div class="card">
         <h3>بنود التقرير <span class="sub">مجموع الأوزان {{ totalWeight }}</span>
-          <span v-if="rep.can_edit && rep.template?.allow_employee_items && empItems < rep.template.max_employee_items" class="acts"><button class="btn sec xs" @click="addItem"><Icon name="plus" :size="14" /> بند شخصي (حتى {{ rep.template.max_employee_items }}، وزن ≤ {{ rep.template.employee_item_weight_max }})</button></span>
+          <span v-if="rep.can_edit && rep.template?.allow_employee_items && empItems < (rep.limits?.emp_items ?? rep.template.max_employee_items)" class="acts"><button class="btn sec xs" @click="addItem"><Icon name="plus" :size="14" /> بند شخصي (حتى {{ rep.limits?.emp_items ?? rep.template.max_employee_items }}، وزن ≤ {{ rep.limits?.emp_weight ?? rep.template.employee_item_weight_max }}، بموافقة المشرف)</button></span>
         </h3>
-        <ReportItems :items="rep.items" :mode="rep.can_edit ? 'edit' : 'view'" :max-emp-weight="rep.template?.employee_item_weight_max || 15" @remove="(it) => rep.items.splice(rep.items.indexOf(it), 1)" />
+        <ReportItems :items="rep.items" :mode="rep.can_edit ? 'edit' : 'view'" :max-emp-weight="rep.limits?.emp_weight || rep.template?.employee_item_weight_max || 15" @remove="(it) => rep.items.splice(rep.items.indexOf(it), 1)" />
       </div>
       <div class="card">
         <h3>التطوير هذا الشهر</h3>
@@ -180,7 +181,7 @@ import Modal from '../components/Modal.vue'
 import ReportItems from '../components/ReportItems.vue'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
-import { curYM, fmtDT, fmtYM } from '../utils'
+import { curYM, fmtD, fmtDT, fmtYM } from '../utils'
 
 const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()

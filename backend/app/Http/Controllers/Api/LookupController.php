@@ -67,6 +67,9 @@ class LookupController extends Controller
         }
         $row = $m::create($this->validated($request, $kind));
         Audit::log($kind, $row->id, 'create', null, $row->toArray());
+        if ($kind === 'schedules') {
+            $row->setAttribute('check', self::checkHours($row->hours ?? [], (int) $row->break_minutes));
+        }
 
         return response()->json($row, 201);
     }
@@ -83,6 +86,9 @@ class LookupController extends Controller
         }
         $row->update($data);
         Audit::log($kind, $row->id, 'update', $before, $row->toArray());
+        if ($kind === 'schedules') {
+            $row->setAttribute('check', self::checkHours($row->hours ?? [], (int) $row->break_minutes));
+        }
         if ($kind === 'job-titles') {
             $users = \App\Models\User::whereIn('employee_id', $row->employees()->pluck('id'))->pluck('id')->all();
             Audit::notify($users, 'تحديث وصفك الوظيفي', "صدرت النسخة {$row->version} من وظيفة «{$row->name}»", 'info', ['screen' => 'me']);
@@ -206,7 +212,9 @@ class LookupController extends Controller
         $d = $r->validate([
             'name' => 'required|string|max:120', 'week_days' => 'required|array|min:1', 'week_days.*' => 'integer|between:0,6',
             'hours' => 'required|array', 'hours.*' => 'array|size:2', 'hours.*.*' => 'date_format:H:i', 'flex' => 'boolean', 'cross_midnight' => 'boolean',
+            'break_minutes' => 'nullable|integer|min:0|max:180',
         ]);
+        $d['break_minutes'] = (int) ($d['break_minutes'] ?? 30);
         $d['week_days'] = array_values(array_unique(array_map('intval', $d['week_days'])));
         $d['hours'] = array_intersect_key($d['hours'], array_flip(array_map('strval', $d['week_days'])));
         foreach ($d['week_days'] as $day) {
@@ -215,7 +223,42 @@ class LookupController extends Controller
             }
         }
         $d['week_pattern'] = count($d['week_days']) >= 6 ? '6' : '5';
+        $check = self::checkHours($d['hours'], $d['break_minutes']);
+        if ($check['errors']) {
+            throw ValidationException::withMessages(['hours' => $check['errors']]);
+        }
 
         return $d;
+    }
+
+    /**
+     * §24/§25 checks of a weekly schedule ({dow: [from, to]}): at most weeklyHours (48) a week, at most maxPresenceHours
+     * (12) of presence a day; a note when a day runs more than 5 continuous hours without a 30-minute break.
+     *
+     * @return array{errors: string[], warnings: string[], weekly_hours: float}
+     */
+    public static function checkHours(array $hours, int $breakMinutes = 30): array
+    {
+        $days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+        $max = (float) \App\Services\Settings::get('weeklyHours', null, 48);
+        $maxDay = (float) \App\Services\Settings::get('maxPresenceHours', null, 12);
+        $total = 0;
+        $errors = $warnings = [];
+        foreach ($hours as $dow => $h) {
+            [$a, $b] = array_map(fn ($t) => (int) substr($t, 0, 2) * 60 + (int) substr($t, 3, 2), array_values($h));
+            $mins = $b > $a ? $b - $a : $b + 1440 - $a; // a shift ending before it starts crosses midnight
+            $total += $mins;
+            if ($mins > $maxDay * 60) {
+                $errors[] = 'يوم '.($days[(int) $dow] ?? $dow).': البقاء في مكان العمل '.round($mins / 60, 1)." ساعة يتجاوز الحد الأعلى {$maxDay} ساعة يوميًا (المادة 25)";
+            }
+            if ($mins > 300 && $breakMinutes < 30) {
+                $warnings[] = 'يوم '.($days[(int) $dow] ?? $dow).': يتجاوز 5 ساعات متصلة — تلزم راحة لا تقل عن 30 دقيقة (المادة 25)';
+            }
+        }
+        if ($total > $max * 60) {
+            $errors[] = 'مجموع ساعات الجدول '.round($total / 60, 1)." ساعة في الأسبوع يتجاوز الحد الأعلى {$max} ساعة (المادة 24)";
+        }
+
+        return ['errors' => $errors, 'warnings' => array_values(array_unique($warnings)), 'weekly_hours' => round($total / 60, 2)];
     }
 }

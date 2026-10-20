@@ -88,8 +88,24 @@ Route::prefix('v1')->group(function () {
         Route::put('attendance/movement/{employee}/viewers', [App\Http\Controllers\Api\PresenceController::class, 'viewers']);
         Route::post('app/version', [App\Http\Controllers\Api\AppVersionController::class, 'publish']);
 
+        // policy audit: attendance/recruitment
+        Route::post('attendance/{record}/excuse', [AttendanceController::class, 'excuse'])->where('record', '[0-9]+');
+        Route::post('attendance/paper', [AttendanceController::class, 'paper']);
+        Route::get('attendance/corrections', [AttendanceController::class, 'corrections']);
+        Route::get('attendance/week', [AttendanceController::class, 'week']);
+        Route::post('recruitment/openings/{opening}/decide', [RecruitmentController::class, 'decideOpening']);
+        Route::post('recruitment/applications/{application}/disclose', [RecruitmentController::class, 'disclose']);
+        Route::post('recruitment/applications/{application}/offer', [RecruitmentController::class, 'offer']);
+        Route::post('geo/resolve', [\App\Http\Controllers\Api\GeoController::class, 'resolve']);
+        Route::post('attendance/recheck-geo', [\App\Http\Controllers\Api\GeoController::class, 'recheck']);
+        // end policy audit: attendance/recruitment
+
         // Leaves
         Route::get('leaves/types', [LeaveController::class, 'types']);
+        // policy audit: requests/leave — official holidays (§58)
+        Route::get('holidays', [\App\Http\Controllers\Api\HolidayController::class, 'index']);
+        Route::post('holidays', [\App\Http\Controllers\Api\HolidayController::class, 'store']);
+        Route::delete('holidays/{holiday}', [\App\Http\Controllers\Api\HolidayController::class, 'destroy']);
         Route::get('leaves/balances', [LeaveController::class, 'myBalances']);
         Route::get('leaves/balances/{employee}', [LeaveController::class, 'balances']);
         Route::get('leaves/report', [LeaveController::class, 'report']);
@@ -403,5 +419,35 @@ Route::prefix('v1')->group(function () {
         Route::post('custody/{item}/secret', [CustodyController::class, 'setSecret']);
         Route::post('custody/{item}/reveal', [CustodyController::class, 'reveal']);
         Route::post('custody/{item}/claims', [CustodyController::class, 'storeClaim']);
+
+        // policy audit: payroll/custody
+        Route::get('payroll/runs/{run}/bank-transfer', [PayrollController::class, 'bankTransfer']);
+        Route::post('custody/{item}/overspend', [CustodyController::class, 'overspend']);
+        Route::post('custody/{item}/purpose-end', [CustodyController::class, 'purposeEnd']);
+        Route::get('finance/reconciliation', [CustodyController::class, 'reconciliation']);
+        // end policy audit: payroll/custody
+
+        // policy audit: discipline/termination/ack
+        Route::get('violation-fines', [ViolationController::class, 'fines']);
+        Route::post('violation-alerts/{alert}/dismiss', [ViolationController::class, 'dismissAlert']);
+        Route::post('violations/{violation}/investigation', [ViolationController::class, 'investigation']);
+        Route::post('violations/{violation}/removal', [ViolationController::class, 'removal']);
+        Route::post('violations/{violation}/committee', [ViolationController::class, 'committee']);
+        Route::get('my-terminations', [TerminationController::class, 'mine']);
+        Route::post('terminations/resignation', [TerminationController::class, 'resignation']);
+        Route::post('terminations/{termination}/resignation', [TerminationController::class, 'resignAction']);
+        Route::post('terminations/{termination}/decision', [TerminationController::class, 'decision']);
+        Route::post('terminations/{termination}/clearance', [TerminationController::class, 'clearanceApprove']);
+        Route::post('letters/service-request', [LetterController::class, 'requestService']);
+        Route::get('announcements/can-publish', [AnnouncementController::class, 'canPublish']);
+        Route::get('announcements/publishers', [AnnouncementController::class, 'publishers']);
+        Route::post('announcements/publishers', [AnnouncementController::class, 'addPublisher']);
+        Route::delete('announcements/publishers/{id}', [AnnouncementController::class, 'removePublisher'])->whereNumber('id');
+        Route::post('reports-center/{key}/exported', [ReportsCenterController::class, 'exported']);
+        Route::get('policy-ack', [App\Http\Controllers\Api\PolicyAckController::class, 'status']);
+        Route::post('policy-ack', [App\Http\Controllers\Api\PolicyAckController::class, 'sign']);
+        Route::get('policy-ack/report', [App\Http\Controllers\Api\PolicyAckController::class, 'report']);
+        Route::post('policy-ack/version', [App\Http\Controllers\Api\PolicyAckController::class, 'setVersion']);
+        // end policy audit: discipline/termination/ack
     });
 });

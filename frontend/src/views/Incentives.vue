@@ -52,7 +52,7 @@
     </div>
     <div class="fg"><label>العنوان *</label><input v-model="f.title" class="in" placeholder="مثال: إشادة من شريك خارجي على جودة التقرير" /></div>
     <div class="fg"><label>التفاصيل</label><textarea v-model="f.detail" class="in" rows="3" /></div>
-    <div class="fg"><label>نقاط التميّز <span class="tiny muted">(الإشادة الموثقة 20 افتراضيًا)</span></label><input v-model.number="f.points" type="number" min="0" max="100" class="in" /></div>
+    <div class="notice info small">نقاط التميّز ثابتة بجدول اللائحة (§88): الإشادة الموثقة من المشرف أو الإدارة أو جهة خارجية (إشادة، خطاب شكر، شهادة تقدير، تكريم، إنجاز نوعي) = <b>20 نقطة</b>؛ ولا نقاط لغيرها.</div>
     <template #foot><button class="btn sec" @click="f = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="save">تسجيل وإشعار الموظف</button></template>
   </Modal>
 </template>
@@ -81,7 +81,7 @@ async function load() {
   else board.value = (await api.get('/incentives/board', { params: { period: period.value, company_id: ui.company || undefined } })).rows
   if (!Object.keys(kinds.value).length) kinds.value = { praise: 'إشادة', thanks_letter: 'خطاب شكر', certificate: 'شهادة تقدير', bonus: 'مكافأة فورية', honor: 'تكريم', achievement: 'إنجاز نوعي', star: 'نجم التطوير' }
 }
-async function openForm() { if (!emps.value.length) emps.value = await api.get('/employees/options'); f.value = { employee_id: null, kind: 'praise', title: '', detail: '', points: 20, period: period.value } }
+async function openForm() { if (!emps.value.length) emps.value = await api.get('/employees/options'); f.value = { employee_id: null, kind: 'praise', title: '', detail: '', period: period.value } }
 async function save() {
   if (!f.value.employee_id || !f.value.title?.trim()) return ui.toast('الموظف والعنوان إلزاميان', 'warn')
   busy.value = true
