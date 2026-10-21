@@ -31,7 +31,7 @@ class TerminationController extends Controller
     public function index(Request $request)
     {
         abort_unless(Access::for()->canAny('TRM', 'view'), 403);
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('TRM')->pluck('id');
 
         return Termination::with('employee:id,name,emp_no', 'company:id,name')->whereIn('employee_id', $ids)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->orderByDesc('id')->get()->map(fn ($t) => $this->row($t));

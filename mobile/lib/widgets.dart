@@ -372,3 +372,98 @@ Future<String?> promptText(BuildContext context, String title, {String? hint, in
     ),
   );
 }
+
+// ---------------------------------------------------------------- searchable lists
+/// Every drop-down list has a search box (owner's note): a field that opens a bottom sheet with a search field and
+/// the filtered options. Arabic letter variants (أ/إ/آ/ا, ة/ه, ى/ي) and Arabic-Indic digits match their plain forms.
+String _norm(String s) => s
+    .toLowerCase()
+    .replaceAll(RegExp('[ً-ْـ]'), '')
+    .replaceAll(RegExp('[أإآٱ]'), 'ا')
+    .replaceAll('ة', 'ه')
+    .replaceAll('ى', 'ي')
+    .replaceAllMapped(RegExp('[٠-٩]'), (m) => '${m[0]!.codeUnitAt(0) - 0x660}')
+    .trim();
+
+Future<T?> pickFromList<T>(BuildContext context, String title, List<(T, String)> items, {T? current}) => showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => _PickSheet<T>(title: title, items: items, current: current),
+    );
+
+class _PickSheet<T> extends StatefulWidget {
+  final String title;
+  final List<(T, String)> items;
+  final T? current;
+  const _PickSheet({required this.title, required this.items, this.current});
+  @override
+  State<_PickSheet<T>> createState() => _PickSheetState<T>();
+}
+
+class _PickSheetState<T> extends State<_PickSheet<T>> {
+  String q = '';
+  @override
+  Widget build(BuildContext context) {
+    final nq = _norm(q);
+    final shown = widget.items.where((i) => nq.isEmpty || _norm(i.$2).contains(nq)).toList();
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .75),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(widget.title, style: context.t.titleLarge)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(autofocus: widget.items.length > 8, onChanged: (v) => setState(() => q = v), decoration: InputDecoration(hintText: tr('ابحث في القائمة…'), prefixIcon: const Icon(Icons.search), isDense: true)),
+          ),
+          Flexible(
+            child: shown.isEmpty
+                ? Padding(padding: const EdgeInsets.all(24), child: Text(tr('لا نتائج'), style: context.t.labelMedium))
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: shown.length,
+                    itemBuilder: (_, i) {
+                      final it = shown[i];
+                      final sel = it.$1 == widget.current;
+                      return ListTile(
+                        title: Text(it.$2, style: TextStyle(fontWeight: sel ? FontWeight.w800 : FontWeight.w500, color: sel ? HcColors.deepBlue : null)),
+                        trailing: sel ? const Icon(Icons.check, color: HcColors.deepBlue) : null,
+                        onTap: () => Navigator.pop(context, it.$1),
+                      );
+                    },
+                  ),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Form field that picks one value from a searchable list.
+class SearchPicker<T> extends StatelessWidget {
+  final String label;
+  final T? value;
+  final List<(T, String)> items;
+  final ValueChanged<T?> onChanged;
+  final String? errorText;
+  const SearchPicker({super.key, required this.label, required this.value, required this.items, required this.onChanged, this.errorText});
+  @override
+  Widget build(BuildContext context) {
+    final cur = items.where((i) => i.$1 == value).map((i) => i.$2).firstOrNull;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () async {
+        final v = await pickFromList<T>(context, label, items, current: value);
+        if (v != null && context.mounted) onChanged(v);
+      },
+      child: InputDecorator(
+        decoration: InputDecoration(labelText: label, errorText: errorText, suffixIcon: const Icon(Icons.arrow_drop_down)),
+        isEmpty: cur == null,
+        child: Text(cur ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    );
+  }
+}

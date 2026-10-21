@@ -74,7 +74,7 @@
     </div>
 
     <div v-else-if="tab === 'att'" class="card">
-      <div class="row mb"><input v-model="period" type="month" class="in" style="width:auto" @change="loadAtt" /></div>
+      <div class="row mb"><MonthPicker v-model="period" @change="loadAtt" /></div>
       <AttendanceTable :records="att?.records || []" :grace="auth.meta?.policy?.grace_minutes ?? 0" />
     </div>
 

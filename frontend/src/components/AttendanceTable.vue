@@ -21,11 +21,13 @@
         <span v-if="r.status === 'absent'" class="pill bad">غياب</span>
         <span v-else-if="r.late_minutes > grace" class="pill warn">متأخر</span>
         <span v-else class="pill ok">حاضر</span>
+        <span v-if="r.note_pending" class="pill bad" title="التحضير معلّق حتى كتابة المنجز اليومي">معلّق — المنجز اليومي</span>
         <span v-if="r.pending" class="pill warn">للمراجعة</span><span v-if="r.corrected" class="pill info">مصحح</span><span v-if="r.geo_fail || r.out_geo_fail" class="pill bad">خارج النطاق</span>
       </td>
       <td class="small" style="max-width:280px">
         <a v-if="r.note" href="#" class="note-link" :title="r.note" @click.prevent="showNote(r)">{{ r.note.length > 60 ? r.note.slice(0, 60) + '…' : r.note }}</a><span v-else>—</span>
-        <button v-if="editable && isToday(r)" class="btn ghost xs" title="تعديل منجز اليوم" @click="editNote(r)"><Icon name="edit" :size="12" /></button>
+        <button v-if="editable && r.note_pending" class="btn okb xs" @click="editNote(r)"><Icon name="edit" :size="12" /> اكتب المنجز</button>
+        <button v-else-if="editable && isToday(r)" class="btn ghost xs" title="تعديل منجز اليوم" @click="editNote(r)"><Icon name="edit" :size="12" /></button>
       </td>
       <td v-if="$slots.actions"><slot name="actions" :r="r" /></td>
     </tr></tbody>
@@ -38,14 +40,14 @@ import { DAYS_AR, fmtT, fmtD } from '../utils'
 import api from '../api'
 import { alertBox, promptBox } from '../dialog'
 // editable: the employee's own table — today's daily achievement can be rewritten (§33)
-const props = defineProps({ records: { type: Array, default: () => [] }, grace: { type: Number, default: 0 }, editable: Boolean })
+const props = defineProps({ records: { type: Array, default: () => [] }, grace: { type: Number, default: 0 }, editable: Boolean, noteMin: { type: Number, default: 20 } })
 const emit = defineEmits(['changed'])
 const isToday = (r) => String(r.work_date).slice(0, 10) === new Date().toLocaleDateString('en-CA')
 function showNote(r) { alertBox(r.note, { title: 'المنجز اليومي — ' + fmtD(r.work_date), icon: 'info' }) }
 async function editNote(r) {
-  const note = await promptBox('المنجز اليومي — اليوم', { value: r.note || '', multiline: true, minLength: 20, confirmText: 'حفظ' })
+  const note = await promptBox(`المنجز اليومي — ${isToday(r) ? 'اليوم' : fmtD(r.work_date)}`, { text: r.note_pending ? 'تحضير هذا اليوم معلّق حتى تكتب ما أنجزته فيه' : '', value: r.note || '', multiline: true, minLength: props.noteMin, confirmText: 'حفظ' })
   if (!note) return
-  try { const x = await api.post(`/attendance/${r.id}/note`, { note }); r.note = x.note; emit('changed') } catch (e) { alertBox(e.message, { icon: 'error' }) }
+  try { const x = await api.post(`/attendance/${r.id}/note`, { note }); r.note = x.note; r.note_pending = x.note_pending; emit('changed') } catch (e) { alertBox(e.message, { icon: 'error' }) }
 }
 void props
 </script>

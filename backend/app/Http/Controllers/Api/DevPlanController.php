@@ -39,7 +39,7 @@ class DevPlanController extends Controller
     {
         $u = $request->user();
         $year = $request->integer('year') ?: (int) now()->year;
-        $emps = $u->isHr() ? Access::for()->employees()->where('status', '!=', 'terminated')->get(['id', 'name', 'emp_no'])
+        $emps = $u->isHr() ? Access::for()->employees('DEV')->where('status', '!=', 'terminated')->get(['id', 'name', 'emp_no'])
             : Employee::where('manager_id', $u->employee_id)->where('status', '!=', 'terminated')->get(['id', 'name', 'emp_no']);
         $plans = DB::table('dev_plans')->where('year', $year)->whereIn('employee_id', $emps->pluck('id'))->get()->keyBy('employee_id');
 

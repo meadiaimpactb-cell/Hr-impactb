@@ -8,10 +8,12 @@ import 'package:provider/provider.dart';
 
 import '../api.dart';
 import '../l10n.dart';
+import '../nav.dart';
 import '../state.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'approvals_screen.dart';
+import 'modules_screens.dart';
 import 'new_request_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -25,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? d;
   bool _punching = false;
   bool _failed = false;
+  int mailUnread = 0;
 
   @override
   void initState() {
@@ -35,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> load() async {
     try {
       final r = await Api.get('/dashboard');
+      Api.get('/mail/unread').then((m) { if (mounted) setState(() => mailUnread = (m['count'] ?? 0) as int); }).catchError((_) {});
       if (mounted) {
         setState(() {
           d = Map<String, dynamic>.from(r);
@@ -64,7 +68,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> punch(bool isOut) async {
     String? note;
     if (isOut) {
-      note = await promptText(context, tr('المنجز اليومي'), hint: tr('ماذا أنجزت اليوم؟'), lines: 4, confirm: tr('تسجيل انصراف'));
+      final today = d?['me']?['today'] as Map?;
+      final required = today?['note_required'] == true;
+      final min = (context.read<AppState>().policy['daily_note_min'] ?? 20) as int;
+      note = await _noteDialog(required, min, '${today?['note'] ?? ''}');
       if (note == null) return;
     }
     // Identity confirmation with the phone's fingerprint / face (policy biometric_punch); falls back gracefully when unavailable
@@ -113,7 +120,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         final late = rec['late_minutes'] ?? 0;
         final pending = rec['pending'] == true;
-        toast(context, isOut ? '${tr('سجّلت انصرافك')} ${hm(rec['check_out'])}' : '${tr('سجّلت حضورك')} ${hm(rec['check_in'])}${late > 0 ? ' · ${tr('متأخر')} $late ${tr('دقيقة')}' : ''}${pending ? '\n${r['geo']['msg']}' : ''}', error: pending);
+        if (isOut && rec['note_pending'] == true) {
+          toast(context, '${tr('سجّلت انصرافك')} ${hm(rec['check_out'])}\n${tr('تحضير اليوم معلّق حتى تكتب المنجز اليومي من «حضوري»')}', error: true);
+        } else {
+          toast(context, isOut ? '${tr('سجّلت انصرافك')} ${hm(rec['check_out'])}' : '${tr('سجّلت حضورك')} ${hm(rec['check_in'])}${late > 0 ? ' · ${tr('متأخر')} $late ${tr('دقيقة')}' : ''}${pending ? '\n${r['geo']['msg']}' : ''}', error: pending);
+        }
       }
       await load();
     } catch (e) {
@@ -121,6 +132,31 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _punching = false);
     }
+  }
+
+  /// The daily achievement at check-out (owner's note): when required, check-out still works without it but the day
+  /// stays pending until it is written — the employee is told so before confirming.
+  Future<String?> _noteDialog(bool required, int min, String initial) {
+    final c = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final len = c.text.trim().length;
+        final short = required && len < min;
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(tr('المنجز اليومي'), style: ctx.t.titleLarge),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            TextField(controller: c, maxLines: 5, onChanged: (_) => set(() {}), decoration: InputDecoration(hintText: tr('ماذا أنجزت اليوم؟'), labelText: required ? '${tr('مطلوب لاعتماد تحضير اليوم')} *' : null)),
+            if (required) ...[
+              const SizedBox(height: 8),
+              Text(short ? '${tr('اكتب')} $min ${tr('حرفًا على الأقل')} ($len/$min). ${tr('إن انصرفت دونه يبقى تحضير اليوم معلّقًا حتى تكتبه.')}' : tr('المنجز مكتمل — سيُعتمد تحضير اليوم'), style: ctx.t.labelMedium?.copyWith(color: short ? HcColors.warn : HcColors.ok)),
+            ],
+          ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('إلغاء'))), FilledButton(style: FilledButton.styleFrom(minimumSize: const Size(110, 44)), onPressed: () => Navigator.pop(ctx, c.text.trim()), child: Text(tr('تسجيل انصراف')))],
+        );
+      }),
+    );
   }
 
   void _new(String type) => Navigator.push(context, MaterialPageRoute(builder: (_) => NewRequestScreen(type: type))).then((_) => load());
@@ -160,6 +196,11 @@ class _HomeScreenState extends State<HomeScreen> {
               Text('$greeting، $firstName', style: context.t.titleLarge),
               Text('${dayName(now.weekday % 7)} ${now.day} ${monthName(now.month)}${emp?['job_title']?['name'] != null ? ' · ${emp!['job_title']['name']}' : ''}', style: context.t.labelMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
             ]),
+          ),
+          IconButton(
+            tooltip: tr('البريد الداخلي'),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MailScreen())).then((_) => load()),
+            icon: Badge(isLabelVisible: mailUnread > 0, label: Text('$mailUnread'), backgroundColor: HcColors.bad, child: Icon(Icons.mail_outline, color: context.text)),
           ),
           if (s.isApprover)
             IconButton(
@@ -203,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(children: [
                 for (final (i, t) in (me['todo'] as List).indexed) ...[
                   if (i > 0) const Divider(indent: 68),
-                  ListRow(icon: _todoIcon(t['kind']), color: statusColor(t['kind'] ?? 'info'), title: t['label'] ?? '', onTap: () => widget.onNavigate(4)),
+                  ListRow(icon: _todoIcon(t['kind']), color: statusColor(t['kind'] ?? 'info'), title: t['label'] ?? '', onTap: () => openScreen(context, '${t['screen'] ?? ''}', tab: widget.onNavigate, title: '${t['label'] ?? ''}')),
                 ],
               ]),
             ),

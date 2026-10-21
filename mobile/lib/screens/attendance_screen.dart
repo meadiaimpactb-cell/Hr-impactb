@@ -51,6 +51,38 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     load();
   }
 
+  /// A day left pending because the daily achievement was not written is approved once it is written (owner's note).
+  Future<void> writeNote(Map r) async {
+    final min = (d?['note_min'] ?? 20) as int;
+    final c = TextEditingController(text: '${r['note'] ?? ''}');
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text('${tr('المنجز اليومي')} — ${fmtDate(r['work_date'])}', style: ctx.t.titleLarge),
+            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr('اكتب ما أنجزته في هذا اليوم ليُعتمد تحضيره'), style: ctx.t.labelMedium),
+              const SizedBox(height: 8),
+              TextField(controller: c, maxLines: 5, onChanged: (_) => set(() {})),
+              const SizedBox(height: 6),
+              Text('${c.text.trim().length}/$min', style: ctx.t.labelSmall?.copyWith(color: c.text.trim().length < min ? HcColors.warn : HcColors.ok)),
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('إلغاء'))),
+              FilledButton(style: FilledButton.styleFrom(minimumSize: const Size(120, 44)), onPressed: c.text.trim().length < min ? null : () => Navigator.pop(ctx, c.text.trim()), child: Text(tr('حفظ واعتماد اليوم'))),
+            ],
+          )),
+    );
+    if (note == null || note.isEmpty) return;
+    try {
+      await Api.post('/attendance/${r['id']}/note', {'note': note});
+      if (mounted) toast(context, tr('حُفظ المنجز واعتُمد تحضير اليوم'));
+      load();
+    } catch (e) {
+      if (mounted) toast(context, errText(e), error: true);
+    }
+  }
+
   /// present / late / absent / null per day-of-month
   Map<int, String> _byDay(List recs) {
     final out = <int, String>{};
@@ -86,12 +118,26 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             const SizedBox(width: 10),
             Expanded(child: MetricTile(label: tr('غياب'), value: '${s['absent']}', hint: tr('يوم'), icon: Icons.cancel_outlined, color: HcColors.bad)),
           ]),
+          if (((d?['note_pending'] as List?) ?? []).isNotEmpty) ...[
+            const SizedBox(height: 12),
+            HcCard(
+              color: HcColors.bad.withValues(alpha: context.isDark ? .18 : .08),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [const Icon(Icons.pending_actions_outlined, color: HcColors.bad), const SizedBox(width: 8), Expanded(child: Text(tr('التحضير معلّق حتى تكتب المنجز اليومي'), style: context.t.bodyLarge?.copyWith(fontWeight: FontWeight.w800, color: HcColors.bad)))]),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final r in (d!['note_pending'] as List).cast<Map>())
+                    FilledButton.tonalIcon(style: FilledButton.styleFrom(minimumSize: const Size(0, 42)), onPressed: () => writeNote(r), icon: const Icon(Icons.edit_outlined, size: 18), label: Text('${fmtDate(r['work_date'])} — ${tr('اكتب المنجز')}')),
+                ]),
+              ]),
+            ),
+          ],
           const SizedBox(height: 12),
           _MiniCalendar(month: month, marks: _byDay(recs)),
           const SizedBox(height: 20),
           SectionTitle(tr('السجلات')),
           if (recs.isEmpty) EmptyView(tr('لا توجد سجلات لهذا الشهر')),
-          for (final r in recs) _RecordCard(r: r),
+          for (final r in recs) _RecordCard(r: r, onWrite: r['note_pending'] == true ? () => writeNote(r) : null),
         ],
       ]),
     );
@@ -138,7 +184,8 @@ class _MiniCalendar extends StatelessWidget {
 
 class _RecordCard extends StatelessWidget {
   final Map r;
-  const _RecordCard({required this.r});
+  final VoidCallback? onWrite;
+  const _RecordCard({required this.r, this.onWrite});
   @override
   Widget build(BuildContext context) {
     final late = (r['late_minutes'] ?? 0) as int;
@@ -174,6 +221,18 @@ class _RecordCard extends StatelessWidget {
                 Expanded(child: Text(r['location']?['name'] ?? (absent ? tr('لم يُسجّل حضور') : tr('خارج النطاق')), style: context.t.labelMedium, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 if (r['pending'] == true) ...[const Icon(Icons.hourglass_top, size: 14, color: HcColors.warn), const SizedBox(width: 4), Text(tr('بانتظار المراجعة'), style: context.t.labelSmall?.copyWith(color: HcColors.warn))],
               ]),
+              if (onWrite != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: InkWell(
+                    onTap: onWrite,
+                    child: Row(children: [
+                      StatusBadge(tr('معلّق — المنجز اليومي'), color: HcColors.bad, icon: Icons.pending_actions_outlined),
+                      const SizedBox(width: 8),
+                      Text(tr('اكتب المنجز'), style: context.t.labelMedium?.copyWith(color: HcColors.deepBlue, fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                ),
               // §33: the daily achievement written at check-out — tap to read it in full
               if ((r['note'] ?? '').toString().isNotEmpty) ...[
                 const SizedBox(height: 6),

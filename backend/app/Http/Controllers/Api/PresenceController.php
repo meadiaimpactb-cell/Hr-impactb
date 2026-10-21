@@ -89,7 +89,7 @@ class PresenceController extends Controller
     {
         abort_unless(Access::for()->canAny('ATT', 'view'), 403);
         $date = $request->date('date')?->toDateString() ?? now()->toDateString();
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('ATT')->pluck('id');
         foreach ($ids as $id) {
             self::expire($id);
         }

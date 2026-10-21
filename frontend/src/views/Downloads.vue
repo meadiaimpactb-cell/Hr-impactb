@@ -1,7 +1,7 @@
 <template>
   <div class="page-h">
     <div><h1>مركز التنزيل</h1><p>كل ملف تصدّره من النظام يُحفظ هنا تلقائيًا، فتعيد تنزيله في أي وقت خلال {{ keepDays }} يومًا.</p></div>
-    <div class="acts"><input v-model="month" type="month" class="in" style="width:auto" title="تصفية بالشهر" /><select v-model="co" class="in" style="width:auto" title="تصفية بالشركة"><option value="">كل الشركات</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.name">{{ c.name }}</option></select><input v-model.trim="q" class="in" placeholder="بحث باسم الملف أو الموظف أو الشركة" style="width:240px" /></div>
+    <div class="acts"><MonthPicker v-model="month" label="تصفية بالشهر" allow-empty /><select v-model="co" class="in" style="width:auto" title="تصفية بالشركة"><option value="">كل الشركات</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.name">{{ c.name }}</option></select><input v-model.trim="q" class="in" placeholder="بحث باسم الملف أو الموظف أو الشركة" style="width:240px" /></div>
   </div>
 
   <div class="tabs">

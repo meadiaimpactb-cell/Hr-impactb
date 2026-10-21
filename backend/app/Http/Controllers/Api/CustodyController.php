@@ -58,7 +58,7 @@ class CustodyController extends Controller
         if ($f = $acc->focus()) {
             $companies = array_values(array_intersect($companies, [$f]));
         }
-        $empIds = $acc->canAny('CUS', 'view') ? $acc->employees()->pluck('id') : collect([$request->user()->employee_id]);
+        $empIds = $acc->canAny('CUS', 'view') ? $acc->employees('CUS')->pluck('id') : collect([$request->user()->employee_id]);
 
         return CustodyItem::with('type:id,name,requires_ack,has_secret,is_cash', 'company:id,name', 'employee:id,name,emp_no')
             ->where(fn ($q) => $q->whereIn('company_id', $companies)->orWhereIn('employee_id', $empIds))
@@ -261,7 +261,7 @@ class CustodyController extends Controller
 
     public function claims(Request $request)
     {
-        $empIds = $this->acc($request)->employees()->pluck('id');
+        $empIds = $this->acc($request)->employees('CUS')->pluck('id');
 
         return ExpenseClaim::with('employee:id,name,emp_no', 'item:id,ident,value')->whereIn('employee_id', $empIds)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->latest()->get()

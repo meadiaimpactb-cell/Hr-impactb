@@ -94,7 +94,7 @@ class LetterController extends Controller
     public function index(Request $request)
     {
         abort_unless(Access::for()->canAny('EMP', 'view'), 403);
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('EMP')->pluck('id');
 
         return Letter::with('employee:id,name,emp_no', 'company:id,name', 'issuer:id,name')->whereIn('employee_id', $ids)->orderByDesc('id')->limit(300)->get()->map(fn ($l) => $this->row($l));
     }

@@ -321,7 +321,18 @@ async function addReportSheet(wb, title, info, items) {
       if (x > end || axisAt[x] !== axisAt[s]) { if (axisAt[s]) merge(s, 2, x - 1, 2); s = x }
     }
   }
-  const t = end + 2
+  let t = end + 2
+  // development of the month, pulled from the development register (owner's note)
+  if (info.dev?.length) {
+    band(t, `التطوير خلال الشهر — يُدرج تلقائيًا من سجل التطوير${info.dev_points?.total ? ` (${info.dev_points.total} نقطة)` : ''}`, { font: font({ bold: true, color: { argb: BRAND.navy } }), fill: fill('FFE9ECF7'), alignment: { horizontal: 'right', vertical: 'middle', readingOrder: 'rtl' } }, 22)
+    t++
+    info.dev.forEach((d) => {
+      const line = [d.program, d.provider, d.activity_name, d.hours ? `${d.hours} ساعة` : '', d.status_label, d.counted && d.points ? `${d.points} نقطة` : ''].filter(Boolean).join('  ·  ')
+      band(t, latin(line), { font: font({ size: 10 }), border: BORDER, alignment: { horizontal: 'right', vertical: 'middle', wrapText: true, readingOrder: 'rtl' } }, 20)
+      t++
+    })
+    t++
+  }
   band(t, `عدد المهام: ${items.length}     |     يُعتمد التقرير إلكترونيًا من المدير المباشر ثم الموارد البشرية بعد رفعه على النظام`, { font: font({ size: 10, color: { argb: 'FF6B7094' } }), alignment: { horizontal: 'center' } }, 20)
 
   ws.pageSetup.printTitlesRow = '6:6'

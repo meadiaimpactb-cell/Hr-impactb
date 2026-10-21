@@ -36,7 +36,7 @@
 
   <!-- runs: per-company payroll generation & staged approval -->
   <template v-else-if="tab === 'runs'">
-    <div class="row mb"><input v-model="period" type="month" class="in" style="width:auto" @change="load" /></div>
+    <div class="row mb"><MonthPicker v-model="period" @change="load" /></div>
     <div v-if="!runs.length" class="card">
       <div v-if="companiesLoaded" class="empty"><div class="ic"><Icon name="building" :size="40" :stroke="1.4" /></div>لا شركات ضمن نطاق صلاحيتك</div>
       <div v-else><div class="skel" v-for="i in 3" :key="i" /></div>
@@ -59,7 +59,7 @@
 
   <!-- slips: browse & approve all payslips for a period -->
   <template v-else-if="tab === 'slips'">
-    <div class="row mb"><input v-model="period" type="month" class="in" style="width:auto" @change="load" /></div>
+    <div class="row mb"><MonthPicker v-model="period" @change="load" /></div>
     <div class="card">
       <h3>قسائم {{ fmtYM(period) }} <span class="sub">{{ slips.filter((s) => s.published).length }} منشورة من {{ slips.length }}</span></h3>
       <div v-if="!slips.length" class="empty">لا قسائم — تُولَّد بعد اعتماد المسير نهائيًا</div>

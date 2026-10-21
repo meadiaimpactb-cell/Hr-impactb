@@ -330,3 +330,16 @@ body.scroll-locked{position:fixed;inset-inline:0;width:100%;overflow:hidden}
 .hlp{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-inline-start:5px;border-radius:50%;font-size:11px;font-weight:800;line-height:1;cursor:help;vertical-align:middle;background:var(--infobg);color:var(--brand,var(--pri));border:1px solid color-mix(in srgb,var(--brand,var(--pri)) 35%,transparent);user-select:none}
 .hlp:hover,.hlp:focus{background:var(--brand,var(--pri));color:#fff;outline:none}
 @media print{.hlp{display:none}}
+/* searchable drop-down lists (lib/selectSearch.js) */
+.ssx{position:fixed;z-index:calc(var(--z-toast) + 5);background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 36px rgba(15,20,48,.24);display:flex;flex-direction:column;overflow:hidden;padding-bottom:var(--safe-b)}
+.ssx-s{padding:8px;border-bottom:1px solid var(--line2);flex:0 0 auto}
+.ssx-s .in{min-height:36px;width:100%}
+.ssx-list{overflow:auto;overscroll-behavior:contain;padding:4px;flex:1 1 auto}
+.ssx-opt{padding:8px 10px;border-radius:8px;cursor:pointer;line-height:1.45}
+.ssx-opt.act{background:var(--soft)}
+.ssx-opt.sel{font-weight:700;color:var(--brand)}
+:root[data-theme="dark"] .ssx-opt.sel{color:var(--cyan)}
+.ssx-opt.dis{opacity:.45;cursor:not-allowed}
+.ssx-group{padding:6px 10px 2px;font-size:11px;color:var(--muted);font-weight:700}
+.ssx-empty{padding:12px;text-align:center;color:var(--muted);font-size:12px}
+@media (max-width:639px){.ssx-opt{padding:11px 12px}}

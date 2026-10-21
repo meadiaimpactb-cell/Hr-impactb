@@ -69,8 +69,9 @@ class MoreScreen extends StatelessWidget {
           ListRow(icon: Icons.gavel_outlined, color: HcColors.warn, title: tr('مخالفاتي'), onTap: () => go(const ViolationsScreen())),
         ]),
       ListGroup(title: tr('التواصل'), children: [
-        ListRow(icon: Icons.campaign_outlined, color: HcColors.cyan, title: tr('الإعلانات'), onTap: () => go(const AnnouncementsScreen())),
-        ListRow(icon: Icons.mail_outline, color: HcColors.deepBlue, title: tr('البريد الداخلي'), onTap: () => go(const MailScreen())),
+        ListRow(icon: Icons.campaign_outlined, color: HcColors.cyan, title: tr('الإعلانات'), subtitle: tr('مقروء وغير مقروء، وتأكيد القراءة'), trailing: const _CountBadge('/announcements/pending-ack', list: true), onTap: () => go(const AnnouncementsScreen())),
+        ListRow(icon: Icons.mail_outline, color: HcColors.deepBlue, title: tr('البريد الداخلي'), trailing: const _CountBadge('/mail/unread'), onTap: () => go(const MailScreen())),
+        if (s.isApprover) ListRow(icon: Icons.notification_add_outlined, color: HcColors.warn, title: tr('تنبيه لفريقي'), subtitle: tr('يظهر لهم نافذةً منبثقة في الجوال والموقع'), onTap: () => _teamAlert(context)),
       ]),
       ListGroup(title: tr('الإعدادات'), children: [
         ListRow(icon: Icons.language_outlined, color: HcColors.periwinkle, title: tr('اللغة'), subtitle: s.locale == 'ar' ? 'العربية' : 'English', onTap: () => s.setLocale(s.locale == 'ar' ? 'en' : 'ar')),
@@ -84,6 +85,18 @@ class MoreScreen extends StatelessWidget {
       ]),
       Center(child: Text('HC · ${tr('مجموعة وادي الأثر المالية')}', style: context.t.labelSmall)),
     ]);
+  }
+
+  Future<void> _teamAlert(BuildContext context) async {
+    try {
+      final p = await Api.get('/announcements/can-publish');
+      final members = List.from(p['team_members'] ?? []);
+      if (!context.mounted) return;
+      if (members.isEmpty) return toast(context, tr('لا يتبعك موظفون لإرسال تنبيه لهم'), error: true);
+      Navigator.push(context, MaterialPageRoute(builder: (_) => TeamAlertScreen(members: members)));
+    } catch (e) {
+      if (context.mounted) toast(context, errText(e), error: true);
+    }
   }
 
   Future<void> _logout(BuildContext context, AppState s) async {
@@ -130,4 +143,20 @@ class _BalancesScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Small red counter next to a menu row (unread mail, announcements waiting).
+class _CountBadge extends StatelessWidget {
+  final String path;
+  final bool list;
+  const _CountBadge(this.path, {this.list = false});
+  @override
+  Widget build(BuildContext context) => FutureBuilder(
+        future: Api.get(path),
+        builder: (ctx, snap) {
+          final n = !snap.hasData ? 0 : list ? (snap.data as List).length : ((snap.data as Map)['count'] ?? 0) as int;
+          if (n == 0) return Icon(Icons.chevron_left, color: context.muted);
+          return Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: HcColors.bad, borderRadius: BorderRadius.circular(10)), child: Text('$n', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)));
+        },
+      );
 }

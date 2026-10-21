@@ -50,7 +50,7 @@ class DevelopmentController extends Controller
         $period = $request->input('period', now()->format('Y-m'));
         $year = (int) $request->input('year', substr($period, 0, 4));
         $quarter = (int) $request->input('quarter', ceil((int) substr($period, 5, 2) / 3));
-        $emps = $acc->employees()->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->get();
+        $emps = $acc->employees('DEV')->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->get();
         $rows = $emps->map(function ($e) use ($period, $year) {
             $dp = \App\Services\EvaluationService::devPoints($e, $period);
             $yr = \App\Services\EvaluationService::devYear($e, $year);
@@ -69,7 +69,7 @@ class DevelopmentController extends Controller
         if ($request->boolean('board')) {
             return $this->board($request);
         }
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('DEV')->pluck('id');
         // §79: last month ended below 50 points → the manager is asked (once) to hold a guidance session
         $prev = now()->subMonthNoOverflow()->format('Y-m');
         foreach (Employee::whereIn('id', $ids)->where('status', '!=', 'terminated')->get() as $emp) {

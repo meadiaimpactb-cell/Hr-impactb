@@ -5,8 +5,8 @@
   </div>
   <div class="card">
     <div class="row mb">
-      <div class="fg" style="margin:0"><label>من شهر</label><input v-model="from" type="month" class="in" style="width:auto" /></div>
-      <div class="fg" style="margin:0"><label>إلى شهر</label><input v-model="to" type="month" class="in" style="width:auto" /></div>
+      <div class="fg" style="margin:0"><label>من شهر</label><MonthPicker v-model="from" /></div>
+      <div class="fg" style="margin:0"><label>إلى شهر</label><MonthPicker v-model="to" /></div>
       <div class="fg" style="margin:0"><label>الشركة</label><select v-model="company" class="in" style="width:auto"><option :value="null">كل الشركات</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.id">{{ c.name }}</option></select></div>
       <button class="btn pri sm" :class="{ loading: busy }" style="align-self:flex-end" @click="load"><Icon name="refresh" :size="14" /> عرض</button>
     </div>

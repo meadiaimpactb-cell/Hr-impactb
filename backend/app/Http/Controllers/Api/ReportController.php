@@ -76,7 +76,7 @@ class ReportController extends Controller
         abort_if(self::locked($report), 422, 'الشهر مقفل — اطلب فتحه عبر «فتح شهر مقفل»');
         $tpl = $report->template ?? EvaluationService::reportTemplateFor($report->employee);
         $d = $request->validate(['items' => 'required|array|max:90', 'items.*.id' => 'nullable|string|max:20', 'items.*.title' => 'required|string|max:300', 'items.*.kpi_result' => 'nullable|string|max:6000', 'items.*.weight' => 'nullable|numeric|min:0|max:100',
-            'items.*.source' => 'in:org,emp', 'items.*.achieved' => 'nullable|string|max:20000', 'items.*.pct' => 'nullable|numeric|min:0|max:100', 'items.*.evidence' => 'nullable|string|max:500',
+            'items.*.source' => 'in:org,emp', 'items.*.target' => 'nullable|string|max:500', 'items.*.indicator' => 'nullable|string|max:500', 'items.*.achieved' => 'nullable|string|max:20000', 'items.*.pct' => 'nullable|numeric|min:0|max:100', 'items.*.evidence' => 'nullable|string|max:500',
             'items.*.obstacles' => 'nullable|string|max:5000', 'items.*.solutions' => 'nullable|string|max:5000', 'items.*.next_target' => 'nullable|string|max:5000', 'items.*.notes' => 'nullable|string|max:5000',
             'dev' => 'nullable|array', 'dev.program' => 'nullable|string|max:200', 'dev.provider' => 'nullable|string|max:120', 'dev.completed' => 'boolean', 'dev.applied' => 'boolean', 'dev.notes' => 'nullable|string|max:1000']);
         // §35: up to 3 own items, each weighing at most 15 (the template may be stricter, never looser)
@@ -104,11 +104,14 @@ class ReportController extends Controller
             $old = $prev[$id] ?? [];
             $isOrg = ($old['source'] ?? $i['source'] ?? 'org') !== 'emp';
             $merged = array_merge($old, $i, ['id' => $id, 'self_score' => $i['pct'] ?? null, 'mgr_note' => $old['mgr_note'] ?? null, 'mgr_score' => $old['mgr_score'] ?? null, 'source' => $isOrg ? 'org' : 'emp', 'weight' => $isOrg ? ($old['weight'] ?? 0) : ($i['weight'] ?? ($old['weight'] ?? 0))]);
-            if ($isOrg && $old) {
-                $merged['title'] = $old['title'];
+            if ($isOrg && $old) { // HR's item, target and indicator are fixed
+                foreach (['title', 'target', 'indicator', 'axis'] as $k) {
+                    $merged[$k] = $old[$k] ?? null;
+                }
             }
             // an own item changed after the manager's decision goes back to the manager for approval
-            if (! $isOrg && $old && (($old['title'] ?? '') !== ($merged['title'] ?? '') || (float) ($old['weight'] ?? 0) !== (float) ($merged['weight'] ?? 0))) {
+            if (! $isOrg && $old && (($old['title'] ?? '') !== ($merged['title'] ?? '') || (float) ($old['weight'] ?? 0) !== (float) ($merged['weight'] ?? 0)
+                || ($old['target'] ?? '') !== ($merged['target'] ?? '') || ($old['indicator'] ?? '') !== ($merged['indicator'] ?? ''))) {
                 $merged['mgr_approved'] = null;
             }
 
@@ -168,7 +171,7 @@ class ReportController extends Controller
     {
         $acc = Access::for();
         $period = $request->input('period', now()->format('Y-m'));
-        $ids = $acc->employees()->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->pluck('id');
+        $ids = $acc->employees('PRF')->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->pluck('id');
         $reps = MonthlyReport::with('employee:id,name,emp_no,manager_id', 'company:id,name')->whereIn('employee_id', $ids)->where('period', $period)->get()->keyBy('employee_id');
         $emps = Employee::whereIn('id', $ids)->with('company:id,name')->orderBy('name')->get(['id', 'name', 'emp_no', 'company_id', 'manager_id']);
 
@@ -183,17 +186,36 @@ class ReportController extends Controller
      * Reports of several employees for one month, ready to export as one workbook (a sheet per employee):
      * the submitted / draft report when there is one, otherwise the employee's blank form.
      */
+    /**
+     * Development of the month, read from the development register (owner's note: the monthly report includes the
+     * development taken during the month automatically): verified records counted in the month, plus records of the
+     * month still awaiting verification (shown, not yet counted).
+     */
+    public static function devFor(Employee $e, string $period): array
+    {
+        $start = $period.'-01';
+        $end = Carbon::parse($start)->endOfMonth()->toDateString();
+        $names = \App\Models\Lookup::where('group', 'dev_activities')->pluck('name', 'code');
+
+        return \App\Models\DevRecord::where('employee_id', $e->id)
+            ->where(fn ($q) => $q->where(fn ($w) => $w->where('status', 'verified')->where('points_month', $period))
+                ->orWhere(fn ($w) => $w->whereIn('status', ['planned', 'pending'])->where(fn ($x) => $x->whereBetween('from', [$start, $end])->orWhereBetween('to', [$start, $end]))))
+            ->orderBy('from')->get(['id', 'program', 'provider', 'activity', 'hours', 'points', 'status', 'from', 'to'])
+            ->map(fn ($x) => $x->toArray() + ['activity_name' => $names[$x->activity] ?? null, 'status_label' => \App\Models\DevRecord::STATUSES[$x->status] ?? $x->status, 'counted' => $x->status === 'verified'])
+            ->values()->all();
+    }
+
     public function exportData(Request $request)
     {
         $d = $request->validate(['period' => 'required|date_format:Y-m', 'employee_ids' => 'required|array|max:300', 'employee_ids.*' => 'integer']);
-        $emps = Access::for()->employees()->whereIn('employees.id', $d['employee_ids'])->with('company:id,name', 'jobTitle:id,name', 'manager:id,name')->orderBy('name')->get();
+        $emps = Access::for()->employees('PRF')->whereIn('employees.id', $d['employee_ids'])->with('company:id,name', 'jobTitle:id,name', 'manager:id,name')->orderBy('name')->get();
         $reps = MonthlyReport::whereIn('employee_id', $emps->pluck('id'))->where('period', $d['period'])->get()->keyBy('employee_id');
 
         return $emps->map(function (Employee $e) use ($reps, $d) {
             $r = $reps[$e->id] ?? null;
 
             return ['info' => ['name' => $e->name, 'company' => $e->company?->name, 'job' => $e->jobTitle?->name, 'manager' => $e->manager?->name, 'period' => $d['period'],
-                'status' => $r ? (MonthlyReport::STATUSES[$r->status] ?? $r->status) : 'لم يبدأ'],
+                'status' => $r ? (MonthlyReport::STATUSES[$r->status] ?? $r->status) : 'لم يبدأ', 'dev' => self::devFor($e, $d['period']), 'dev_points' => EvaluationService::devPoints($e, $d['period'])],
                 'items' => $r && count($r->items) ? $r->items : self::itemsFrom(EvaluationService::reportTemplateFor($e))];
         })->values();
     }
@@ -302,7 +324,7 @@ class ReportController extends Controller
     {
         abort_unless($request->user()->isHr(), 403);
         $period = $request->input('period', now()->subMonthNoOverflow()->format('Y-m'));
-        $ids = Access::for()->employees()->where('status', '!=', 'terminated')->pluck('id');
+        $ids = Access::for()->employees('PRF')->where('status', '!=', 'terminated')->pluck('id');
         $done = MonthlyReport::whereIn('employee_id', $ids)->where('period', $period)->whereNotIn('status', ['draft', 'returned'])->pluck('employee_id');
         $late = Employee::whereIn('id', $ids)->whereNotIn('id', $done)->get(['id', 'name', 'manager_id']);
         foreach ($late as $e) {
@@ -337,18 +359,26 @@ class ReportController extends Controller
         $period = $request->input('period', now()->format('Y-m'));
         EvaluationService::ensureWeeks($e, $period);
 
-        return WeeklyReport::where('employee_id', $e->id)->where('week_start', 'like', "$period-%")->orderByDesc('week_start')->get();
+        return WeeklyReport::where('employee_id', $e->id)->where('week_start', 'like', "$period-%")->orderByDesc('week_start')->get()
+            ->map(fn ($w) => $w->toArray() + ['due_at' => EvaluationService::weekDue($w->setRelation('employee', $e))->toDateTimeString(), 'due_rule' => EvaluationService::weekDueLabel($e)]);
     }
 
+    /**
+     * Plan item: axis / item / indicator, the target for its period (a month or 3 months, or taken from the monthly
+     * report) and this week's share of it (target); at the end of the week the achievement and next week's target.
+     */
     private const WEEK_ITEM_RULES = ['items' => 'nullable|array|max:30', 'items.*.axis' => 'nullable|string|max:120', 'items.*.title' => 'required|string|max:300', 'items.*.kpi' => 'nullable|string|max:300',
-        'items.*.target' => 'nullable|string|max:500', 'items.*.achieved' => 'nullable|string|max:3000'];
+        'items.*.target' => 'nullable|string|max:500', 'items.*.achieved' => 'nullable|string|max:3000', 'items.*.horizon' => 'nullable|in:month,quarter',
+        'items.*.period_target' => 'nullable|string|max:500', 'items.*.next_target' => 'nullable|string|max:500', 'items.*.source' => 'nullable|in:monthly,prev,own'];
 
     /** §34: the week's plan (axis / item / indicator / weekly target) goes up at the start of the week for the manager to approve. */
     public function weeklyPlan(Request $request, WeeklyReport $week)
     {
         abort_unless($week->employee_id === $request->user()->employee_id, 403);
         $d = $request->validate(self::WEEK_ITEM_RULES);
-        $week->update(['items' => array_values($d['items'] ?? []), 'plan_status' => 'submitted']);
+        abort_if(in_array($week->status, ['submitted', 'late'], true), 422, 'رُفع تقرير هذا الأسبوع ولا تُعدَّل خطته');
+        abort_unless($d['items'] ?? [], 422, 'أضف بنود الخطة أولًا');
+        $week->update(['items' => array_values($d['items']), 'plan_status' => 'submitted', 'plan_approved_at' => null, 'plan_approved_by' => null]);
         $e = $week->employee;
         $mgr = $e->manager_id ? User::where('employee_id', $e->manager_id)->where('active', true)->value('id') : null;
         Audit::notify($mgr ?: Access::hrUsersFor($e->company_id, 'PRF'), 'خطة أسبوعية بانتظار اعتمادك', $e->name.' — أسبوع '.$week->week_start->toDateString(), 'approval', ['screen' => 'reports']);
@@ -356,31 +386,69 @@ class ReportController extends Controller
         return $week;
     }
 
+    /** The direct manager approves the week's plan (and may adjust it), or returns it to the employee with a note. */
     public function weeklyPlanApprove(Request $request, WeeklyReport $week)
     {
         $u = $request->user();
         abort_unless(Access::for()->isManagerOf($week->employee) || $u->isHr() || $u->hasRole('super'), 403);
-        $d = $request->validate(['items' => 'nullable|array|max:30', 'note' => 'nullable|string|max:500'] + array_slice(self::WEEK_ITEM_RULES, 1));
+        $d = $request->validate(['items' => 'nullable|array|max:30', 'note' => 'nullable|string|max:500', 'decision' => 'nullable|in:approve,return'] + array_slice(self::WEEK_ITEM_RULES, 1));
+        $empUser = User::where('employee_id', $week->employee_id)->value('id');
+        if (($d['decision'] ?? 'approve') === 'return') {
+            abort_unless(trim((string) ($d['note'] ?? '')) !== '', 422, 'اكتب سبب إرجاع الخطة');
+            $week->update(['plan_status' => 'returned', 'mgr_note' => $d['note']]);
+            Audit::notify($empUser, 'أُرجعت خطتك الأسبوعية للتعديل', 'أسبوع '.$week->week_start->format('d/m/Y').' — '.$d['note'], 'warn', ['screen' => 'reports']);
+
+            return $week;
+        }
         $week->update(['items' => isset($d['items']) ? array_values($d['items']) : $week->items, 'plan_status' => 'approved', 'plan_approved_at' => now(), 'plan_approved_by' => $u->id, 'mgr_note' => $d['note'] ?? $week->mgr_note]);
-        Audit::notify(User::where('employee_id', $week->employee_id)->value('id'), 'اعتُمدت خطتك الأسبوعية', 'أسبوع '.$week->week_start->toDateString(), 'ok', ['screen' => 'reports']);
+        Audit::notify($empUser, 'اعتُمدت خطتك الأسبوعية', 'أسبوع '.$week->week_start->format('d/m/Y'), 'ok', ['screen' => 'reports']);
 
         return $week;
     }
 
-    /** Items to seed the weekly plan from (§34): the month's report targets (axis, item, indicator, monthly target). */
+    /**
+     * Items to seed the weekly plan from (§34 + owner's note): source=monthly — the month's report items with their
+     * monthly target, broken down per week (a numeric target ÷ the weeks of the month); source=prev — last week's items
+     * with the "next week" targets written at its end.
+     */
     public function weeklyFromMonthly(Request $request, WeeklyReport $week)
     {
         abort_unless($week->employee_id === $request->user()->employee_id || Access::for()->canSeeEmployee($week->employee), 403);
+        if ($request->input('source') === 'prev') {
+            $prev = WeeklyReport::where('employee_id', $week->employee_id)->where('week_start', '<', $week->week_start->toDateString())->orderByDesc('week_start')->first();
+
+            return collect($prev?->items ?? [])->map(fn ($i) => ['axis' => $i['axis'] ?? '', 'title' => $i['title'] ?? '', 'kpi' => $i['kpi'] ?? '', 'horizon' => $i['horizon'] ?? 'month',
+                'period_target' => $i['period_target'] ?? '', 'target' => $i['next_target'] ?? '', 'achieved' => '', 'source' => 'prev'])->values();
+        }
         $rep = MonthlyReport::where('employee_id', $week->employee_id)->where('period', $week->week_start->format('Y-m'))->first();
         $items = $rep?->items ?: self::itemsFrom(EvaluationService::reportTemplateFor($week->employee));
+        $weeks = max(1, WeeklyReport::where('employee_id', $week->employee_id)->where('week_start', 'like', $week->week_start->format('Y-m').'-%')->count());
 
-        return collect($items)->map(fn ($i) => ['axis' => $i['axis'] ?? $i['group'] ?? '', 'title' => $i['title'] ?? '', 'kpi' => $i['indicator'] ?? $i['kpi'] ?? '', 'target' => $i['target'] ?? '', 'achieved' => ''])->values();
+        return collect($items)->map(fn ($i) => ['axis' => $i['axis'] ?? $i['group'] ?? '', 'title' => $i['title'] ?? '', 'kpi' => $i['indicator'] ?? $i['kpi'] ?? '', 'horizon' => 'month',
+            'period_target' => $i['target'] ?? '', 'target' => self::weekShare((string) ($i['target'] ?? ''), $weeks), 'achieved' => '', 'source' => 'monthly'])->values();
+    }
+
+    /** A week's share of a period target: "20 عميل" over 4 weeks → "5 عميل"; text targets are left for the employee. */
+    public static function weekShare(string $target, float $weeks): string
+    {
+        $t = strtr(trim($target), ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9', '٫' => '.']);
+        if (! preg_match('/^(\d+(?:\.\d+)?)\s*(%?)\s*(.*)$/u', $t, $m)) {
+            return '';
+        }
+        if ($m[2] === '%') {
+            return $m[1].'%'.($m[3] !== '' ? ' '.$m[3] : ''); // a rate stays the same every week
+        }
+        $share = round((float) $m[1] / max(1, $weeks), 1);
+
+        return rtrim(rtrim(number_format($share, 1, '.', ''), '0'), '.').($m[3] !== '' ? ' '.$m[3] : '');
     }
 
     /** End of the week (§34): what was achieved per item, obstacles, and the next week's plan. Late after the first day of the following week. */
     public function weeklySubmit(Request $request, WeeklyReport $week)
     {
         abort_unless($week->employee_id === $request->user()->employee_id, 403);
+        // owner's note: the weekly report follows the weekly plan the employee raised for the manager's approval
+        abort_unless(in_array($week->plan_status, ['submitted', 'approved'], true), 422, $week->plan_status === 'returned' ? 'أعاد مديرك خطة هذا الأسبوع — عدّلها وأعد رفعها أولًا' : 'ارفع خطة هذا الأسبوع أولًا ليعتمدها مديرك، ثم ارفع المنجز');
         $d = $request->validate(['done' => 'nullable|string|max:3000', 'next' => 'nullable|string|max:3000', 'blockers' => 'nullable|string|max:2000'] + self::WEEK_ITEM_RULES);
         $items = isset($d['items']) ? array_values($d['items']) : ($week->items ?? []);
         if (trim((string) ($d['done'] ?? '')) === '' && ! collect($items)->contains(fn ($i) => trim((string) ($i['achieved'] ?? '')) !== '')) {
@@ -397,27 +465,64 @@ class ReportController extends Controller
         return $week;
     }
 
-    /** HR / the manager switch weekly reports on or off for one employee (§34). */
+    /**
+     * HR / the direct manager set, per employee (§34 + owner's notes): weekly report on/off, its deadline (last day of
+     * the week or first day of the next), and the daily achievement at check-out.
+     */
     public function weeklyToggle(Request $request, Employee $employee)
     {
         $u = $request->user();
-        abort_unless(Access::for()->isManagerOf($employee) || $u->isHr() || $u->hasRole('super'), 403);
-        $d = $request->validate(['required' => 'nullable|boolean']);
-        $employee->update(['weekly_report_required' => $d['required'] ?? null]);
-        Audit::log('employees', $employee->id, 'weekly_report', null, ['required' => $d['required'] ?? null]);
+        abort_unless(Access::for()->isManagerOf($employee) || ($u->isHr() && Access::for()->can('PRF', 'edit', ['employee' => $employee])) || $u->hasRole('super'), 403);
+        $d = $request->validate(['required' => 'nullable|boolean', 'due' => 'nullable|in:end,next', 'daily_note' => 'nullable|boolean']);
+        $before = $employee->only('weekly_report_required', 'weekly_due', 'daily_note_required');
+        $patch = [];
+        if ($request->has('required')) {
+            $patch['weekly_report_required'] = $d['required'] ?? null;
+        }
+        if ($request->has('due')) {
+            $patch['weekly_due'] = $d['due'] ?? null;
+        }
+        if ($request->has('daily_note')) {
+            $patch['daily_note_required'] = (bool) $d['daily_note'];
+        }
+        $employee->update($patch);
+        Audit::log('employees', $employee->id, 'weekly_report', $before, $patch);
+        $e = $employee->fresh();
+        if ($patch && ($empUser = User::where('employee_id', $e->id)->value('id'))) {
+            $msg = array_filter([
+                array_key_exists('weekly_report_required', $patch) ? 'التقرير الأسبوعي: '.(EvaluationService::weeklyRequired($e) ? 'مطلوب' : 'غير مطلوب') : null,
+                array_key_exists('weekly_due', $patch) ? 'موعد رفعه: '.EvaluationService::weekDueLabel($e) : null,
+                array_key_exists('daily_note_required', $patch) ? 'المنجز اليومي عند الانصراف: '.($e->daily_note_required ? 'مطلوب' : 'غير مطلوب') : null,
+            ]);
+            Audit::notify($empUser, 'حدّث مديرك إعدادات تقاريرك', implode(' · ', $msg), 'info', ['screen' => 'reports']);
+        }
 
-        return ['required' => EvaluationService::weeklyRequired($employee->fresh()), 'override' => $employee->weekly_report_required];
+        return ['required' => EvaluationService::weeklyRequired($e), 'override' => $e->weekly_report_required, 'due' => $e->weekly_due, 'due_label' => EvaluationService::weekDueLabel($e), 'daily_note' => (bool) $e->daily_note_required];
     }
 
     public function weeklyTeam(Request $request)
     {
         $period = $request->input('period', now()->format('Y-m'));
-        $ids = Access::for()->employees()->where('status', '!=', 'terminated')->pluck('id');
+        $ids = Access::for()->employees('PRF')->where('status', '!=', 'terminated')->pluck('id');
         foreach (Employee::whereIn('id', $ids)->get() as $e) {
             EvaluationService::ensureWeeks($e, $period);
         }
 
-        return WeeklyReport::with('employee:id,name,emp_no')->whereIn('employee_id', $ids)->where('week_start', 'like', "$period-%")->orderBy('employee_id')->orderBy('week_start')->get();
+        return WeeklyReport::with('employee:id,name,emp_no,manager_id,company_id,weekly_due,weekly_report_required,daily_note_required')->whereIn('employee_id', $ids)->where('week_start', 'like', "$period-%")->orderBy('employee_id')->orderBy('week_start')->get()
+            ->map(fn ($w) => $w->toArray() + ['due_at' => EvaluationService::weekDue($w)->toDateTimeString()]);
+    }
+
+    /** The manager's team with their report settings (weekly report, its deadline, daily achievement). */
+    public function teamSettings(Request $request)
+    {
+        $acc = Access::for();
+        $u = $request->user();
+        $q = $u->isHr() || $u->hasRole('super') ? $acc->employees('PRF') : Employee::where('manager_id', $u->employee_id ?: 0);
+
+        return $q->where('status', '!=', 'terminated')->orderBy('name')->get(['id', 'name', 'emp_no', 'company_id', 'manager_id', 'weekly_report_required', 'weekly_due', 'daily_note_required', 'schedule_id', 'work_hours', 'week_pattern'])
+            ->map(fn (Employee $e) => ['id' => $e->id, 'name' => $e->name, 'emp_no' => $e->emp_no, 'weekly' => EvaluationService::weeklyRequired($e), 'weekly_override' => $e->weekly_report_required,
+                'due' => $e->weekly_due, 'due_label' => EvaluationService::weekDueLabel($e), 'daily_note' => (bool) $e->daily_note_required,
+                'daily_note_company' => (bool) Settings::get('dailyNoteEnabled', $e->company_id, false), 'week' => $e->sixDayWeek() ? 'السبت–الخميس' : 'الأحد–الخميس']);
     }
 
     // ---------- helpers ----------
@@ -480,8 +585,7 @@ class ReportController extends Controller
             'timeline' => array_values(array_filter([$r->submitted_at ? ['at' => $r->submitted_at, 'label' => 'رُفع'] : null, $r->mgr_at ? ['at' => $r->mgr_at, 'label' => 'راجعه المدير'] : null, $r->hr_at ? ['at' => $r->hr_at, 'label' => 'راجعته الموارد البشرية'] : null, $r->ceo_at ? ['at' => $r->ceo_at, 'label' => 'اعتمده الرئيس'] : null])),
             'preview' => $acc->can('PRF', 'view', ['employee' => $e]) || $r->employee_id === $u->employee_id ? EvaluationService::compute($e, $r->period) : null,
             // §35: the development achieved in the month is pulled from the development register automatically
-            'dev_records' => \App\Models\DevRecord::where('employee_id', $e->id)->where('status', 'verified')->where('points_month', $r->period)->orderByDesc('points')->get(['id', 'program', 'provider', 'activity', 'hours', 'points'])
-                ->map(fn ($x) => $x->toArray() + ['activity_name' => \App\Models\Lookup::where('group', 'dev_activities')->where('code', $x->activity)->value('name')]),
+            'dev_records' => self::devFor($e, $r->period),
             'dev_points' => EvaluationService::devPoints($e, $r->period),
         ];
     }

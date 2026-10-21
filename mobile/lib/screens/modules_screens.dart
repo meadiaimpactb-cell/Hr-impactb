@@ -7,6 +7,9 @@ import '../state.dart';
 import '../widgets.dart';
 import 'compose_mail_screen.dart';
 
+export 'announcements_screen.dart' show AnnouncementsScreen, TeamAlertScreen;
+export 'reports_screens.dart' show MonthlyReportScreen, WeeklyScreen, WeekScreen;
+
 const _custodyAck = 'أقرّ بأنني استلمت هذه العهدة، وأتحمّل مسؤولية المحافظة عليها واستخدامها في أغراض العمل فقط، وأوافق على استيفاء ما لا يُسوّى منها وفق أحكام الباب الثامن (المادة 43)، وأتعهد بتسوية العهدة النقدية بالفواتير والمستندات المؤيدة خلال المدة المحددة في المادة (44).';
 
 /// Shared loader: fetch → list with pull-to-refresh, error and empty states.
@@ -139,30 +142,7 @@ class CustodyScreen extends StatelessWidget {
       );
 }
 
-// ---------------- Announcements ----------------
-class AnnouncementsScreen extends StatelessWidget {
-  const AnnouncementsScreen({super.key});
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(tr('الإعلانات'))),
-        body: ApiList(path: '/announcements', builder: (ctx, data, reload) {
-          final list = data as List;
-          if (list.isEmpty) return EmptyView(tr('لا توجد بيانات'));
-          return ListView(padding: const EdgeInsets.all(12), children: [
-            for (final a in list)
-              Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(a['title'], style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                Text('${a['sender']} · ${(a['published_at'] ?? '').toString().substring(0, 10)}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                const SizedBox(height: 6),
-                Text(a['body'] ?? ''),
-                if (a['require_ack'] == true && a['ack_at'] == null && a['is_sender'] != true)
-                  Align(alignment: AlignmentDirectional.centerEnd, child: FilledButton.icon(icon: const Icon(Icons.check_circle_outline), label: Text(tr('أقرّ بالاطلاع')), onPressed: () => act(ctx, () => Api.post('/announcements/${a['id']}/ack'), reload))),
-                if (a['ack_at'] != null) Text(tr('أقررت بالاطلاع'), style: const TextStyle(color: Colors.green, fontSize: 12)),
-              ]))),
-          ]);
-        }),
-      );
-}
+// Announcements: see announcements_screen.dart (exported from here for older imports)
 
 // ---------------- Documents ----------------
 class DocumentsScreen extends StatelessWidget {
@@ -219,100 +199,7 @@ class EvaluationScreen extends StatelessWidget {
       );
 }
 
-// ---------------- Monthly report ----------------
-class MonthlyReportScreen extends StatefulWidget {
-  const MonthlyReportScreen({super.key});
-  @override
-  State<MonthlyReportScreen> createState() => _MonthlyReportScreenState();
-}
-
-class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
-  Map<String, dynamic>? rep;
-  bool busy = false;
-  @override
-  void initState() { super.initState(); load(); }
-  Future<void> load() async {
-    try {
-      final r = await Api.get('/reports/monthly/mine');
-      if (mounted) setState(() => rep = Map<String, dynamic>.from(r));
-    } catch (e) {
-      if (mounted) toast(context, errText(e), error: true);
-    }
-  }
-
-  Future<void> save({bool submit = false}) async {
-    setState(() => busy = true);
-    try {
-      await Api.put('/reports/monthly/${rep!['id']}', {'items': rep!['items'], 'dev': rep!['dev']});
-      if (submit) await Api.post('/reports/monthly/${rep!['id']}/submit');
-      if (mounted) toast(context, tr(submit ? 'أُرسل التقرير إلى مديرك' : 'حُفظت المسودة'));
-      load();
-    } catch (e) {
-      if (mounted) toast(context, errText(e), error: true);
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final r = rep;
-    return Scaffold(
-      appBar: AppBar(title: Text(tr('تقريري الشهري'))),
-      body: r == null
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(padding: const EdgeInsets.all(12), children: [
-              Card(child: ListTile(title: Text('${r['period']} — ${r['status_label']}', style: const TextStyle(fontWeight: FontWeight.w800)), subtitle: r['preview'] != null ? Text('${tr('الدرجة المتوقعة')} ${r['preview']['score']} · ${r['preview']['grade']['label']}') : null)),
-              if (r['return_note'] != null) Card(color: const Color(0xFFFDE8E6), child: ListTile(title: Text('${tr('سبب الإرجاع')}: ${r['return_note']}'))),
-              for (final it in (r['items'] as List))
-                Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${it['title']}  (${tr('وزن')} ${it['weight']})', style: const TextStyle(fontWeight: FontWeight.w800)),
-                  if (it['target'] != null) Text('${it['target']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                  const SizedBox(height: 8),
-                  TextFormField(initialValue: it['achieved'] ?? '', maxLines: 2, enabled: r['can_edit'] == true, decoration: InputDecoration(labelText: tr('ماذا أنجزت؟')), onChanged: (v) => it['achieved'] = v),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Expanded(child: Slider(value: (num.tryParse('${it['pct'] ?? 0}') ?? 0).toDouble().clamp(0.0, 100.0).toDouble(), min: 0, max: 100, divisions: 20, label: '${it['pct'] ?? 0}%', onChanged: r['can_edit'] == true ? (v) => setState(() => it['pct'] = v.round()) : null)),
-                    SizedBox(width: 48, child: Text('${it['pct'] ?? 0}%', style: const TextStyle(fontWeight: FontWeight.w800))),
-                  ]),
-                  if (it['mgr_score'] != null) Text('${tr('تقييم المدير')}: ${it['mgr_score']}% ${it['mgr_note'] != null ? '— ${it['mgr_note']}' : ''}', style: const TextStyle(color: Colors.blue, fontSize: 12)),
-                ]))),
-              if (r['can_edit'] == true)
-                Row(children: [
-                  Expanded(child: OutlinedButton(onPressed: busy ? null : () => save(), child: Text(tr('حفظ مسودة')))),
-                  const SizedBox(width: 8),
-                  Expanded(child: FilledButton(onPressed: busy ? null : () => save(submit: true), child: Text(tr('إرسال للمدير')))),
-                ]),
-            ]),
-    );
-  }
-}
-
-// ---------------- Weekly ----------------
-class WeeklyScreen extends StatelessWidget {
-  const WeeklyScreen({super.key});
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(tr('التقرير الأسبوعي'))),
-        body: ApiList(path: '/reports/weekly/mine', builder: (ctx, data, reload) {
-          final list = data as List;
-          const labels = {'submitted': 'في الموعد', 'late': 'متأخر', 'missing': 'لم يُرفع'};
-          const colors = {'submitted': Colors.green, 'late': Colors.orange, 'missing': Colors.red};
-          return ListView(padding: const EdgeInsets.all(12), children: [
-            for (final w in list)
-              Card(child: ListTile(
-                title: Text('${w['week_start']} → ${w['week_end']}', style: const TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: Text(w['done'] ?? tr('لم يُرفع')),
-                trailing: Text(tr(labels[w['status']] ?? ''), style: TextStyle(color: colors[w['status']], fontWeight: FontWeight.w700)),
-                onTap: () async {
-                  final txt = await promptText(ctx, tr('ما أُنجز هذا الأسبوع'), lines: 5);
-                  if (txt != null && txt.isNotEmpty && ctx.mounted) act(ctx, () => Api.post('/reports/weekly/${w['id']}', {'done': txt}), reload, ok: 'رُفع التقرير الأسبوعي');
-                },
-              )),
-          ]);
-        }),
-      );
-}
+// Monthly and weekly reports: see reports_screens.dart
 
 // ---------------- Letters ----------------
 class LettersScreen extends StatelessWidget {

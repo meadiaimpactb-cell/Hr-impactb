@@ -71,7 +71,7 @@
 
   <template v-else-if="tab === 'recon'">
     <div class="row mb">
-      <input v-model="reconPeriod" type="month" class="in" style="width:auto" @change="load" />
+      <MonthPicker v-model="reconPeriod" @change="load" />
       <button class="btn sec sm" :disabled="!recon?.rows?.length" @click="exportRecon"><Icon name="download" :size="15" /> تصدير Excel</button>
     </div>
     <div v-if="recon" class="grid g4 mb">

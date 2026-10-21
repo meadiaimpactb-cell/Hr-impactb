@@ -49,15 +49,15 @@ class DocumentController extends Controller
         $scope = $request->input('scope', 'employee');
         $q = Document::where('scope', $scope);
         if ($scope === 'employee') {
-            $q->whereIn('owner_id', $acc->employees()->pluck('id'))->with('employee:id,name,emp_no,company_id');
+            $q->whereIn('owner_id', $acc->employees('DOC')->pluck('id'))->with('employee:id,name,emp_no,company_id');
         } else {
-            $q->whereIn('owner_id', $acc->companyIds())->with('company:id,name');
+            $q->whereIn('owner_id', $acc->companyIds('DOC'))->with('company:id,name');
         }
         $rows = $q->orderBy('expiry_date')->get()->map(fn ($d) => $this->row($d));
         // missing mandatory documents per employee / company
         $types = collect(Lookup::grouped()['document_types'] ?? [])->filter(fn ($t) => ($t['meta']['scope'] ?? '') === $scope);
         $mandatory = $types->filter(fn ($t) => ! empty($t['meta']['mandatory']))->pluck('code');
-        $owners = $scope === 'employee' ? $acc->employees()->where('status', '!=', 'terminated')->get(['id', 'name']) : Company::whereIn('id', $acc->companyIds())->get(['id', 'name']);
+        $owners = $scope === 'employee' ? $acc->employees('DOC')->where('status', '!=', 'terminated')->get(['id', 'name']) : Company::whereIn('id', $acc->companyIds('DOC'))->get(['id', 'name']);
         $have = $rows->groupBy('owner_id')->map(fn ($g) => $g->pluck('type')->all());
         $missing = [];
         foreach ($owners as $o) {
@@ -149,7 +149,7 @@ class DocumentController extends Controller
             $e = Employee::findOrFail($ownerId);
             abort_unless($acc->can('DOC', $action, ['employee' => $e]) || ($e->id === auth()->user()->employee_id && $action === 'edit' && Settings::get('employeeCanUploadDocs', $e->company_id, true)), 403);
         } else {
-            abort_unless($acc->can('DOC', $action, ['company_id' => $ownerId]) && in_array($ownerId, $acc->companyIds(), true), 403);
+            abort_unless($acc->can('DOC', $action, ['company_id' => $ownerId]) && in_array($ownerId, $acc->companyIds('DOC'), true), 403);
         }
     }
 

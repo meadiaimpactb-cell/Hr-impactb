@@ -71,7 +71,7 @@
   </template>
 
   <div v-else-if="tab === 'cal'" class="card">
-    <div class="row mb"><input v-model="month" type="month" class="in" style="width:auto" @change="load" /></div>
+    <div class="row mb"><MonthPicker v-model="month" @change="load" /></div>
     <div class="cal">
       <div v-for="(d, i) in DAYS_AR" :key="'h' + i" class="center b small muted">{{ d }}</div>
       <div v-for="i in firstDow" :key="'e' + i" />

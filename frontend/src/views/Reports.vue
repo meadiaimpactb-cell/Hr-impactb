@@ -1,7 +1,7 @@
 <template>
   <div class="page-h">
     <div><h1>{{ t('التقارير الدورية') }}</h1><p>تقرير شهري لكل موظف من قالب مرن (بنود بأوزان + بنود شخصية) يمر بالمدير ثم الموارد البشرية ثم الرئيس ويولّد التقييم آليًا · تقرير أسبوعي قصير يؤثر في محور الانضباط</p></div>
-    <div class="acts"><input v-model="period" type="month" class="in" style="width:auto" @change="load" /></div>
+    <div class="acts"><MonthPicker v-model="period" @change="load" /></div>
   </div>
   <div class="tabs"><button v-for="x in tabs" :key="x[0]" :class="{ on: tab === x[0] }" @click="tab = x[0]; load()">{{ x[1] }}</button></div>
 
@@ -37,13 +37,13 @@
         <ReportItems :items="rep.items" :mode="rep.can_edit ? 'edit' : 'view'" :max-emp-weight="rep.limits?.emp_weight || rep.template?.employee_item_weight_max || 15" @remove="(it) => rep.items.splice(rep.items.indexOf(it), 1)" />
       </div>
       <div class="card">
-        <h3>التطوير هذا الشهر</h3>
-        <div class="fr">
-          <div class="fg"><label>البرنامج</label><input v-model="rep.dev.program" class="in" :disabled="!rep.can_edit" /></div>
-          <div class="fg"><label>الجهة</label><input v-model="rep.dev.provider" class="in" :disabled="!rep.can_edit" /></div>
-        </div>
-        <div class="row"><label class="chk"><input v-model="rep.dev.completed" type="checkbox" :disabled="!rep.can_edit" /> أكملت البرنامج</label><label class="chk"><input v-model="rep.dev.applied" type="checkbox" :disabled="!rep.can_edit" /> طبّقت ما تعلمته في العمل</label></div>
-        <div class="fg"><label>ملاحظات</label><textarea v-model="rep.dev.notes" class="in" rows="2" :disabled="!rep.can_edit" /></div>
+        <h3>التطوير خلال الشهر <span class="sub">يُدرج تلقائيًا من سجل التطوير، ولا يحتاج كتابة · {{ rep.dev_points?.total ?? 0 }} / {{ rep.dev_points?.target ?? 100 }} نقطة</span>
+          <span class="acts"><RouterLink class="btn sec xs" to="/development"><Icon name="plus" :size="14" /> إضافة نشاط تطوير</RouterLink></span></h3>
+        <div v-if="!rep.dev_records?.length" class="empty small">لا تطوير مسجّل لهذا الشهر. سجّل الدورات والقراءة والورش من «التطوير والتدريب» لتظهر هنا تلقائيًا.</div>
+        <div v-dt v-else class="tw"><table><thead><tr><th>البرنامج</th><th>الجهة</th><th>النوع</th><th>الفترة</th><th>الساعات</th><th>الحالة</th><th>النقاط</th></tr></thead>
+          <tbody><tr v-for="d in rep.dev_records" :key="d.id"><td><b>{{ d.program }}</b></td><td>{{ d.provider || '—' }}</td><td class="small">{{ d.activity_name || '—' }}</td><td class="small num">{{ fmtD(d.from) }}{{ d.to && d.to !== d.from ? ' — ' + fmtD(d.to) : '' }}</td><td class="num">{{ d.hours || '—' }}</td>
+            <td><span class="pill" :class="d.counted ? 'ok' : 'warn'">{{ d.status_label }}</span></td><td class="num">{{ d.counted ? d.points : '—' }}</td></tr></tbody></table></div>
+        <div class="fg mt"><label>ملاحظاتك على التطوير هذا الشهر (اختياري)</label><textarea v-model="rep.dev.notes" class="in" rows="2" :disabled="!rep.can_edit" /></div>
       </div>
       <div v-if="rep.timeline.length" class="card"><h3>المسار</h3><ul class="timeline"><li v-for="(x, i) in rep.timeline" :key="i"><b>{{ x.label }}</b> <span class="tiny muted">{{ fmtDT(x.at) }}</span></li></ul></div>
       <div v-if="rep.can_edit" class="row">
@@ -88,27 +88,47 @@
 
   <!-- Weekly -->
   <template v-else-if="tab === 'weekly'">
-    <div class="card">
-      <h3>أسابيعي <span class="sub">اللائحة §34: الخطة في أول يوم من الأسبوع ويعتمدها المشرف، والمنجز في آخر يوم منه أو أول يوم من الأسبوع التالي بحد أقصى · المتأخر برتقالي وغير المرفوع أحمر</span></h3>
+    <div v-if="auth.emp" class="card">
+      <h3>أسابيعي <span class="sub">الأسبوع من الأحد إلى الخميس (ومن السبت لمن يعمل 6 أيام) · ارفع خطة الأسبوع في أوله ليعتمدها مديرك، ثم المنجز قبل الموعد الذي حدده · المتأخر برتقالي وغير المرفوع أحمر ويُسجَّل في ملفك ويُخصم من تقييمك الشهري</span></h3>
       <div v-if="!weeks.length" class="empty">لا أسابيع مطلوبة منك هذا الشهر</div>
-      <div v-dt v-else class="tw"><table><thead><tr><th>الأسبوع</th><th>الخطة</th><th>التقرير</th><th>البنود</th><th>ما أُنجز</th><th /></tr></thead>
-        <tbody><tr v-for="w in weeks" :key="w.id">
-          <td class="num">{{ w.week_start }} → {{ w.week_end }}</td>
-          <td><span class="pill" :class="{ none: 'gray', submitted: 'info', approved: 'ok' }[w.plan_status || 'none']">{{ PLAN[w.plan_status || 'none'] }}</span></td>
-          <td><span class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[w.status]">{{ WEEK[w.status] }}</span></td>
+      <div v-dt v-else class="tw"><table><thead><tr><th>الأسبوع</th><th>موعد رفع المنجز</th><th>الخطة</th><th>التقرير</th><th>البنود</th><th>ما أُنجز</th><th /></tr></thead>
+        <tbody><tr v-for="w in weeks" :key="w.id" :class="{ 'wk-red': weekState(w) === 'missing', 'wk-orange': w.status === 'late' }">
+          <td class="num">{{ fmtD(w.week_start) }} → {{ fmtD(w.week_end) }}</td>
+          <td class="small"><span class="num">{{ fmtDT(w.due_at) }}</span><span class="tiny muted" style="display:block">{{ w.due_rule }}</span></td>
+          <td><span class="pill" :class="PLAN_C[w.plan_status || 'none']">{{ PLAN[w.plan_status || 'none'] }}</span><div v-if="w.plan_status === 'returned' && w.mgr_note" class="tiny bad">{{ w.mgr_note }}</div></td>
+          <td><span class="pill" :class="WEEK_C[weekState(w)]">{{ WEEK[weekState(w)] }}</span></td>
           <td class="small">{{ (w.items || []).length ? `${(w.items || []).length} بند` : '—' }}</td>
           <td class="small">{{ w.done || (w.items || []).filter((i) => i.achieved).map((i) => i.achieved).join(' · ') || '—' }}</td>
-          <td class="row" style="gap:4px;flex-wrap:nowrap"><button v-if="(w.plan_status || 'none') === 'none'" class="btn sec xs" @click="openWeek(w, 'plan')">خطة الأسبوع</button><button class="btn ghost xs" @click="openWeek(w, 'report')">{{ w.status === 'missing' ? 'رفع المنجز' : 'تعديل' }}</button></td>
+          <td class="row" style="gap:4px;flex-wrap:nowrap">
+            <button v-if="['none', 'returned', 'submitted'].includes(w.plan_status || 'none') && w.status === 'missing'" class="btn xs" :class="(w.plan_status || 'none') === 'submitted' ? 'ghost' : 'sec'" @click="openWeek(w, 'plan')">{{ (w.plan_status || 'none') === 'submitted' ? 'تعديل الخطة' : 'رفع خطة الأسبوع' }}</button>
+            <button v-if="['submitted', 'approved'].includes(w.plan_status)" class="btn xs" :class="w.status === 'missing' ? 'pri' : 'ghost'" @click="openWeek(w, 'report')">{{ w.status === 'missing' ? 'رفع المنجز' : 'تعديل المنجز' }}</button>
+          </td>
         </tr></tbody></table></div>
     </div>
     <div v-if="auth.isApprover" class="card">
-      <h3>لوحة أسابيع الفريق</h3>
-      <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th v-for="ws in weekStarts" :key="ws" class="num">{{ ws.slice(5) }}</th></tr></thead>
+      <h3>لوحة أسابيع الفريق <span class="sub">اضغط على أي أسبوع لعرضه، والخطط بانتظار اعتمادك معلَّمة «خطة»</span></h3>
+      <div v-if="!Object.keys(teamWeeksByEmp).length" class="empty">لا أسابيع للفريق في هذا الشهر</div>
+      <div v-dt v-else class="tw"><table><thead><tr><th>الموظف</th><th v-for="ws in weekStarts" :key="ws" class="num">{{ fmtD(ws).slice(0, 5) }}</th></tr></thead>
         <tbody><tr v-for="(rows, name) in teamWeeksByEmp" :key="name"><td><b>{{ name }}</b></td>
           <td v-for="ws in weekStarts" :key="ws">
-            <template v-if="rows[ws]"><span class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[rows[ws].status]" style="cursor:pointer" @click="teamWeek = rows[ws]">{{ WEEK[rows[ws].status] }}</span><span v-if="rows[ws].plan_status === 'submitted'" class="pill info" style="cursor:pointer" title="خطة بانتظار اعتمادك" @click="teamWeek = rows[ws]">خطة</span></template>
+            <template v-if="rows[ws]"><span class="pill" :class="WEEK_C[weekState(rows[ws])]" style="cursor:pointer" @click="openTeamWeek(rows[ws])">{{ WEEK[weekState(rows[ws])] }}</span><span v-if="rows[ws].plan_status === 'submitted'" class="pill info" style="cursor:pointer" title="خطة بانتظار اعتمادك" @click="openTeamWeek(rows[ws])">خطة</span></template>
             <span v-else class="muted">—</span>
           </td>
+        </tr></tbody></table></div>
+    </div>
+    <div v-if="auth.isApprover" class="card">
+      <h3>إعدادات تقارير الفريق <span class="sub">يحددها المدير المباشر (أو الموارد البشرية) لكل موظف: التقرير الأسبوعي وموعد رفعه، والمنجز اليومي عند الانصراف</span>
+        <span class="acts"><button class="btn ghost xs" @click="loadTeamSettings"><Icon name="refresh" :size="13" /> تحديث</button></span></h3>
+      <div v-if="!teamSettings.length" class="empty small">لا موظفين تابعين لك</div>
+      <div v-dt v-else class="tw"><table><thead><tr><th>الموظف</th><th>أيام العمل</th><th>التقرير الأسبوعي</th><th>موعد رفع المنجز</th><th>المنجز اليومي عند الانصراف</th></tr></thead>
+        <tbody><tr v-for="m in teamSettings" :key="m.id">
+          <td><b>{{ m.name }}</b><span class="tiny muted">{{ m.emp_no }}</span></td>
+          <td class="small">{{ m.week }}</td>
+          <td><select class="in" style="min-height:30px;width:auto" :value="m.weekly_override === null ? '' : m.weekly_override ? '1' : '0'" @change="setTeam(m, { required: $event.target.value === '' ? null : $event.target.value === '1' })">
+            <option value="">حسب إعداد الشركة ({{ m.weekly && m.weekly_override === null ? 'مطلوب' : 'افتراضي' }})</option><option value="1">مطلوب</option><option value="0">غير مطلوب</option></select></td>
+          <td><select class="in" style="min-height:30px;width:auto" :value="m.due || ''" :disabled="!m.weekly" @change="setTeam(m, { due: $event.target.value || null })">
+            <option value="">الافتراضي ({{ m.due ? 'أول يوم من الأسبوع التالي' : m.due_label }})</option><option value="end">آخر يوم في الأسبوع</option><option value="next">أول يوم من الأسبوع التالي</option></select></td>
+          <td><label class="chk"><input type="checkbox" :checked="m.daily_note" @change="setTeam(m, { daily_note: $event.target.checked })" /> مطلوب</label><span v-if="m.daily_note_company && !m.daily_note" class="tiny muted">(مطلوب للجميع من إعداد الشركة)</span></td>
         </tr></tbody></table></div>
     </div>
   </template>
@@ -127,28 +147,49 @@
   </template>
 
 
-  <Modal v-if="weekForm" :title="`${weekMode === 'plan' ? 'خطة' : 'تقرير'} الأسبوع ${weekForm.week_start}`" size="wide" @close="weekForm = null">
-    <div class="row mb" style="gap:6px"><button class="btn sec xs" @click="fromMonthly"><Icon name="download" :size="13" /> جلب البنود من التقرير الشهري</button><button class="btn ghost xs" @click="weekForm.items.push({ axis: '', title: '', kpi: '', target: '', achieved: '' })"><Icon name="plus" :size="13" /> بند</button><span class="tiny muted">المحور · البند · المؤشر · المستهدف الأسبوعي{{ weekMode === 'report' ? ' · المنجز' : '' }}</span></div>
-    <div class="tw"><table class="wk"><thead><tr><th>المحور</th><th>البند</th><th>المؤشر</th><th>المستهدف الأسبوعي</th><th v-if="weekMode === 'report'">المنجز</th><th /></tr></thead>
-      <tbody><tr v-for="(it, i) in weekForm.items" :key="i">
-        <td><input v-model="it.axis" class="in" /></td><td><input v-model="it.title" class="in" /></td><td><input v-model="it.kpi" class="in" /></td><td><input v-model="it.target" class="in" /></td>
-        <td v-if="weekMode === 'report'"><textarea v-model="it.achieved" class="in" rows="1" /></td>
-        <td><button class="btn ghost xs" @click="weekForm.items.splice(i, 1)"><Icon name="x" :size="13" /></button></td>
-      </tr></tbody></table></div>
-    <template v-if="weekMode === 'report'">
-      <div class="fg mt"><label>ملخص ما أُنجز</label><textarea v-model="weekForm.done" class="in" rows="2" /></div>
-      <div class="fr"><div class="fg"><label>العقبات</label><input v-model="weekForm.blockers" class="in" /></div><div class="fg"><label>خطة الأسبوع القادم</label><input v-model="weekForm.next" class="in" /></div></div>
+  <Modal v-if="weekForm" :title="`${weekMode === 'plan' ? 'خطة' : 'منجز'} الأسبوع ${fmtD(weekForm.week_start)} → ${fmtD(weekForm.week_end)}`" size="wide" @close="weekForm = null">
+    <template v-if="weekMode === 'plan'">
+      <div class="notice info small">حدّد بنود الأسبوع: لكل بند مستهدفه لمدة شهر أو 3 أشهر (أو اجلبه من تقريرك الشهري)، ثم يُقسَّم تلقائيًا إلى مستهدف هذا الأسبوع ويمكنك تعديله. ترفع الخطة لمديرك المباشر ليعتمدها.</div>
+      <div v-if="weekForm.plan_status === 'returned' && weekForm.mgr_note" class="notice bad small">ملاحظة المدير عند الإرجاع: {{ weekForm.mgr_note }}</div>
+      <div class="row mb" style="gap:6px">
+        <button class="btn sec xs" @click="fromMonthly('monthly')"><Icon name="download" :size="13" /> جلب البنود من التقرير الشهري</button>
+        <button class="btn sec xs" @click="fromMonthly('prev')"><Icon name="repeat" :size="13" /> من خطة الأسبوع الماضي</button>
+        <button class="btn ghost xs" @click="weekForm.items.push({ axis: '', title: '', kpi: '', horizon: 'month', period_target: '', target: '', achieved: '', source: 'own' })"><Icon name="plus" :size="13" /> بند</button>
+      </div>
+      <div class="tw"><table class="wk"><thead><tr><th>المحور</th><th>البند *</th><th>المؤشر</th><th>مدة المستهدف</th><th>المستهدف للمدة</th><th>مستهدف هذا الأسبوع</th><th /></tr></thead>
+        <tbody><tr v-for="(it, i) in weekForm.items" :key="i">
+          <td><input v-model="it.axis" class="in" /></td><td><input v-model="it.title" class="in" /></td><td><input v-model="it.kpi" class="in" /></td>
+          <td><select v-model="it.horizon" class="in" style="min-width:96px" @change="autoShare(it, true)"><option value="month">شهر</option><option value="quarter">3 أشهر</option></select></td>
+          <td><input v-model="it.period_target" class="in" placeholder="مثال: 20 عميل" @change="autoShare(it, true)" /></td>
+          <td><input v-model="it.target" class="in" :placeholder="share(it) || 'مستهدف الأسبوع'" /></td>
+          <td><button class="btn ghost xs" title="حذف" @click="weekForm.items.splice(i, 1)"><Icon name="x" :size="13" /></button></td>
+        </tr></tbody></table></div>
     </template>
-    <template #foot><button class="btn sec" @click="weekForm = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="weekMode === 'plan' ? submitPlan() : submitWeek()">{{ weekMode === 'plan' ? 'رفع الخطة لاعتماد المشرف' : 'رفع التقرير' }}</button></template>
+    <template v-else>
+      <div class="tw"><table class="wk"><thead><tr><th>البند</th><th>مستهدف الأسبوع</th><th>المنجز *</th><th>مستهدف الأسبوع القادم</th></tr></thead>
+        <tbody><tr v-for="(it, i) in weekForm.items" :key="i">
+          <td><b>{{ it.title }}</b><span v-if="it.period_target" class="tiny muted" style="display:block">{{ it.horizon === 'quarter' ? 'مستهدف 3 أشهر' : 'مستهدف الشهر' }}: {{ it.period_target }}</span></td>
+          <td class="small">{{ it.target || '—' }}</td>
+          <td><textarea v-model="it.achieved" class="in" rows="2" /></td>
+          <td><input v-model="it.next_target" class="in" placeholder="ماذا ستنجز في هذا البند الأسبوع القادم" /></td>
+        </tr></tbody></table></div>
+      <div class="fg mt"><label>ملخص ما أُنجز</label><textarea v-model="weekForm.done" class="in" rows="2" /></div>
+      <div class="fr"><div class="fg"><label>العقبات</label><input v-model="weekForm.blockers" class="in" /></div><div class="fg"><label>ماذا ستفعل الأسبوع القادم</label><input v-model="weekForm.next" class="in" /></div></div>
+      <div class="tiny muted">موعد الرفع: {{ fmtDT(weekForm.due_at) }} ({{ weekForm.due_rule }}) — بعده يُعد متأخرًا.</div>
+    </template>
+    <template #foot><button class="btn sec" @click="weekForm = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="weekMode === 'plan' ? submitPlan() : submitWeek()">{{ weekMode === 'plan' ? 'رفع الخطة لاعتماد المدير' : 'رفع المنجز' }}</button></template>
   </Modal>
 
-  <Modal v-if="teamWeek" :title="`${teamWeek.employee?.name} — أسبوع ${teamWeek.week_start}`" size="wide" @close="teamWeek = null">
-    <div class="row mb" style="gap:6px"><span class="pill" :class="{ none: 'gray', submitted: 'info', approved: 'ok' }[teamWeek.plan_status || 'none']">الخطة: {{ PLAN[teamWeek.plan_status || 'none'] }}</span><span class="pill" :class="{ submitted: 'ok', late: 'warn', missing: 'bad' }[teamWeek.status]">التقرير: {{ WEEK[teamWeek.status] }}</span></div>
-    <div v-if="(teamWeek.items || []).length" class="tw"><table><thead><tr><th>المحور</th><th>البند</th><th>المؤشر</th><th>المستهدف</th><th>المنجز</th></tr></thead>
-      <tbody><tr v-for="(it, i) in teamWeek.items" :key="i"><td>{{ it.axis }}</td><td>{{ it.title }}</td><td>{{ it.kpi }}</td><td>{{ it.target }}</td><td>{{ it.achieved || '—' }}</td></tr></tbody></table></div>
+  <Modal v-if="teamWeek" :title="`${teamWeek.employee?.name} — أسبوع ${fmtD(teamWeek.week_start)}`" size="wide" @close="teamWeek = null">
+    <div class="row mb" style="gap:6px"><span class="pill" :class="PLAN_C[teamWeek.plan_status || 'none']">الخطة: {{ PLAN[teamWeek.plan_status || 'none'] }}</span><span class="pill" :class="WEEK_C[weekState(teamWeek)]">التقرير: {{ WEEK[weekState(teamWeek)] }}</span><span class="tiny muted">موعد الرفع {{ fmtDT(teamWeek.due_at) }}</span></div>
+    <div v-if="(teamWeek.items || []).length" class="tw"><table><thead><tr><th>المحور</th><th>البند</th><th>المؤشر</th><th>المستهدف للمدة</th><th>مستهدف الأسبوع</th><th>المنجز</th><th>الأسبوع القادم</th></tr></thead>
+      <tbody><tr v-for="(it, i) in teamWeek.items" :key="i"><td>{{ it.axis }}</td><td>{{ it.title }}</td><td>{{ it.kpi }}</td><td class="small">{{ it.period_target ? `${it.period_target} (${it.horizon === 'quarter' ? '3 أشهر' : 'شهر'})` : '—' }}</td>
+        <td><input v-if="teamWeek.plan_status === 'submitted'" v-model="it.target" class="in" style="min-height:30px" /><template v-else>{{ it.target || '—' }}</template></td><td>{{ it.achieved || '—' }}</td><td class="small">{{ it.next_target || '—' }}</td></tr></tbody></table></div>
+    <div v-else class="empty small">لم يرفع الموظف خطة هذا الأسبوع بعد</div>
     <div v-if="teamWeek.done" class="small mt"><b>الملخص:</b> {{ teamWeek.done }}</div><div v-if="teamWeek.blockers" class="small"><b>العقبات:</b> {{ teamWeek.blockers }}</div><div v-if="teamWeek.next" class="small"><b>الأسبوع القادم:</b> {{ teamWeek.next }}</div>
-    <div v-if="teamWeek.plan_status === 'submitted'" class="fg mt"><label>ملاحظة للموظف</label><input v-model="planNote" class="in" /></div>
-    <template #foot><button class="btn sec" @click="teamWeek = null">إغلاق</button><button v-if="teamWeek.plan_status === 'submitted'" class="btn pri" :class="{ loading: busy }" @click="approvePlan">اعتماد الخطة</button></template>
+    <div v-if="teamWeek.plan_status === 'submitted'" class="fg mt"><label>ملاحظة للموظف (إلزامية عند الإرجاع)</label><input v-model="planNote" class="in" /></div>
+    <template #foot><button class="btn sec" @click="teamWeek = null">إغلاق</button>
+      <template v-if="teamWeek.plan_status === 'submitted'"><button class="btn dan" :class="{ loading: busy }" @click="approvePlan('return')">إرجاع للتعديل</button><button class="btn pri" :class="{ loading: busy }" @click="approvePlan('approve')">اعتماد الخطة</button></template></template>
   </Modal>
 
   <Modal v-if="tplForm" :title="tplForm.id ? 'تعديل قالب' : 'قالب جديد'" size="wide" @close="tplForm = null">
@@ -174,7 +215,7 @@ import { applyReportRows, exportReportForm, exportReportForms, readXlsx } from '
 import { alertBox } from '../dialog'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
 import Kpi from '../components/Kpi.vue'
 import Modal from '../components/Modal.vue'
@@ -189,25 +230,53 @@ const router = useRouter()
 const STATUS_COLOR = { draft: 'gray', submitted: 'warn', mgr_reviewed: 'info', hr_reviewed: 'info', approved: 'ok', returned: 'bad' }
 const STAGE_ACTOR = { draft: 'الموظف', returned: 'الموظف', submitted: 'المدير المباشر', mgr_reviewed: 'الموارد البشرية', hr_reviewed: 'رئيس الشركة', approved: 'منشور' }
 const ROLE = { mgr: 'المدير المباشر', hr: 'الموارد البشرية', ceo: 'رئيس الشركة' }
-const WEEK = { submitted: 'في الموعد', late: 'متأخر', missing: 'لم يُرفع' }
-const PLAN = { none: 'لم تُرفع', submitted: 'بانتظار المشرف', approved: 'معتمدة' }
-const weekMode = ref('report'); const teamWeek = ref(null); const planNote = ref('')
-function openWeek(w, mode) { weekMode.value = mode; weekForm.value = { ...w, items: (w.items || []).map((i) => ({ ...i })) } }
-async function fromMonthly() { const items = await api.get(`/reports/weekly/${weekForm.value.id}/from-monthly`); if (!items.length) return ui.toast('لا بنود في التقرير الشهري بعد', 'warn'); weekForm.value.items = items }
+const WEEK = { submitted: 'في الموعد', late: 'متأخر', missing: 'لم يُرفع', open: 'لم يُرفع بعد' }
+const WEEK_C = { submitted: 'ok', late: 'warn', missing: 'bad', open: 'gray' }
+const PLAN = { none: 'لم تُرفع', submitted: 'بانتظار المدير', approved: 'معتمدة', returned: 'أُرجعت للتعديل' }
+const PLAN_C = { none: 'gray', submitted: 'info', approved: 'ok', returned: 'bad' }
+// a week still before its deadline is "not raised yet" (grey), only past the deadline is it red
+const weekState = (w) => (w.status === 'missing' && w.due_at && new Date(w.due_at.replace(' ', 'T')) > new Date() ? 'open' : w.status)
+const weekMode = ref('report'); const teamWeek = ref(null); const planNote = ref(''); const teamSettings = ref([])
+function openWeek(w, mode) { weekMode.value = mode; weekForm.value = { ...w, items: (w.items || []).map((i) => ({ horizon: 'month', ...i })) } }
+function openTeamWeek(w) { planNote.value = ''; teamWeek.value = { ...w, items: (w.items || []).map((i) => ({ ...i })) } }
+// a week's share of the period target: "20 عميل" over the weeks of the month (or 13 weeks for 3 months) → "5 عميل"
+function share(it) {
+  const t = String(it.period_target || '').trim().replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace('٫', '.')
+  const m = t.match(/^(\d+(?:\.\d+)?)\s*(%?)\s*(.*)$/)
+  if (!m) return ''
+  if (m[2]) return `${m[1]}%${m[3] ? ' ' + m[3] : ''}`
+  const n = it.horizon === 'quarter' ? 13 : Math.max(1, weeks.value.length || 4)
+  return `${Math.round((Number(m[1]) / n) * 10) / 10}${m[3] ? ' ' + m[3] : ''}`
+}
+function autoShare(it, force) { const x = share(it); if (x && (force || !it.target)) it.target = x }
+async function fromMonthly(source) {
+  const items = await api.get(`/reports/weekly/${weekForm.value.id}/from-monthly`, { params: { source } })
+  if (!items.length) return ui.toast(source === 'prev' ? 'لا خطة للأسبوع الماضي' : 'لا بنود في التقرير الشهري بعد', 'warn')
+  weekForm.value.items = items.map((i) => ({ horizon: 'month', ...i }))
+}
 async function submitPlan() {
   if (!weekForm.value.items.some((i) => i.title?.trim())) return ui.toast('أضف بندًا واحدًا على الأقل', 'warn')
   busy.value = true
-  try { await api.post(`/reports/weekly/${weekForm.value.id}/plan`, { items: weekForm.value.items.filter((i) => i.title?.trim()) }); ui.toast('رُفعت الخطة لاعتماد المشرف', 'ok'); weekForm.value = null; load() } catch (e) { ui.toast(e.message || 'تعذر الرفع', 'bad') } finally { busy.value = false }
+  try { await api.post(`/reports/weekly/${weekForm.value.id}/plan`, { items: weekForm.value.items.filter((i) => i.title?.trim()) }); ui.toast('رُفعت الخطة لاعتماد المدير', 'ok'); weekForm.value = null; load() } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message || 'تعذر الرفع', 'bad') } finally { busy.value = false }
 }
-async function approvePlan() {
+async function approvePlan(decision) {
+  if (decision === 'return' && !planNote.value.trim()) return ui.toast('اكتب سبب الإرجاع في الملاحظة', 'warn')
   busy.value = true
-  try { await api.post(`/reports/weekly/${teamWeek.value.id}/plan/approve`, { note: planNote.value || null }); ui.toast('اعتُمدت الخطة', 'ok'); teamWeek.value = null; planNote.value = ''; load() } catch (e) { ui.toast(e.message || 'تعذر الاعتماد', 'bad') } finally { busy.value = false }
+  try {
+    await api.post(`/reports/weekly/${teamWeek.value.id}/plan/approve`, { decision, note: planNote.value || null, items: decision === 'approve' ? teamWeek.value.items : undefined })
+    ui.toast(decision === 'return' ? 'أُرجعت الخطة للموظف' : 'اعتُمدت الخطة', 'ok'); teamWeek.value = null; planNote.value = ''; load()
+  } catch (e) { ui.toast(e.message || 'تعذر الإجراء', 'bad') } finally { busy.value = false }
+}
+async function loadTeamSettings() { teamSettings.value = await api.get('/reports/team-settings').catch(() => []) }
+async function setTeam(m, patch) {
+  try { const r = await api.put(`/reports/weekly/employee/${m.id}`, patch); Object.assign(m, { weekly: r.required, weekly_override: r.override, due: r.due, due_label: r.due_label, daily_note: r.daily_note }); ui.toast('حُفظ — وأُبلغ الموظف', 'ok') } catch (e) { ui.toast(e.message || 'تعذر الحفظ', 'bad'); loadTeamSettings() }
 }
 const SCOPE = { group: 'المجموعة', company: 'شركة', job: 'وظيفة', employee: 'موظف بعينه' }
 const prevMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 const period = ref(auth.emp ? curYM() : prevMonth())
-const tabs = computed(() => [auth.emp && ['mine', 'تقريري الشهري'], auth.isApprover && ['team', 'تقارير الفريق'], auth.emp && ['weekly', 'الأسبوعي'], auth.isAdmin && ['templates', 'قوالب التقارير']].filter(Boolean))
-const tab = ref(auth.emp ? 'mine' : 'team')
+const tabs = computed(() => [auth.emp && ['mine', 'تقريري الشهري'], auth.isApprover && ['team', 'تقارير الفريق'], (auth.emp || auth.isApprover) && ['weekly', 'الأسبوعي'], auth.isAdmin && ['templates', 'قوالب التقارير']].filter(Boolean))
+const route = useRoute()
+const tab = ref(['mine', 'team', 'weekly', 'templates'].includes(route.query.tab) ? route.query.tab : auth.emp ? 'mine' : 'team')
 const rep = ref(null); const history = ref([]); const team = ref([]); const weeks = ref([]); const teamWeeks = ref([]); const templates = ref([])
 const rv = ref(null); const rvf = ref({}); const adj = ref({ hr_bonus: 0, reason: '' }); const weekForm = ref(null); const tplForm = ref(null); const busy = ref(false)
 const totalWeight = computed(() => (rep.value?.items || []).reduce((s, i) => s + (Number(i.weight) || 0), 0))
@@ -221,7 +290,7 @@ async function load() {
   const p = { params: { period: period.value } }
   if (tab.value === 'mine') [rep.value, history.value] = await Promise.all([api.get('/reports/monthly/mine', p), api.get('/reports/monthly/history')])
   else if (tab.value === 'team') { picked.value = []; team.value = await api.get('/reports/monthly', { params: { period: period.value, company_id: ui.company || undefined } }) }
-  else if (tab.value === 'weekly') { weeks.value = await api.get('/reports/weekly/mine', p); if (auth.isApprover) teamWeeks.value = await api.get('/reports/weekly/team', p) }
+  else if (tab.value === 'weekly') { if (auth.emp) weeks.value = await api.get('/reports/weekly/mine', p); if (auth.isApprover) { teamWeeks.value = await api.get('/reports/weekly/team', p); loadTeamSettings() } }
   else { [templates.value] = await Promise.all([api.get('/reports/templates'), loadStaff()]) }
 }
 // Excel round-trip in the group's monthly report layout: the employee's own obligations pre-filled, the rest to fill in
@@ -252,7 +321,7 @@ async function uploadTemplate(ev) {
     ui.toast(`استُورد ${n} بندًا وحُفظت المسودة. راجعها ثم اضغط «إرسال للمدير»`, 'ok', 6000)
   } catch (x) { alertBox(x.message || 'تعذرت قراءة الملف', { icon: 'error' }) }
 }
-function addItem() { rep.value.items.push({ title: '', weight: 5, source: 'emp', achieved: '', kpi_result: '', pct: 0, evidence: '', obstacles: '', solutions: '', next_target: '', notes: '' }) }
+function addItem() { rep.value.items.push({ title: '', target: '', indicator: '', weight: 5, source: 'emp', achieved: '', kpi_result: '', pct: 0, evidence: '', obstacles: '', solutions: '', next_target: '', notes: '' }) }
 async function save(submit) {
   busy.value = true
   try {
@@ -292,4 +361,8 @@ onMounted(load)
 <style scoped>
 .wk input, .wk textarea { min-height: 32px; padding: 4px 8px; font-size: 13px; }
 .wk td { padding: 3px; vertical-align: top; }
+.wk-red td:first-child { box-shadow: inset -4px 0 0 var(--bad); }
+.wk-orange td:first-child { box-shadow: inset -4px 0 0 var(--warn); }
+.wk-red { background: var(--badbg); }
+.wk-orange { background: var(--warnbg); }
 </style>

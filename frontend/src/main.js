@@ -9,8 +9,12 @@ import router from './router'
 import { i18n } from './i18n'
 import { installZodArabic } from './lib/validation'
 import { installTouchHelpers } from './lib/touch'
+import { installSelectSearch } from './lib/selectSearch'
+import MonthPicker from './components/MonthPicker.vue'
+import PeriodPicker from './components/PeriodPicker.vue'
 installZodArabic()
 installTouchHelpers()
+installSelectSearch()
 import './styles.css'
 
 // API refusals (403 permission / 422 validation) are already shown to the user as a toast by the api client; a screen that
@@ -20,6 +24,6 @@ window.addEventListener('unhandledrejection', (e) => { if (e.reason && [401, 403
 const app = createApp(App)
 // a lifecycle hook that hit an API refusal is not a crash (the toast already explains it); anything else is still reported
 app.config.errorHandler = (err, _vm, info) => { if (err && [401, 403, 404, 422].includes(err.status)) return; console.error(err, info) }
-app.component('Icon', Icon).component('Avatar', Avatar).component('DateInput', DateInput).directive('dt', vDt).use(createPinia()).use(router).use(i18n).mount('#app')
+app.component('Icon', Icon).component('Avatar', Avatar).component('DateInput', DateInput).component('MonthPicker', MonthPicker).component('PeriodPicker', PeriodPicker).directive('dt', vDt).use(createPinia()).use(router).use(i18n).mount('#app')
 // «؟» explanations next to fields, headings and columns, for every user (owner's notes)
 import('./lib/helpTips.js').then((m) => m.startHelpTips()).catch(() => {})

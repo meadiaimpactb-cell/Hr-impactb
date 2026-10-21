@@ -26,6 +26,16 @@
       </div>
     </div>
 
+    <!-- quick actions for every employee (owner's note: the employee needs clear action icons on the site, like the app) -->
+    <div v-if="d.me" class="card">
+      <h3>{{ t('إجراءات سريعة') }}</h3>
+      <div class="qa-grid">
+        <button v-for="q in quick" :key="q.label" type="button" class="qa" :style="{ '--c': q.color }" @click="q.run()">
+          <span class="qa-ic"><Icon :name="q.icon" :size="22" /></span><span class="qa-l">{{ q.label }}</span><span v-if="q.badge" class="qa-b">{{ q.badge }}</span>
+        </button>
+      </div>
+    </div>
+
     <div class="grid g2">
       <div v-if="d.me" class="card">
         <h3>{{ t('يومي') }} <span class="sub">{{ auth.emp?.name }} · {{ auth.emp?.job_title?.name }}</span></h3>
@@ -77,13 +87,14 @@
     </div>
   </template>
   <PunchModal v-if="punchOpen" :today="todayRec" @close="punchOpen = false" @done="load" />
-  <NewRequest v-if="newReq" @close="newReq = false" @done="load" />
+  <NewRequest v-if="newReq" :initial="reqType" @close="newReq = false; reqType = null" @done="load" />
   <RequestDetail v-if="openId" :id="openId" @close="openId = null" @changed="load" />
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import api from '../api'
 import Kpi from '../components/Kpi.vue'
 import NewRequest from '../components/NewRequest.vue'
@@ -99,7 +110,34 @@ const ui = useUi()
 const d = ref(null)
 const punchOpen = ref(false)
 const newReq = ref(false)
+const reqType = ref(null)
 const openId = ref(null)
+const router = useRouter()
+const ask = (code) => { reqType.value = code; newReq.value = true }
+const go = (to) => router.push(to)
+const quick = computed(() => {
+  const me = d.value?.me
+  if (!me) return []
+  const punch = todayRec.value?.check_in && !todayRec.value?.check_out ? 'تسجيل انصراف' : 'تسجيل حضور'
+  return [
+    me.punch_required && !todayRec.value?.check_out && { icon: 'fingerprint', label: punch, color: 'var(--ok)', run: () => { punchOpen.value = true } },
+    { icon: 'leave', label: 'طلب إجازة', color: 'var(--deep)', run: () => ask('leave') },
+    { icon: 'signature', label: 'طلب خطاب', color: 'var(--purple)', run: () => ask('letter') },
+    { icon: 'money', label: 'طلب سلفة', color: 'var(--warn)', run: () => ask('advance') },
+    me.punch_required && { icon: 'clock', label: 'تصحيح حضور', color: 'var(--blue)', run: () => ask('correction') },
+    { icon: 'requests', label: 'طلب آخر', color: 'var(--navy)', run: () => ask(null) },
+    { icon: 'report', label: 'تقريري الشهري', color: 'var(--deep)', run: () => go('/reports') },
+    { icon: 'lists', label: 'التقرير الأسبوعي', color: 'var(--cyan)', run: () => go('/reports?tab=weekly') },
+    { icon: 'training', label: 'نشاط تطوير', color: 'var(--purple)', run: () => go('/development') },
+    { icon: 'sheet', label: 'قسيمة الراتب', color: 'var(--ok)', run: () => go('/payroll') },
+    { icon: 'mail', label: 'البريد الداخلي', color: 'var(--blue)', run: () => go('/mail') },
+    { icon: 'megaphone', label: 'الإعلانات', color: 'var(--warn)', run: () => go('/announcements') },
+    { icon: 'user', label: 'ملفي', color: 'var(--navy)', run: () => go('/me') },
+    // the group CEO sets each package's benefits (leave balances, allowances, extra items) — HR proposes per-employee changes
+    auth.has('super', 'hr_mgr') && { icon: 'building', label: 'باقات المزايا', color: 'var(--purple)', run: () => go('/companies?tab=packages') },
+    auth.isApprover && { icon: 'megaphone', label: 'تنبيه لفريقي', color: 'var(--bad)', run: () => go('/announcements') },
+  ].filter(Boolean)
+})
 const todayRec = computed(() => d.value?.me?.today)
 const maxCo = computed(() => Math.max(1, ...(d.value?.by_company || []).map((c) => c.employees_count)))
 const hijri = (() => { try { return new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date()) } catch { return '' } })()
@@ -111,3 +149,13 @@ onMounted(() => { load(); timer = setInterval(tick, 30000); document.addEventLis
 onUnmounted(() => { clearInterval(timer); document.removeEventListener('visibilitychange', tick) })
 watch(() => ui.company, load)
 </script>
+
+<style scoped>
+.qa-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.qa{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);transition:transform .12s,box-shadow .12s,border-color .12s}
+.qa:hover{transform:translateY(-1px);box-shadow:var(--shadow);border-color:color-mix(in srgb,var(--c) 45%,var(--line))}
+.qa-ic{width:42px;height:42px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent)}
+.qa-l{font-size:12.5px;font-weight:700;text-align:center;line-height:1.35}
+.qa-b{position:absolute;top:6px;inset-inline-end:6px;background:var(--bad);color:#fff;border-radius:9px;font-size:10.5px;padding:0 6px}
+@media (max-width:480px){.qa-grid{grid-template-columns:repeat(3,1fr)}.qa{padding:10px 4px}}
+</style>

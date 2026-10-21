@@ -36,8 +36,8 @@
     <div class="card">
       <h3>التطوير المنجز خلال الشهر <span class="sub">يُدرج تلقائيًا من سجل التطوير بعد اعتماد المشرف (§35/§78) · {{ rv.dev_points?.total ?? 0 }} / {{ rv.dev_points?.target ?? 100 }} نقطة{{ rv.dev_points?.carry ? ` (منها ${rv.dev_points.carry} مرحّلة)` : '' }} · المستوى: {{ rv.dev_points?.level_label || '—' }}</span></h3>
       <div v-if="!rv.dev_records?.length" class="small muted">لا أنشطة تطوير معتمدة في هذا الشهر — سجّلها من شاشة «التطوير والتدريب».</div>
-      <div v-dt v-else class="tw"><table><thead><tr><th>النشاط أو البرنامج</th><th>الجهة</th><th>النوع</th><th>الساعات</th><th>النقاط</th></tr></thead>
-        <tbody><tr v-for="d in rv.dev_records" :key="d.id"><td><b>{{ d.program }}</b></td><td>{{ d.provider || '—' }}</td><td class="small">{{ d.activity_name || d.activity }}</td><td>{{ d.hours || '—' }}</td><td class="num"><b>{{ d.points }}</b></td></tr></tbody></table></div>
+      <div v-dt v-else class="tw"><table><thead><tr><th>النشاط أو البرنامج</th><th>الجهة</th><th>النوع</th><th>الساعات</th><th>الحالة</th><th>النقاط</th></tr></thead>
+        <tbody><tr v-for="d in rv.dev_records" :key="d.id"><td><b>{{ d.program }}</b></td><td>{{ d.provider || '—' }}</td><td class="small">{{ d.activity_name || d.activity }}</td><td>{{ d.hours || '—' }}</td><td><span class="pill" :class="d.counted ? 'ok' : 'warn'">{{ d.status_label }}</span></td><td class="num"><b>{{ d.counted ? d.points : '—' }}</b></td></tr></tbody></table></div>
       <div v-if="rv.dev?.notes" class="small muted mt" style="white-space:pre-line">{{ rv.dev.notes }}</div>
     </div>
 
@@ -53,8 +53,8 @@
 
     <div v-if="empOwn.length && (rv.can_review && rv.review_role === 'mgr' || empOwn.some((i) => i.mgr_approved != null))" class="card">
       <h3>البنود الشخصية للموظف <span class="sub">حتى 3 بنود لا يزيد وزن كل منها على 15، ولا تُحتسب إلا بموافقة المشرف المباشر (§35)</span></h3>
-      <div class="tw"><table><thead><tr><th>البند</th><th>الوزن</th><th>نسبة الموظف</th><th>قرار المشرف</th></tr></thead>
-        <tbody><tr v-for="it in empOwn" :key="it.id"><td><b>{{ it.title }}</b></td><td class="num">{{ it.weight }}</td><td class="num">{{ it.pct ?? '—' }}%</td>
+      <div class="tw"><table><thead><tr><th>البند</th><th>المستهدف</th><th>مؤشر النجاح</th><th>الوزن</th><th>نسبة الموظف</th><th>قرار المشرف</th></tr></thead>
+        <tbody><tr v-for="it in empOwn" :key="it.id"><td><b>{{ it.title }}</b></td><td class="small">{{ it.target || '—' }}</td><td class="small">{{ it.indicator || '—' }}</td><td class="num">{{ it.weight }}</td><td class="num">{{ it.pct ?? '—' }}%</td>
           <td><select v-if="rv.can_review && rv.review_role === 'mgr'" v-model="it.approved" class="in" style="min-height:30px;padding:2px 6px"><option :value="null" disabled>اختر…</option><option :value="true">موافقة — يُحتسب</option><option :value="false">رفض — لا يُحتسب</option></select>
             <span v-else class="pill" :class="it.mgr_approved ? 'ok' : it.mgr_approved === false ? 'bad' : 'gray'">{{ it.mgr_approved ? 'موافق عليه' : it.mgr_approved === false ? 'مرفوض' : 'بانتظار المشرف' }}</span></td></tr></tbody></table></div>
     </div>

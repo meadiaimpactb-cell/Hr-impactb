@@ -95,6 +95,7 @@ Route::prefix('v1')->group(function () {
         Route::post('attendance/{record}/excuse', [AttendanceController::class, 'excuse'])->where('record', '[0-9]+');
         Route::post('attendance/paper', [AttendanceController::class, 'paper']);
         Route::post('attendance/{record}/note', [AttendanceController::class, 'note'])->where('record', '[0-9]+');
+        Route::get('attendance/note-pending', [AttendanceController::class, 'notePending']);
         Route::get('attendance/corrections', [AttendanceController::class, 'corrections']);
         Route::get('attendance/week', [AttendanceController::class, 'week']);
         Route::post('recruitment/openings/{opening}/decide', [RecruitmentController::class, 'decideOpening']);
@@ -155,6 +156,7 @@ Route::prefix('v1')->group(function () {
         Route::post('reports/weekly/{week}/plan/approve', [ReportController::class, 'weeklyPlanApprove']);
         Route::get('reports/weekly/{week}/from-monthly', [ReportController::class, 'weeklyFromMonthly']);
         Route::put('reports/weekly/employee/{employee}', [ReportController::class, 'weeklyToggle']);
+        Route::get('reports/team-settings', [ReportController::class, 'teamSettings']);
         Route::get('mail/unread', [MailController::class, 'unread']);
         Route::get('mail/recipients', [MailController::class, 'recipients']);
         Route::get('mail/all', [MailController::class, 'all']);

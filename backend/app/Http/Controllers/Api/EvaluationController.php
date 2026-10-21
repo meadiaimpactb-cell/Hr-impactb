@@ -46,7 +46,7 @@ class EvaluationController extends Controller
         $acc = Access::for();
         abort_unless($acc->canAny('PRF', 'view'), 403);
         $period = $request->input('period', now()->subMonthNoOverflow()->format('Y-m'));
-        $emps = $acc->employees()->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->orderBy('name')->get();
+        $emps = $acc->employees('PRF')->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->orderBy('name')->get();
         $published = Evaluation::whereIn('employee_id', $emps->pluck('id'))->where('period', $period)->where('type', 'monthly')->get()->keyBy('employee_id');
         $weights = $request->input('weights'); // simulation
 
@@ -149,7 +149,7 @@ class EvaluationController extends Controller
         $acc = Access::for();
         abort_unless($acc->canAny('PRF', 'view'), 403);
         $year = (int) $request->input('year', now()->year);
-        $emps = $acc->employees()->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->orderBy('name')->get();
+        $emps = $acc->employees('PRF')->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->orderBy('name')->get();
 
         $kind = $request->input('kind', 'fiscal') === 'contract' ? 'contract' : 'fiscal';
         $withBonus = $request->user()->hasRole('super', 'hr_mgr', 'fin') || $acc->canAny('PAY', 'view');

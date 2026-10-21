@@ -6,7 +6,7 @@
   <div class="tabs"><button v-for="x in tabs" :key="x[0]" :class="{ on: tab === x[0] }" @click="tab = x[0]; load()">{{ t(x[1]) }}</button></div>
 
   <template v-if="tab === 'mine'">
-    <div class="row mb"><input v-model="period" type="month" class="in" style="width:auto" @change="load" /></div>
+    <div class="row mb"><MonthPicker v-model="period" @change="load" /></div>
     <div v-if="mine" class="grid g4 mb">
       <Kpi icon="calendar" label="أيام مطلوبة" :value="mine.summary.required" color="n" />
       <Kpi icon="user-check" :label="t('حاضر')" :value="mine.summary.present" color="g" />
@@ -23,13 +23,17 @@
       </div>
       <p v-if="mine.week.ramadan" class="tiny muted mt">فترة رمضان: ساعات العمل المطلوبة 6 ساعات يوميًا (§24).</p>
     </div>
+    <div v-if="mine?.note_pending?.length" class="card" style="border-inline-start:4px solid var(--bad)">
+      <h3 class="bad">التحضير معلّق حتى تكتب المنجز اليومي <span class="sub">المنجز اليومي مفعّل لك: لا يُعتمد تحضير اليوم إلا بعد كتابة ما أنجزته فيه</span></h3>
+      <div class="row" style="gap:8px"><button v-for="r in mine.note_pending" :key="r.id" class="btn okb sm" @click="writeNote(r)"><Icon name="edit" :size="14" /> {{ fmtD(r.work_date) }} — اكتب المنجز</button></div>
+    </div>
     <div v-if="excuses.length" class="card">
       <h3>مطلوب إبداء العذر <span class="sub">حضور من خارج النطاق لم تقبله الموارد البشرية — يُعدّ اليوم غيابًا إن لم يُقبل العذر (§27)</span></h3>
       <div v-dt class="tw"><table><thead><tr><th>اليوم</th><th>المهلة</th><th>العذر</th><th /></tr></thead>
         <tbody><tr v-for="r in excuses" :key="r.id"><td class="num">{{ fmtD(r.work_date) }}</td><td class="num">{{ fmtD(r.excuse_due) }}</td><td class="small">{{ r.excuse || '—' }}</td>
           <td><button class="btn pri xs" @click="giveExcuse(r)">{{ r.excuse ? 'تعديل العذر' : 'إبداء العذر' }}</button></td></tr></tbody></table></div>
     </div>
-    <div class="card"><h3>{{ t('سجلي') }} <span class="acts"><button class="btn ghost sm" @click="corr = true">طلب تصحيح</button></span></h3><AttendanceTable editable :records="mine?.records || []" :grace="mine?.grace ?? grace" /></div>
+    <div class="card"><h3>{{ t('سجلي') }} <span class="acts"><button class="btn ghost sm" @click="corr = true">طلب تصحيح</button></span></h3><AttendanceTable :note-min="mine?.note_min || 20" editable :records="mine?.records || []" :grace="mine?.grace ?? grace" /></div>
   </template>
 
   <template v-else-if="tab === 'paper'">
@@ -113,7 +117,7 @@
   </Modal>
 
   <template v-else-if="tab === 'month'">
-    <div class="row mb"><input v-model="period" type="month" class="in" style="width:auto" @change="load" /><button class="btn sec sm" @click="exportMonth"><Icon name="download" :size="16" /> {{ t('تصدير Excel') }}</button></div>
+    <div class="row mb"><MonthPicker v-model="period" @change="load" /><button class="btn sec sm" @click="exportMonth"><Icon name="download" :size="16" /> {{ t('تصدير Excel') }}</button></div>
     <div class="card"><div v-dt class="tw"><table>
       <thead><tr><th>{{ t('الموظف') }}</th><th>{{ t('الشركة') }}</th><th>أيام العمل</th><th>الحضور</th><th>التأخيرات</th><th>دقائق التأخير</th><th>الخروج المبكر</th><th>الغياب</th><th>الإجازات</th><th>معلّق</th></tr></thead>
       <tbody><tr v-for="r in month" :key="r.employee.id">
@@ -176,6 +180,13 @@ const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.isApprover &
   auth.isApprover && ['corrections', 'طلبات التصحيح'], isHr.value && ['paper', 'السجل البديل']].filter(Boolean))
 const hm = (m) => `${Math.floor((m || 0) / 60)}:${String((m || 0) % 60).padStart(2, '0')}`
 const excuses = computed(() => (mine.value?.records || []).filter((r) => r.status === 'excuse_requested'))
+// a day left pending for a missing daily achievement is approved once it is written (owner's note)
+async function writeNote(r) {
+  const min = mine.value?.note_min || 20
+  const note = await promptBox(`المنجز اليومي — ${fmtD(r.work_date)}`, { text: 'اكتب ما أنجزته في هذا اليوم ليُعتمد تحضيره', value: r.note || '', multiline: true, minLength: min, confirmText: 'حفظ واعتماد اليوم' })
+  if (!note) return
+  try { await api.post(`/attendance/${r.id}/note`, { note }); ui.toast('حُفظ المنجز واعتُمد تحضير اليوم', 'ok'); load() } catch (e) { alertBox(e.message, { icon: 'error' }) }
+}
 async function giveExcuse(r) {
   const text = await promptBox(`عذرك عن حضور يوم ${fmtD(r.work_date)} من خارج النطاق`, { value: r.excuse || '' })
   if (!text) return

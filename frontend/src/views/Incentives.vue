@@ -27,7 +27,7 @@
 
   <template v-else-if="tab === 'all'">
     <div class="card">
-      <div class="row mb"><input v-model="period" type="month" class="in" style="width:auto" @change="load" /><span class="tiny muted">فارغ = كل الفترات</span></div>
+      <div class="row mb"><MonthPicker v-model="period" @change="load" allow-empty empty-label="كل الفترات" /><span class="tiny muted">فارغ = كل الفترات</span></div>
       <div v-if="!all.length" class="empty">لا سجلات</div>
       <div v-dt v-else class="tw"><table><thead><tr><th>الموظف</th><th>النوع</th><th>العنوان</th><th>الشهر</th><th>النقاط</th><th>المبلغ</th><th>بواسطة</th><th /></tr></thead>
         <tbody><tr v-for="r in all" :key="r.id"><td><b>{{ r.employee?.name }}</b><span class="tiny muted">{{ r.company }}</span></td><td><span class="pill" :class="KC[r.kind] || 'info'">{{ r.kind_label }}</span></td><td>{{ r.title }}<div class="tiny muted">{{ r.detail }}</div></td><td class="num">{{ r.period }}</td><td class="num">{{ r.points || '—' }}</td><td class="num">{{ r.amount ? money(r.amount) : '—' }}</td><td class="small">{{ r.by }}</td>
@@ -37,7 +37,7 @@
 
   <template v-else>
     <div class="card">
-      <h3>لوحة المتميزين <span class="sub">ترتيب نقاط التميّز للشهر — مرجع اختيار موظف الربع ونجم التطوير</span><span class="acts"><input v-model="period" type="month" class="in" style="width:auto" @change="load" /></span></h3>
+      <h3>لوحة المتميزين <span class="sub">ترتيب نقاط التميّز للشهر — مرجع اختيار موظف الربع ونجم التطوير</span><span class="acts"><MonthPicker v-model="period" @change="load" allow-empty empty-label="كل الفترات" /></span></h3>
       <div v-if="!board.length" class="empty">لا بيانات</div>
       <div v-dt v-else class="tw"><table><thead><tr><th>#</th><th>الموظف</th><th>الشركة</th><th>النقاط</th><th>التفاصيل</th></tr></thead>
         <tbody><tr v-for="(r, i) in board" :key="r.employee.id"><td class="num"><b>{{ i + 1 }}</b></td><td><b>{{ r.employee.name }}</b></td><td class="small">{{ r.company }}</td><td class="num"><b>{{ r.points.total }}</b></td><td class="small">{{ r.points.items.map((x) => `${x.label} +${x.points}`).join(' · ') || '—' }}</td></tr></tbody></table></div>
@@ -48,7 +48,7 @@
     <div class="fg"><label>الموظف *</label><SearchSelect v-model="f.employee_id" :options="empOptions" /></div>
     <div class="fr">
       <div class="fg"><label>النوع *</label><select v-model="f.kind" class="in"><option v-for="(l, k) in kinds" :key="k" :value="k" :disabled="k === 'bonus'">{{ l }}{{ k === 'bonus' ? ' — عبر طلب «مكافأة إنجاز فورية»' : '' }}</option></select></div>
-      <div class="fg"><label>الشهر</label><input v-model="f.period" type="month" class="in" /></div>
+      <div class="fg"><label>الشهر</label><MonthPicker v-model="f.period" /></div>
     </div>
     <div class="fg"><label>العنوان *</label><input v-model="f.title" class="in" placeholder="مثال: إشادة من شريك خارجي على جودة التقرير" /></div>
     <div class="fg"><label>التفاصيل</label><textarea v-model="f.detail" class="in" rows="3" /></div>

@@ -50,16 +50,28 @@
         <select v-model="permUserId" class="in" style="width:auto"><option v-for="u in staff" :key="u.id" :value="u.id">{{ u.name }} ({{ u.login }})</option></select>
       </div>
       <div v-if="perm" class="grid g3">
-        <div class="card" style="margin:0"><h3>1 · الشركات</h3>
-          <label v-for="c in meta.companies" :key="c.id" class="chk"><input v-model="perm.companies" type="checkbox" :value="c.id" /> {{ c.name }}</label>
+        <div class="card" style="margin:0"><h3>1 · الشركات التي يشرف عليها</h3>
+          <label v-for="c in meta.companies" :key="c.id" class="chk"><input v-model="perm.companies" type="checkbox" :value="c.id" /> {{ c.name }}
+            <span v-if="perm.per_company[c.id] && perm.companies.includes(c.id)" class="pill purple" style="font-size:10.5px">صلاحيات خاصة</span></label>
+          <p class="tiny muted mt">كل شركة تأخذ الصلاحيات الأساسية، ويمكنك تخصيص صلاحيات مختلفة لأي شركة من القائمة المجاورة.</p>
         </div>
         <div class="card" style="margin:0;grid-column:span 2"><h3>2 · العمليات والإجراءات <span class="sub">SEC و ADM غير قابلة للتفويض</span></h3>
+          <div class="row mb" style="gap:8px;align-items:center;flex-wrap:wrap">
+            <label class="small b">الصلاحيات في:</label>
+            <select v-model="permCompany" class="in" style="width:auto">
+              <option value="">كل الشركات المختارة (الأساس)</option>
+              <option v-for="c in permCompanies" :key="c.id" :value="c.id">{{ c.name }}{{ perm.per_company[c.id] ? ' — مخصّصة' : '' }}</option>
+            </select>
+            <button v-if="permCompany && !perm.per_company[permCompany]" class="btn sec xs" @click="customize"><Icon name="edit" :size="14" /> تخصيص صلاحيات هذه الشركة</button>
+            <button v-if="permCompany && perm.per_company[permCompany]" class="btn ghost xs" @click="uncustomize"><Icon name="repeat" :size="14" /> إلغاء التخصيص والعودة للأساس</button>
+          </div>
+          <div v-if="permCompany && !perm.per_company[permCompany]" class="notice info small">هذه الشركة تتبع الصلاحيات الأساسية. اضغط «تخصيص» لتفعيل أو إيقاف صلاحيات معينة له داخل هذه الشركة فقط.</div>
           <div v-dt class="tw"><table>
             <thead><tr><th>العملية</th><th v-for="(al, a) in ACTIONS" :key="a" class="center">{{ al }}</th><th>حد الاعتماد</th></tr></thead>
             <tbody><tr v-for="(label, op) in delegableOps" :key="op">
               <td><b>{{ op }}</b> <span class="tiny muted">{{ label }}</span></td>
-              <td v-for="(al, a) in ACTIONS" :key="a" class="center"><input type="checkbox" :checked="(perm.ops[op] || []).includes(a)" @change="toggleOp(op, a, $event.target.checked)" /></td>
-              <td><input v-model="perm.limits[op]" class="in" style="min-height:30px;width:80px" placeholder="—" /></td>
+              <td v-for="(al, a) in ACTIONS" :key="a" class="center"><input type="checkbox" :disabled="!mat.editable" :checked="(mat.ops[op] || []).includes(a)" @change="toggleOp(op, a, $event.target.checked)" /></td>
+              <td><input v-model="mat.limits[op]" :disabled="!mat.editable" class="in" style="min-height:30px;width:80px" placeholder="—" /></td>
             </tr></tbody>
           </table></div>
           <div class="fr mt">
@@ -215,20 +227,38 @@ const userOptions = computed(() => allUsers.value.filter((u) => u.active).map((u
 const companyName = (id) => auth.meta.companies.find((c) => c.id === +id)?.name || id
 const delegActive = (d) => d.status === 'active' && d.valid_to >= today()
 
+const permCompany = ref('')
+const permCompanies = computed(() => (perm.value ? meta.value.companies.filter((c) => perm.value.companies.includes(c.id)) : []))
+// the matrix being edited: the shared one, or one company's own matrix
+const mat = computed(() => {
+  const p = perm.value
+  if (!p) return { ops: {}, limits: {}, editable: false }
+  if (!permCompany.value) return { ops: p.ops, limits: p.limits, editable: true }
+  const own = p.per_company[permCompany.value]
+  return own ? { ops: own.ops, limits: own.limits, editable: true } : { ops: p.ops, limits: { ...p.limits }, editable: false }
+})
+const describe = (m) => Object.entries(m.ops).filter(([, v]) => v.length).map(([k, v]) => `${delegableOps.value[k]} (${v.map((a) => ACTIONS[a]).join('، ')}${m.limits[k] ? ` حتى ${m.limits[k]}` : ''})`).join('؛ ')
 const permPreview = computed(() => {
   const u = allUsers.value.find((x) => x.id === permUserId.value)
-  if (!u || !perm.value) return ''
-  const ops = Object.entries(perm.value.ops).filter(([, v]) => v.length)
-  if (!ops.length) return `${u.name} لا يملك صلاحيات مفوّضة بعد.`
-  return `يستطيع ${u.name} على ${perm.value.companies.length} شركة: ` + ops.map(([k, v]) => `${delegableOps.value[k]} (${v.map((a) => ACTIONS[a]).join('، ')}${perm.value.limits[k] ? ` حتى ${perm.value.limits[k]}` : ''})`).join('؛ ') +
-    (perm.value.ops.PAY?.length ? '' : '؛ ولا يرى الرواتب') + (perm.value.valid_to ? ` — حتى ${perm.value.valid_to}` : '')
+  const p = perm.value
+  if (!u || !p) return ''
+  const base = describe(p)
+  const custom = permCompanies.value.filter((c) => p.per_company[c.id]).map((c) => `في ${c.name}: ${describe(p.per_company[c.id]) || 'لا صلاحيات'}`)
+  if (!base && !custom.length) return `${u.name} لا يملك صلاحيات مفوّضة بعد.`
+  return `يستطيع ${u.name} على ${p.companies.length} شركة: ${base || 'لا صلاحيات أساسية'}` + (custom.length ? ` — وصلاحيات خاصة ${custom.join(' · ')}` : '') + (p.valid_to ? ` — حتى ${p.valid_to}` : '')
 })
 
 watch(permUserId, (id) => {
   const u = allUsers.value.find((x) => x.id === id)
   const p = u?.perms || {}
-  perm.value = { companies: (p.companies || []).map(Number), ops: JSON.parse(JSON.stringify(p.ops || {})), limits: { ...(p.limits || {}) }, valid_to: p.valid_to || '', reason: '' }
+  const obj = (x) => (!x || Array.isArray(x) ? {} : JSON.parse(JSON.stringify(x))) // PHP sends an empty map as []
+  const per = {}
+  Object.entries(obj(p.per_company)).forEach(([cid, m]) => { per[+cid] = { ops: obj(m.ops), limits: obj(m.limits) } })
+  permCompany.value = ''
+  perm.value = { companies: (p.companies || []).map(Number), ops: obj(p.ops), limits: obj(p.limits), per_company: per, valid_to: p.valid_to || '', reason: '' }
 })
+function customize() { perm.value.per_company[permCompany.value] = { ops: JSON.parse(JSON.stringify(perm.value.ops)), limits: { ...perm.value.limits } } }
+function uncustomize() { delete perm.value.per_company[permCompany.value] }
 
 async function load() {
   loading.value = true
@@ -278,12 +308,15 @@ async function resetPass(u) {
   load()
 }
 function toggleOp(op, a, on) {
-  const cur = new Set(perm.value.ops[op] || [])
+  const m = mat.value
+  const cur = new Set(m.ops[op] || [])
   on ? cur.add(a) : cur.delete(a)
-  perm.value.ops[op] = [...cur]
+  m.ops[op] = [...cur]
 }
 async function savePerms() {
-  await api.put(`/users/${permUserId.value}/perms`, { ...perm.value, valid_to: perm.value.valid_to || null })
+  const p = perm.value
+  const per = Object.fromEntries(Object.entries(p.per_company).filter(([cid]) => p.companies.includes(+cid)))
+  try { await api.put(`/users/${permUserId.value}/perms`, { ...p, per_company: per, valid_to: p.valid_to || null }) } catch (e) { return alertBox(e.message, { icon: 'error' }) }
   ui.toast('حُفظت الصلاحيات وسُجّلت في التدقيق', 'ok')
   load()
 }

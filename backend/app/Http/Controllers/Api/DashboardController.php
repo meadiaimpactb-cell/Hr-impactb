@@ -25,6 +25,14 @@ class DashboardController extends Controller
 {
     public function index(Request $request)
     {
+        // the daily jobs that drive the owner's notes (weekly-report deadlines, pending daily achievements) also start from
+        // the first visit of the day, so they run even before the server's cron is configured (each runs once a day)
+        if (\Illuminate\Support\Facades\Cache::add('hc.daily-kick.'.now()->toDateString(), 1, now()->endOfDay())) {
+            dispatch(function () {
+                \Illuminate\Support\Facades\Artisan::call('hc:weekly-watch');
+                \Illuminate\Support\Facades\Artisan::call('hc:policy-reminders');
+            })->afterResponse();
+        }
         $u = $request->user();
         $acc = Access::for($u);
         $today = now()->toDateString();
@@ -54,6 +62,7 @@ class DashboardController extends Controller
             $me['todo'] = array_values(array_filter([
                 (! $rep || in_array($rep->status, ['draft', 'returned'], true)) && now()->day <= 25 ? ['screen' => 'reports', 'label' => "تقريرك الشهري عن $prev ".($rep?->status === 'returned' ? 'مُرجَع للتعديل' : 'لم يُرفع بعد'), 'kind' => 'warn'] : null,
                 ($w = WeeklyReport::where('employee_id', $e->id)->where('status', 'missing')->where('week_end', '<', $today)->count()) ? ['screen' => 'reports', 'label' => "$w تقارير أسبوعية لم تُرفع", 'kind' => 'warn'] : null,
+                ($np = $e->attendance()->where('note_pending', true)->where('work_date', '>=', now()->subDays((int) \App\Services\Settings::get('dailyNoteLateDays', $e->company_id, 7))->toDateString())->count()) ? ['screen' => 'attendance', 'label' => "التحضير معلّق في $np يوم حتى تكتب المنجز اليومي", 'kind' => 'bad'] : null,
                 ($v = Violation::where('employee_id', $e->id)->where('status', 'awaiting_statement')->count()) ? ['screen' => 'violations', 'label' => "$v مخالفة تنتظر إفادتك", 'kind' => 'bad'] : null,
                 ($a = AnnouncementReceipt::where('user_id', $u->id)->whereNull('ack_at')->whereHas('announcement', fn ($q) => $q->where('require_ack', true))->count()) ? ['screen' => 'announcements', 'label' => "$a إعلانات تتطلب إقرارك", 'kind' => 'info'] : null,
                 ($dx = Document::where('scope', 'employee')->where('owner_id', $e->id)->whereNotNull('expiry_date')->where('renewed', false)->where('expiry_date', '<=', now()->addDays(30)->toDateString())->count()) ? ['screen' => 'documents', 'label' => "$dx وثائق تنتهي خلال 30 يومًا", 'kind' => 'warn'] : null,

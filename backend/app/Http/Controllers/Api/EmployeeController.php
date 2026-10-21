@@ -20,7 +20,7 @@ class EmployeeController extends Controller
     public function index(Request $request)
     {
         $acc = Access::for();
-        $q = $acc->employees()->with('company:id,name,code', 'jobTitle:id,name', 'manager:id,name', 'user:id,employee_id,login,active,last_login_at,invited_at,invite_accepted_at,photo_path')
+        $q = $acc->employees('EMP')->with('company:id,name,code', 'jobTitle:id,name', 'manager:id,name', 'user:id,employee_id,login,active,last_login_at,invited_at,invite_accepted_at,photo_path')
             ->select('id', 'emp_no', 'name', 'name_en', 'company_id', 'job_title_id', 'manager_id', 'dept', 'hire_date', 'contract_type', 'punch_required', 'status', 'email', 'phone', 'email_enabled');
 
         $status = $request->input('status', 'active');

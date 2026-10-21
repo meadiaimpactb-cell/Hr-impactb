@@ -120,9 +120,10 @@ class AttendanceService
     }
 
     /** First day (Saturday) of the policy week that contains $d. */
-    public static function weekStart(Carbon $d): Carbon
+    /** First day of the employee's work week: Sunday, or Saturday for a six-day week (owner's note). */
+    public static function weekStart(Carbon $d, ?Employee $e = null): Carbon
     {
-        return $d->copy()->startOfDay()->startOfWeek(Carbon::SATURDAY);
+        return $d->copy()->startOfDay()->startOfWeek($e ? $e->weekStartsOn() : Carbon::SUNDAY);
     }
 
     /** §29/30: the flex allowance is a weekly budget of minutes (tier benefit flexMinutes), not a daily one. */
@@ -134,7 +135,7 @@ class AttendanceService
     /** Flex minutes already absorbed this week, the given day excluded. */
     public static function flexUsed(Employee $e, Carbon $d): int
     {
-        $ws = self::weekStart($d);
+        $ws = self::weekStart($d, $e);
 
         return (int) AttendanceRecord::where('employee_id', $e->id)->whereBetween('work_date', [$ws->toDateString(), $ws->copy()->addDays(6)->toDateString()])
             ->whereDate('work_date', '!=', $d->toDateString())->sum('flex_minutes');
@@ -177,7 +178,7 @@ class AttendanceService
 
     public static function remoteUsed(Employee $e, Carbon $d): bool
     {
-        $ws = self::weekStart($d);
+        $ws = self::weekStart($d, $e);
 
         return AttendanceRecord::where('employee_id', $e->id)->where('remote', true)->whereBetween('work_date', [$ws->toDateString(), $ws->copy()->addDays(6)->toDateString()])
             ->whereDate('work_date', '!=', $d->toDateString())->exists();
@@ -190,7 +191,7 @@ class AttendanceService
     public static function weekly(Employee $e, ?Carbon $any = null): array
     {
         $any ??= now();
-        $ws = self::weekStart($any);
+        $ws = self::weekStart($any, $e);
         $we = $ws->copy()->addDays(6);
         $today = now()->toDateString();
         $recs = AttendanceRecord::where('employee_id', $e->id)->whereBetween('work_date', [$ws->toDateString(), $we->toDateString()])->get()->keyBy(fn ($r) => $r->work_date->toDateString());
@@ -296,22 +297,23 @@ class AttendanceService
                 'accuracy' => $in['accuracy'] ?? null, 'distance_m' => $geo['dist'], 'device' => substr((string) ($in['device'] ?? request()->userAgent()), 0, 190),
                 'offline' => $offline, 'geo_fail' => ! $geo['ok'], 'low_accuracy' => $lowAcc,
                 // shown at once; only a punch outside the allowed range is flagged for review (low accuracy / offline sync are just recorded)
-                'pending' => ! $geo['ok'], 'note_required' => $noteRequired,
+                'pending' => ! $geo['ok'], 'note_required' => $noteRequired, 'note_pending' => $noteRequired,
                 'client_time' => isset($in['client_time']) ? Carbon::parse($in['client_time']) : null,
             ]);
         } elseif (! $rec->check_out) {
             $note = trim((string) ($in['note'] ?? ''));
             $min = (int) Settings::get('dailyNoteMin', $e->company_id, 20);
-            if ($noteRequired && mb_strlen($note) < $min) {
-                throw ValidationException::withMessages(['note' => "المنجز اليومي إلزامي ({$min} حرفًا على الأقل)"]);
-            }
+            // owner's note: the check-out is recorded, but when the daily achievement is required and not written the
+            // day stays pending ("التحضير معلق") until the employee writes it
+            $note = $note !== '' ? $note : (string) $rec->note;
+            $notePending = $noteRequired && mb_strlen(trim($note)) < $min;
             if ($rec->remote && ! $geo['ok']) {
                 $geo = ['ok' => true, 'location_id' => null, 'msg' => 'يوم عمل عن بُعد', 'dist' => $geo['dist']];
             }
             // check-out is measured too: leaving from outside the site is flagged for review like an outside check-in
             $rec->fill([
                 'check_out' => $now, 'early_minutes' => self::earlyMinutes($e, $rec->check_in, $now),
-                'out_lat' => $in['lat'] ?? null, 'out_lng' => $in['lng'] ?? null, 'note' => $note ?: $rec->note,
+                'out_lat' => $in['lat'] ?? null, 'out_lng' => $in['lng'] ?? null, 'note' => $note ?: $rec->note, 'note_required' => $noteRequired || $rec->note_required, 'note_pending' => $notePending,
                 'out_distance_m' => $geo['dist'], 'out_geo_fail' => ! $geo['ok'], 'pending' => $rec->pending || ! $geo['ok'],
             ]);
             if (! $geo['ok']) {
@@ -344,7 +346,7 @@ class AttendanceService
         $recs = $e->attendance()->whereBetween('work_date', [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()])->get()->keyBy(fn ($r) => $r->work_date->toDateString());
         $leaves = ApprovalRequest::where('employee_id', $e->id)->whereIn('type', ['leave', 'trip'])->where('status', 'approved')->get(['data']);
         $isLeave = fn ($d) => $leaves->contains(fn ($l) => ($l->data['from'] ?? '') <= $d && ($l->data['to'] ?? '') >= $d);
-        $s = ['required' => 0, 'present' => 0, 'late' => 0, 'late_minutes' => 0, 'early_minutes' => 0, 'absent' => 0, 'leave' => 0, 'pending' => 0, 'no_checkout' => 0];
+        $s = ['required' => 0, 'present' => 0, 'late' => 0, 'late_minutes' => 0, 'early_minutes' => 0, 'absent' => 0, 'leave' => 0, 'pending' => 0, 'no_checkout' => 0, 'note_pending' => 0];
         for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
             if ($d->lt($e->hire_date) || ! self::isWorkDay($e, $d)) {
                 continue;
@@ -378,6 +380,7 @@ class AttendanceService
             }
             $s['early_minutes'] += $r->early_minutes;
             $s['pending'] += $r->pending ? 1 : 0;
+            $s['note_pending'] += $r->note_pending ? 1 : 0;
         }
 
         return $s;

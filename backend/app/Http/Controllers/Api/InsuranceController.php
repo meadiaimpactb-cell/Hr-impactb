@@ -19,9 +19,9 @@ class InsuranceController extends Controller
     {
         $acc = Access::for();
         abort_unless($acc->canAny('EMP', 'view'), 403);
-        $cids = $acc->companyIds();
+        $cids = $acc->companyIds('EMP');
         $policies = InsurancePolicy::with('company:id,name')->whereIn('company_id', $cids)->orderByDesc('to')->get();
-        $emps = $acc->employees()->where('status', '!=', 'terminated')->with('company.tier')->get();
+        $emps = $acc->employees('EMP')->where('status', '!=', 'terminated')->with('company.tier')->get();
 
         return [
             'policies' => $policies->map(fn ($p) => $this->row($p)),

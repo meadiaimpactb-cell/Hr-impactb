@@ -1,9 +1,9 @@
 <template>
   <div class="page-h">
-    <div><h1>{{ t('الشركات والتصنيفات') }}</h1><p>لكل شركة هويتها (الشعار والألوان) التي يراها موظفوها · وتصنيفها (تأسيس / تمكين / أثر) الذي تنزل مزاياه تلقائيًا على موظفيها — اللائحة §47–52</p></div>
+    <div><h1>{{ t('الشركات وباقات المزايا') }}</h1><p>لكل شركة هويتها (الشعار والألوان) التي يراها موظفوها · وتصنيفها (تأسيس / تمكين / أثر) الذي تنزل مزاياه تلقائيًا على موظفيها — اللائحة §47–52</p></div>
     <div class="acts"><button class="btn pri sm" @click="edit({})"><Icon name="plus" :size="16" /> شركة</button></div>
   </div>
-  <div class="tabs"><button :class="{ on: tab === 'c' }" @click="tab = 'c'">الشركات</button><button :class="{ on: tab === 't' }" @click="tab = 't'">فئات التصنيف ومزاياها</button></div>
+  <div class="tabs"><button :class="{ on: tab === 'c' }" @click="tab = 'c'">الشركات</button><button :class="{ on: tab === 't' }" @click="tab = 't'">الباقات ومزايا كل باقة (الإجازات والبدلات…)</button></div>
 
   <div v-if="tab === 'c'" class="card">
     <DataTable :rows="companies" :columns="columns" :selectable="auth.has('super')" store-key="companies" export-name="companies" search-placeholder="ابحث بالرمز أو الاسم أو الموقع…" @row-click="view = $event">
@@ -78,7 +78,7 @@
         </div>
       </th></tr></thead>
       <tbody><tr v-for="k in benefitKeys" :key="k">
-        <td><div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start"><input v-if="auth.has('super')" v-model="selBen" type="checkbox" :value="k" style="margin-top:4px" /><div><b>{{ BEN[k] || k }}</b><span class="tiny muted">{{ k }}</span></div><button v-if="auth.has('super')" class="btn ghost xs" style="margin-inline-start:auto" title="حذف البند من كل الفئات" @click="selBen = [k]; removeBenefits()"><Icon name="trash" :size="12" /></button></div></td>
+        <td><div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start"><input v-if="auth.has('super')" v-model="selBen" type="checkbox" :value="k" style="margin-top:4px" /><div><b>{{ BEN[k] || k }}</b><span class="tiny muted">{{ k }}</span><span v-if="ALLOW.includes(k) || TYPES[k] === 'allowance'" class="pill info" style="font-size:10.5px" title="يُضاف تلقائيًا إلى راتب كل موظف في شركات الباقة">بدل شهري يُصرف مع الراتب</span></div><button v-if="auth.has('super')" class="btn ghost xs" style="margin-inline-start:auto" title="حذف البند من كل الفئات" @click="selBen = [k]; removeBenefits()"><Icon name="trash" :size="12" /></button></div></td>
         <td v-for="tr in tiers" :key="tr.id"><input v-model="tr.benefits[k]" class="in" style="min-height:32px;padding:3px 8px" :disabled="!auth.has('super')" /></td>
       </tr></tbody>
     </table></div>
@@ -141,9 +141,10 @@
 
 <script setup>
 import { logoColors } from '../lib/logoColors'
-import { alertBox, confirmBox, promptBox } from '../dialog'
+import { alertBox, chooseBox, confirmBox, promptBox } from '../dialog'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import api from '../api'
 import ActionMenu from '../components/ActionMenu.vue'
 import DataTable from '../components/DataTable.vue'
@@ -155,7 +156,8 @@ import { useUi } from '../stores/ui'
 const { t } = useI18n()
 const auth = useAuth()
 const ui = useUi()
-const tab = ref('c')
+// /companies?tab=packages opens the package benefits directly (group CEO: leave balances, allowances and extra items)
+const tab = ref(['t', 'packages'].includes(useRoute().query.tab) ? 't' : 'c')
 const companies = ref([])
 const tiers = ref([])
 const form = ref(null)
@@ -208,6 +210,9 @@ async function bulkTier(rows, ev, clear) {
   ui.toast('حُدّث التصنيف', 'ok'); clear(); load(); auth.loadMeta()
 }
 const BEN = computed(() => auth.meta?.benefit_labels || {})
+// items paid every month with the salary: the built-in allowances plus the ones the group CEO added as allowances
+const ALLOW = ['housingPct', 'transport', 'transportPct', 'transportMin', 'comm']
+const TYPES = computed(() => auth.meta?.benefit_types || {})
 const ORDER = ['annualLeave', 'leaveUnit', 'eidExtraDays', 'bridgeDay', 'sick', 'emergency', 'maternity', 'marriage', 'bereavement', 'siblingBereavement', 'newborn', 'hajj', 'unpaidMax', 'carryOverMax',
   'housingPct', 'transportPct', 'transportMin', 'transport', 'comm', 'commMax', 'carAllowance2', 'carAllowance4', 'carAllowanceDaily', 'weeklyHours', 'workDays', 'flexMinutes', 'remote',
   'devBudget', 'devDays', 'programsPerMonth', 'ticketCap', 'ticketFamily', 'bonusMaxMonths', 'hotelCap', 'perDiemCeo', 'perDiemDir', 'perDiemMgr', 'perDiemSpec', 'perDiemStaff',
@@ -300,10 +305,13 @@ async function newBenefit() {
   const raw = ((await promptBox(`القيمة الافتراضية لـ«${label}» في كل الباقات`, { text: 'رقم (مبلغ أو عدد أيام)، ويمكن تعديله لكل باقة لاحقًا', multiline: false, required: false, confirmText: 'إضافة البند' })) ?? '0').trim()
   const val = raw === '' ? 0 : Number(raw.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
   if (Number.isNaN(val)) return ui.toast('القيمة يجب أن تكون رقمًا', 'warn')
+  const kind = await chooseBox(`نوع «${label}»`, { allowance: 'بدل شهري يُصرف مع الراتب (مبلغ بالريال)', other: 'ميزة أو رصيد آخر (أيام، عدد، سقف…)' }, { text: 'البدل الشهري يُضاف تلقائيًا إلى رواتب كل موظفي شركات الباقة، وتتحدث قيمته عند تعديل الباقة.', confirmText: 'إضافة البند' })
+  if (!kind) return
   let key = 'custom' + Date.now().toString(36)
   while (benefitKeys.value.includes(key)) key += '1'
   const reason = `بند مزايا جديد: ${label}`
   await api.put('/settings', { key: 'benefitLabels', value: { ...labels, [key]: label }, reason })
+  if (kind === 'allowance') await api.put('/settings', { key: 'benefitTypes', value: { ...(auth.meta?.benefit_types || {}), [key]: 'allowance' }, reason })
   for (const tr of tiers.value) await api.put(`/tiers/${tr.id}`, { benefits: { ...tr.benefits, [key]: val }, reason })
   await Promise.all([auth.loadMeta(), load()])
   ui.toast(`أُضيف «${label}» إلى كل الباقات وحُفظ — عدّل قيمته لأي باقة ثم «حفظ نسخة جديدة»`, 'ok', 6000)
@@ -325,8 +333,9 @@ async function saveCompany() {
 async function saveTiers() {
   if (!reason.value.trim()) return ui.toast('سبب التعديل إلزامي', 'warn')
   const cast = (v) => (v === 'true' ? true : v === 'false' ? false : v !== '' && !isNaN(v) ? Number(v) : v)
-  for (const tr of tiers.value) await api.put(`/tiers/${tr.id}`, { benefits: Object.fromEntries(Object.entries(tr.benefits).map(([k, v]) => [k, cast(v)])), reason: reason.value })
-  ui.toast('حُفظت الباقات', 'ok'); reason.value = ''; load()
+  let synced = 0
+  for (const tr of tiers.value) synced += (await api.put(`/tiers/${tr.id}`, { benefits: Object.fromEntries(Object.entries(tr.benefits).map(([k, v]) => [k, cast(v)])), reason: reason.value })).benefits_synced || 0
+  ui.toast(synced ? `حُفظت الباقات وتحدّثت بدلات ${synced} موظف تلقائيًا` : 'حُفظت الباقات — لا بدلات تغيّرت على الموظفين', 'ok', 6000); reason.value = ''; load()
 }
 onMounted(load)
 </script>

@@ -1,7 +1,7 @@
 <template>
   <div class="page-h">
     <div><h1>{{ t('التقييم والأوزان') }}</h1><p>أربعة محاور بأوزان قابلة للتعديل: الإنجاز · الحضور · التطوير · الانضباط — تُحسب آليًا من التقرير الشهري وسجل الحضور والتطوير والمخالفات، وتُنشر مع اعتماد التقرير، ويحق للموظف الاعتراض خلال المهلة</p></div>
-    <div class="acts"><input v-if="tab !== 'annual' && tab !== 'weights'" v-model="period" type="month" class="in" style="width:auto" @change="load" /><input v-else-if="tab === 'annual'" v-model.number="year" type="number" class="in" style="width:110px" @change="load" /></div>
+    <div class="acts"><MonthPicker v-if="tab !== 'annual' && tab !== 'weights'" v-model="period" @change="load" /><input v-else-if="tab === 'annual'" v-model.number="year" type="number" class="in" style="width:110px" @change="load" /></div>
   </div>
   <div class="tabs"><button v-for="x in tabs" :key="x[0]" :class="{ on: tab === x[0] }" @click="tab = x[0]; load()">{{ x[1] }}</button></div>
 
@@ -30,7 +30,7 @@
       <div v-if="my.annual_published?.length" class="card">
         <h3>تقييماتي السنوية المنشورة <span class="sub">يحق الاعتراض مرة واحدة خلال 7 أيام عمل من النشر، ويُبت فيه خلال 10 أيام عمل (§76)</span></h3>
         <div v-dt class="tw"><table><thead><tr><th>السنة</th><th>النوع</th><th>الدرجة</th><th>التقدير</th><th>نُشر</th><th>الاعتراض</th><th /></tr></thead>
-          <tbody><tr v-for="a in my.annual_published" :key="a.id"><td class="num"><b>{{ a.year }}</b></td><td class="small">{{ a.kind === 'contract' ? 'السنة العقدية' : 'السنة المالية' }}</td><td class="num"><b>{{ a.score }}</b></td><td>{{ a.grade }} · {{ a.grade_label }}</td><td class="small">{{ fmtD(a.published_at) }}</td>
+          <tbody><tr v-for="a in my.annual_published" :key="a.id"><td class="num"><b>{{ a.year }}</b></td><td class="small">{{ a.kind === 'contract' ? 'السنة العقدية' : 'السنة الميلادية' }}</td><td class="num"><b>{{ a.score }}</b></td><td>{{ a.grade }} · {{ a.grade_label }}</td><td class="small">{{ fmtD(a.published_at) }}</td>
             <td class="small">{{ OBJ[a.objection_status] }}<div v-if="a.objection_decision" class="tiny muted">{{ a.objection_decision }}</div><div v-if="a.can_object" class="tiny muted">حتى {{ fmtD(a.objection.deadline) }}</div><div v-if="a.objection_status === 'open' && a.objection?.decision_due" class="tiny muted">يُبت فيه حتى {{ fmtD(a.objection.decision_due) }}</div></td>
             <td><button v-if="a.can_object" class="btn dan xs" @click="objectAnnual(a)">اعتراض</button></td></tr></tbody></table></div>
       </div>
@@ -58,7 +58,7 @@
   <template v-else-if="tab === 'annual'">
     <div class="card">
       <h3>التقييم السنوي {{ year }} <span class="sub">اللائحة §73: 70% متوسط الأشهر المنشورة (يُستبعد الشهر الذي عمل فيه أقل من 10 أيام) + 30% تقييم الأهداف السنوية · المكافأة §85: أشهر × أجر ديسمبر الشامل × نسبة الخدمة × معامل التمويل</span>
-        <span class="acts"><select v-model="annualKind" class="in" style="width:auto" @change="load"><option value="fiscal">السنة المالية (يناير–ديسمبر)</option><option value="contract">السنة العقدية (من المباشرة)</option></select><button v-if="canPublish" class="btn sec xs" :class="{ loading: busy }" @click="publishAnnual">نشر التقييم السنوي</button></span></h3>
+        <span class="acts"><select v-model="annualKind" class="in" style="width:auto" @change="load"><option value="fiscal">السنة الميلادية (يناير–ديسمبر)</option><option value="contract">السنة العقدية (من المباشرة)</option></select><button v-if="canPublish" class="btn sec xs" :class="{ loading: busy }" @click="publishAnnual">نشر التقييم السنوي</button></span></h3>
       <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th>الشركة</th><th>الأشهر</th><th>إنجاز</th><th>حضور</th><th>تطوير</th><th>انضباط</th><th>الأهداف السنوية</th><th>المعدل</th><th>التقدير</th><th v-if="annualKind === 'fiscal'">المكافأة</th><th v-if="annualKind === 'fiscal'">العلاوة</th><th /></tr></thead>
         <tbody><tr v-for="r in annual" :key="r.employee.id">
           <td><b>{{ r.employee.name }}</b></td><td class="small">{{ r.company }}</td>
@@ -232,7 +232,7 @@ const TAB_HELP = {
   monthly: 'التقييم الشهري: تقييم فريقك لشهر محدد. الدرجة تُحسب آليًا من التقرير الشهري والحضور والتطوير والانضباط، ويُضيف المدير تقييم الجودة والتعاون من زر «عرض»، ثم يُنشر التقييم للموظف.',
   annual: 'التقييم السنوي: 70% متوسط التقييمات الشهرية المنشورة + 30% الأهداف السنوية المعتمدة من الرئيس التنفيذي للشركة. إن نقصت الأشهر عن 6 والموظف مستوفٍ لمدة خدمة المكافأة يُحسب من الأشهر المتاحة. يُنشر ليحق للموظف الاعتراض عليه.',
   sim: 'محاكاة «ماذا لو»: تجربة أوزان مختلفة ومعرفة أثرها على درجات الفريق قبل اعتمادها، دون تغيير أي تقييم فعلي.',
-  weights: 'الأوزان والتقديرات: نسب المحاور الأربعة وحد القبول وسلم التقديرات المعتمد. التعديل للمدير العام فقط ويُحفظ بنسخة جديدة.',
+  weights: 'الأوزان والتقديرات: نسب المحاور الأربعة وحد القبول وسلم التقديرات المعتمد. التعديل للرئيس التنفيذي للمجموعة فقط ويُحفظ بنسخة جديدة.',
 }
 async function saveRating() {
   const r = rateForm.value, mx = detail.value.rating

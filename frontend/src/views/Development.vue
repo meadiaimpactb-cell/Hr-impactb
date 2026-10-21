@@ -48,7 +48,7 @@
       <div class="tw"><table><thead><tr><th>النشاط أو المسار</th><th style="width:140px">الشهر</th><th>كيف ستطبّقه</th><th /></tr></thead>
         <tbody><tr v-for="(t, i) in plan.tracks" :key="i">
           <td><input v-model="t.title" class="in" :disabled="plan.status === 'approved'" placeholder="مثال: دورة إدارة المشاريع" /></td>
-          <td><input v-model="t.month" type="month" class="in" :disabled="plan.status === 'approved'" /></td>
+          <td><MonthPicker v-model="t.month" :disabled="plan.status === 'approved'" :ahead="12" /></td>
           <td><input v-model="t.apply" class="in" :disabled="plan.status === 'approved'" /></td>
           <td><button v-if="plan.status !== 'approved'" class="btn ghost xs" @click="plan.tracks.splice(i, 1)"><Icon name="x" :size="13" /></button></td>
         </tr></tbody></table></div>
@@ -78,7 +78,7 @@
 
   <template v-else-if="tab === 'board'">
     <div v-if="board" class="card">
-      <h3>نجم التطوير — الربع {{ board.stars.quarter }}/{{ board.stars.year }} <span class="sub">صاحب أعلى رصيد من نقاط التطوير في كل شركة خلال الربع (§79) — شهادة تقدير وإعلان على مستوى المجموعة</span><span class="acts"><input v-model="boardPeriod" type="month" class="in" style="width:auto" @change="load" /></span></h3>
+      <h3>نجم التطوير — الربع {{ board.stars.quarter }}/{{ board.stars.year }} <span class="sub">صاحب أعلى رصيد من نقاط التطوير في كل شركة خلال الربع (§79) — شهادة تقدير وإعلان على مستوى المجموعة</span><span class="acts"><MonthPicker v-model="boardPeriod" @change="load" /></span></h3>
       <div v-if="!board.stars.stars.length" class="small muted">لا نقاط تطوير موثقة في هذا الربع</div>
       <div class="row" style="gap:6px;flex-wrap:wrap"><span v-for="st in board.stars.stars" :key="st.employee.id" class="pill ok">{{ st.company }}: <b>{{ st.employee.name }}</b> — {{ st.points }} نقطة</span></div>
     </div>

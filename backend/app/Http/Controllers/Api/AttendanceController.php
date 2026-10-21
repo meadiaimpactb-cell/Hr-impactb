@@ -45,6 +45,8 @@ class AttendanceController extends Controller
             'records' => $this->records($e, $period),
             'grace' => (int) Settings::get('graceMinutes', $e->company_id, 0),
             'note_required' => $e->daily_note_required || Settings::get('dailyNoteEnabled', $e->company_id, false),
+            'note_min' => (int) Settings::get('dailyNoteMin', $e->company_id, 20),
+            'note_pending' => $e->attendance()->where('note_pending', true)->where('work_date', '>=', now()->subDays((int) Settings::get('dailyNoteLateDays', $e->company_id, 7))->toDateString())->orderByDesc('work_date')->get(['id', 'work_date', 'note']),
         ];
     }
 
@@ -52,7 +54,7 @@ class AttendanceController extends Controller
     public function today(Request $request)
     {
         $today = $request->date('date')?->toDateString() ?? now()->toDateString(); // any day's log; today by default
-        $emps = Access::for()->employees()->where('status', '!=', 'terminated')->where('punch_required', true)
+        $emps = Access::for()->employees('ATT')->where('status', '!=', 'terminated')->where('punch_required', true)
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
             ->with(['company:id,name', 'attendance' => fn ($q) => $q->whereDate('work_date', $today)->with('location:id,name')])
             ->orderBy('name')->get(['id', 'name', 'emp_no', 'company_id']);
@@ -76,7 +78,7 @@ class AttendanceController extends Controller
     public function month(Request $request)
     {
         $period = $request->input('period', now()->format('Y-m'));
-        $emps = Access::for()->employees()->where('status', '!=', 'terminated')->where('punch_required', true)
+        $emps = Access::for()->employees('ATT')->where('status', '!=', 'terminated')->where('punch_required', true)
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
             ->with('company:id,name', 'schedule')->orderBy('name')->get();
 
@@ -93,7 +95,7 @@ class AttendanceController extends Controller
 
     public function pending()
     {
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('ATT')->pluck('id');
 
         return AttendanceRecord::with('employee:id,name,emp_no', 'location:id,name')->whereIn('employee_id', $ids)
             ->where('pending', true)->orderByDesc('work_date')->limit(200)->get();
@@ -120,9 +122,10 @@ class AttendanceController extends Controller
             $days = (int) Settings::get('excuseDays', $record->employee->company_id, 3);
             $due = now();
             for ($i = 0; $i < $days; $i++) {
+                $guard = 0;
                 do {
                     $due->addDay();
-                } while (in_array($due->dayOfWeek, [Carbon::FRIDAY, Carbon::SATURDAY], true));
+                } while (! AttendanceService::isWorkDay($record->employee, $due) && ++$guard < 14);
             }
             $record->update(['status' => 'excuse_requested', 'pending' => true, 'excuse_due' => $due->endOfDay(), 'reviewed_by' => $u->id]);
             Audit::log('attendance', $record->id, 'excuse_requested', null, null, $data['reason']);
@@ -159,7 +162,7 @@ class AttendanceController extends Controller
         abort_unless($u->hasRole('super', 'hr_mgr') || ($u->hasRole('hr_staff') && Access::for()->canAny('ATT', 'approve')), 403, 'إدخال السجل البديل للموارد البشرية');
         $d = $request->validate(['rows' => 'required|array|min:1|max:500', 'rows.*.employee_id' => 'required|integer|exists:employees,id', 'rows.*.date' => 'required|date|before_or_equal:today',
             'rows.*.in' => 'nullable|date_format:H:i', 'rows.*.out' => 'nullable|date_format:H:i', 'rows.*.note' => 'nullable|string|max:300']);
-        $ids = Access::for()->employees()->pluck('id')->all();
+        $ids = Access::for()->employees('ATT')->pluck('id')->all();
         $done = [];
         $errors = [];
         foreach ($d['rows'] as $i => $r) {
@@ -182,7 +185,7 @@ class AttendanceController extends Controller
     public function corrections(Request $request)
     {
         abort_unless(Access::for()->canAny('ATT', 'view'), 403);
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('ATT')->pluck('id');
         $types = \App\Models\RequestType::where('handler', 'correction')->pluck('code')->all() ?: ['correction'];
 
         return \App\Models\ApprovalRequest::with('employee:id,name,emp_no,company_id')->whereIn('employee_id', $ids)->whereIn('type', $types)
@@ -211,16 +214,35 @@ class AttendanceController extends Controller
             ->orderByDesc('work_date')->get();
     }
 
-    /** §33: the employee can rewrite his daily achievement for today (after check-out too); earlier days stay as written. */
+    /**
+     * §33: the employee can rewrite his daily achievement for today (after check-out too); earlier days stay as written.
+     * A day left pending for a missing achievement can still be completed within dailyNoteLateDays (owner's note:
+     * the day's attendance is approved once the achievement is written).
+     */
     public function note(Request $request, \App\Models\AttendanceRecord $record)
     {
         abort_unless($record->employee_id === $request->user()->employee_id, 403);
-        abort_unless($record->work_date->isToday(), 422, 'يُعدَّل المنجز اليومي في اليوم نفسه فقط');
-        $min = (int) \App\Services\Settings::get('dailyNoteMin', $record->employee?->company_id, 20);
+        $cid = $record->employee?->company_id;
+        $late = (int) \App\Services\Settings::get('dailyNoteLateDays', $cid, 7);
+        $ok = $record->work_date->isToday() || ($record->note_pending && $record->work_date->gte(now()->subDays($late)->startOfDay()));
+        abort_unless($ok, 422, $record->note_pending ? "انتهت مهلة كتابة المنجز ($late أيام)" : 'يُعدَّل المنجز اليومي في اليوم نفسه فقط');
+        $min = (int) \App\Services\Settings::get('dailyNoteMin', $cid, 20);
         $d = $request->validate(['note' => "required|string|min:$min|max:2000"], ['note.min' => "اكتب المنجز في $min حرفًا على الأقل (§33)"]);
-        $record->update(['note' => $d['note']]);
-        \App\Services\Audit::log('attendance', $record->id, 'note');
+        $was = $record->note_pending;
+        $record->update(['note' => $d['note'], 'note_pending' => false]);
+        \App\Services\Audit::log('attendance', $record->id, $was ? 'note_completed' : 'note');
 
         return $record->fresh();
+    }
+
+    /** My days still pending for a missing daily achievement (web + mobile banner). */
+    public function notePending(Request $request)
+    {
+        $e = $request->user()->employee;
+        abort_unless($e, 404);
+        $late = (int) Settings::get('dailyNoteLateDays', $e->company_id, 7);
+
+        return $e->attendance()->where('note_pending', true)->where('work_date', '>=', now()->subDays($late)->toDateString())->orderByDesc('work_date')->get(['id', 'work_date', 'check_in', 'check_out', 'note'])
+            ->map(fn ($r) => $r->toArray() + ['deadline' => $r->work_date->copy()->addDays($late)->toDateString()]);
     }
 }

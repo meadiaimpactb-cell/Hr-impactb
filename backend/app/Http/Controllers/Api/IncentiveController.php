@@ -28,7 +28,7 @@ class IncentiveController extends Controller
     public function index(Request $request)
     {
         abort_unless(Access::for()->canAny('PRF', 'view'), 403);
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('PRF')->pluck('id');
 
         return Incentive::with('employee:id,name,emp_no,company_id', 'employee.company:id,name', 'giver:id,name')->whereIn('employee_id', $ids)
             ->when($request->input('period'), fn ($q, $p) => $q->where('period', $p))->orderByDesc('id')->limit(300)->get()->map(fn ($i) => $this->row($i));
@@ -78,7 +78,7 @@ class IncentiveController extends Controller
     public function board(Request $request)
     {
         $period = $request->input('period', now()->format('Y-m'));
-        $emps = Access::for()->employees()->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->get();
+        $emps = Access::for()->employees('PRF')->where('status', '!=', 'terminated')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->with('company:id,name')->get();
         $rows = $emps->map(fn ($e) => ['employee' => $e->only('id', 'name', 'emp_no'), 'company' => $e->company?->name, 'points' => BonusService::excellencePoints($e, $period)])
             ->sortByDesc(fn ($r) => $r['points']['total'])->values();
 

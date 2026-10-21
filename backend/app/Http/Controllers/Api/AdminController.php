@@ -44,7 +44,7 @@ class AdminController extends Controller
             'departments' => array_values(array_unique(array_merge(Lookup::names('departments'), Employee::whereNotNull('dept')->where('dept', '!=', '')->distinct()->orderBy('dept')->pluck('dept')->all()))),
             'letter_kinds' => Lookup::names('letter_kinds'),
             'correction_kinds' => Lookup::names('correction_kinds'),
-            'benefit_labels' => array_merge(config('hc.benefitLabels'), (array) Settings::get('benefitLabels')),
+            'benefit_labels' => array_merge(config('hc.benefitLabels'), (array) Settings::get('benefitLabels')), 'benefit_types' => (array) Settings::get('benefitTypes', null, []),
             'policy' => ['grace_minutes' => (int) Settings::get('graceMinutes', null, 0), 'daily_note_min' => (int) Settings::get('dailyNoteMin', null, 20), 'sla_days' => (int) Settings::conf('approvalSlaDays'), 'max_absent_per_team' => (int) Settings::get('maxAbsentPerTeam', null, 0), 'reactions_enabled' => (bool) Settings::get('reactionsEnabled', null, true), 'selfie_enabled' => (bool) Settings::get('selfieEnabled', null, false), 'kudos_enabled' => (bool) Settings::get('peerKudosEnabled', null, true), 'biometric_punch' => (bool) Settings::get('biometricPunch', null, true),
                 'presence_check' => (bool) Settings::get('presenceCheckEnabled', null, true), 'location_tracking' => (bool) Settings::get('locationTrackingEnabled', null, false), 'track_interval' => (int) Settings::get('trackIntervalMinutes', null, 10)],
         ];
@@ -102,6 +102,11 @@ class AdminController extends Controller
         $before = $company?->toArray();
         $company ? $company->update($data) : $company = Company::create($data);
         Audit::log('companies', $company->id, $before ? 'update' : 'create', $before, $data);
+        if ($before && isset($data['tier_id']) && (int) $data['tier_id'] !== (int) ($before['tier_id'] ?? 0)) {
+            // the company moved to another package: its employees' package allowances follow
+            [$emps] = \App\Services\BenefitSync::syncCompanies([$company->id], 'انتقال الشركة إلى باقة '.$company->tier()->value('name'));
+            $company->setAttribute('benefits_synced', $emps);
+        }
 
         return $company;
     }
@@ -167,8 +172,12 @@ class AdminController extends Controller
         }
         $tier->update($patch);
         Audit::log('tiers', $tier->id, isset($data['benefits']) ? 'benefits' : 'update', $before, $patch, $data['reason']);
+        $synced = 0;
+        if (isset($data['benefits'])) { // every employee of the companies in this package gets the new values
+            [$synced] = \App\Services\BenefitSync::syncCompanies($tier->companies()->pluck('id')->all(), 'تعديل مزايا باقة '.$tier->name.': '.$data['reason']);
+        }
 
-        return $tier->loadCount('companies');
+        return $tier->loadCount('companies')->setAttribute('benefits_synced', $synced);
     }
 
     /** Deleting a tier that still classifies companies requires the tier they move to (asked for in the UI). */
@@ -181,6 +190,7 @@ class AdminController extends Controller
         if ($count && empty($d['move_to'])) {
             abort(422, "الفئة مرتبطة بـ {$count} شركة — اختر الفئة التي تنتقل إليها هذه الشركات أولًا");
         }
+        $moved = $count ? $tier->companies()->pluck('id')->all() : [];
         if ($count) {
             $tier->companies()->update(['tier_id' => $d['move_to']]);
         }
@@ -190,6 +200,9 @@ class AdminController extends Controller
             $first->update(['is_default' => true]);
         }
         Audit::log('tiers', $snapshot['id'], 'delete', $snapshot, ['moved_to' => $d['move_to'] ?? null, 'companies' => $count], $d['reason']);
+        if ($moved) {
+            \App\Services\BenefitSync::syncCompanies($moved, 'حذف باقة '.$snapshot['name'].' ونقل الشركة إلى باقة '.Tier::whereKey($d['move_to'])->value('name'));
+        }
 
         return ['ok' => true, 'moved' => $count];
     }

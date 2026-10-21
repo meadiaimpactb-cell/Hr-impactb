@@ -200,10 +200,10 @@ class ApprovalService
             if (! empty($p['valid_to']) && $p['valid_to'] < $today) {
                 return false;
             }
-            if (! in_array($r->company_id, array_map('intval', $p['companies'] ?? []), true) || ! in_array('approve', $p['ops'][$op] ?? [], true)) {
+            if (! in_array($r->company_id, array_map('intval', $p['companies'] ?? []), true) || ! in_array('approve', Access::staffOps($p, $r->company_id)[$op] ?? [], true)) {
                 return false;
             }
-            $limit = $p['limits'][$op] ?? null;
+            $limit = Access::staffLimit($p, $op, $r->company_id);
 
             return $limit === null || $limit === '' || $metric === null || $metric <= (float) $limit;
         })->pluck('id')->all();
@@ -266,7 +266,7 @@ class ApprovalService
         // the HR staff limit (days / amount) of the person changing it still applies
         if ($by->hasRole('hr_staff') && ! $by->hasRole('hr_mgr', 'super')) {
             $op = self::op($r->type);
-            $limit = $by->perms['limits'][$op] ?? null;
+            $limit = Access::staffLimit($by->perms ?? [], $op, $r->company_id);
             $metric = $op === 'LVE' ? (float) ($d['days'] ?? 0) : (float) ($d['amount'] ?? 0);
             if ($limit !== null && $limit !== '' && $metric > (float) $limit) {
                 throw ValidationException::withMessages(['changes' => 'التعديل يتجاوز حد صلاحيتك المفوضة']);
@@ -404,12 +404,16 @@ class ApprovalService
                 $e->components()->where('key', $key)->whereNull('valid_to')->update(['valid_to' => Carbon::parse($from)->subDay()->toDateString()]);
                 $e->components()->create(['key' => $key, 'name' => $d['name'] ?? 'الأجر الأساسي', 'amount' => $d['after'], 'source' => 'custom', 'valid_from' => $from, 'approval_request_id' => $r->id]);
                 $e->addCareer($isBasic ? 'تغيير الأجر' : 'تغيير بدل', ($d['name'] ?? 'الأساسي').": {$d['before']} → {$d['after']}");
+                if ($isBasic) { // housing / transport are a share of the basic wage
+                    BenefitSync::sync($e->fresh(), 'تغيّر الأجر الأساسي (طلب #'.$r->id.')', max($from, BenefitSync::effectiveFrom($e->company_id)));
+                }
                 break;
             case 'benefit':
                 $cb = $e->custom_benefits ?? [];
                 $cb[$d['benefit']] = is_numeric($d['after']) ? (float) $d['after'] : $d['after'];
                 $e->update(['custom_benefits' => $cb]);
                 $e->addCareer('استثناء مزايا', "{$d['benefit']}: {$d['before']} → {$d['after']}");
+                BenefitSync::sync($e->fresh(), 'استثناء مزايا معتمد (طلب #'.$r->id.')');
                 break;
             case 'resignation':
                 app(\App\Http\Controllers\Api\TerminationController::class)->createCase($e, 'resign', $d['computed_last'], $d['reason'] ?? null, auth()->id(), $r->id);
@@ -442,6 +446,7 @@ class ApprovalService
                     $co->update(['tier_id' => $tier->id]);
                     Audit::log('companies', $co->id, 'tier', ['tier_id' => $before], ['tier_id' => $tier->id], 'طلب تصنيف #'.$r->id.' — بطاقة الأداء '.$d['achievement'].'%');
                     $users = User::whereIn('employee_id', \App\Models\Employee::where('company_id', $co->id)->pluck('id'))->pluck('id')->all();
+                    BenefitSync::syncCompanies([$co->id], 'تصنيف الشركة: '.$tier->name.' (طلب #'.$r->id.')');
                     Audit::notify($users, 'تصنيف شركتك للسنة الجديدة: '.$tier->name, 'يسري من '.$d['effective'].' وتتحدث مزاياك تلقائيًا (§49–50)', 'info', ['screen' => 'dashboard']);
                 }
                 break;

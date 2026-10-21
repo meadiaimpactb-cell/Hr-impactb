@@ -19,3 +19,5 @@ Schedule::command('hc:custody-overdue')->dailyAt('07:20');
 Schedule::command('hc:finance-reconciliation')->monthlyOn(1, '08:00');
 // §116: periodic access-rights review (every accessReviewDays days)
 Schedule::command('hc:access-review')->dailyAt('08:10');
+// Weekly reports (§34 + owner's notes): missing weeks noted in the file and the evaluation, plan / deadline reminders
+Schedule::command('hc:weekly-watch')->dailyAt('07:30');

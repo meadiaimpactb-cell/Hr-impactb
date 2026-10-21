@@ -27,7 +27,7 @@ class ImprovementPlanController extends Controller
     public function index(Request $request)
     {
         abort_unless(Access::for()->canAny('PRF', 'view'), 403);
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('PRF')->pluck('id');
 
         return ['plans' => ImprovementPlan::with('employee:id,name,emp_no,company_id,manager_id', 'employee.company:id,name')->whereIn('employee_id', $ids)->orderByDesc('id')->limit(200)->get()->map(fn ($p) => $this->row($p, $request->user())),
             'suggestions' => $this->suggestions($ids)];

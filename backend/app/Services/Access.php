@@ -57,8 +57,8 @@ class Access
         return $this->user->employee_id && Company::whereKey($companyId)->where('ceo_employee_id', $this->user->employee_id)->exists();
     }
 
-    /** Company ids in my scope. */
-    public function companyIds(): array
+    /** Company ids in my scope; with $op, HR staff keep only the companies where that operation was granted to them. */
+    public function companyIds(?string $op = null, string $action = 'view'): array
     {
         $u = $this->user;
         if (! $u) {
@@ -72,7 +72,7 @@ class Access
         }
         $ids = [];
         if ($u->hasRole('hr_staff')) {
-            $ids = array_merge($ids, $this->hrStaffCompanies());
+            $ids = array_merge($ids, $this->hrStaffCompanies($op, $action));
         }
         if ($u->hasRole('ceo') && $u->company_id) {
             $ids[] = $u->company_id;
@@ -87,14 +87,43 @@ class Access
         return array_values(array_unique($ids));
     }
 
-    private function hrStaffCompanies(): array
+    private function hrStaffCompanies(?string $op = null, string $action = 'view'): array
     {
         $p = $this->user->perms ?? [];
         if (! empty($p['valid_to']) && $p['valid_to'] < now()->toDateString()) {
             return [];
         }
+        $ids = array_map('intval', $p['companies'] ?? []);
 
-        return array_map('intval', $p['companies'] ?? []);
+        return $op ? array_values(array_filter($ids, fn ($c) => in_array($action, self::staffOps($p, $c)[$op] ?? [], true))) : $ids;
+    }
+
+    /**
+     * HR staff operations × actions inside one company: the company's own matrix when the HR manager customised it,
+     * otherwise the shared matrix. Without a company: everything granted anywhere (list screens narrow by company later).
+     */
+    public static function staffOps(array $p, ?int $companyId = null): array
+    {
+        $per = $p['per_company'] ?? [];
+        if ($companyId) {
+            return $per[$companyId]['ops'] ?? $per[(string) $companyId]['ops'] ?? ($p['ops'] ?? []);
+        }
+        $all = $p['ops'] ?? [];
+        foreach ($per as $c) {
+            foreach ($c['ops'] ?? [] as $op => $actions) {
+                $all[$op] = array_values(array_unique(array_merge($all[$op] ?? [], $actions)));
+            }
+        }
+
+        return $all;
+    }
+
+    /** Approval limit of an HR staff member for an operation in a company (null = no limit). */
+    public static function staffLimit(array $p, string $op, ?int $companyId = null): mixed
+    {
+        $per = $p['per_company'][$companyId] ?? $p['per_company'][(string) $companyId] ?? null;
+
+        return ($per ? ($per['limits'][$op] ?? null) : null) ?? ($p['limits'][$op] ?? null);
     }
 
     /**
@@ -109,10 +138,10 @@ class Access
         return $id && in_array($id, $this->companyIds(), true) ? $id : null;
     }
 
-    /** Query of employees visible to the current user, narrowed to the selected company (lists). */
-    public function employees(): Builder
+    /** Query of employees visible to the current user, narrowed to the selected company (lists). $op narrows HR staff per company. */
+    public function employees(?string $op = null, string $action = 'view'): Builder
     {
-        $q = $this->employeesAll();
+        $q = $this->employeesAll($op, $action);
         if ($f = $this->focus()) {
             $q->where('employees.company_id', $f);
         }
@@ -121,7 +150,7 @@ class Access
     }
 
     /** Every employee in the user's scope regardless of the selected company (permission checks). */
-    public function employeesAll(): Builder
+    public function employeesAll(?string $op = null, string $action = 'view'): Builder
     {
         $u = $this->user;
         $q = Employee::query();
@@ -133,7 +162,7 @@ class Access
         }
         $companies = [];
         if ($u->hasRole('hr_staff')) {
-            $companies = $this->hrStaffCompanies();
+            $companies = $this->hrStaffCompanies($op, $action);
         }
         if ($u->hasRole('ceo') && $u->company_id) {
             $companies[] = $u->company_id;
@@ -170,7 +199,7 @@ class Access
 
         if ($u->hasRole('hr_staff') && ! in_array($op, self::NON_DELEGABLE, true)) {
             $p = $u->perms ?? [];
-            $ok = in_array($action, $p['ops'][$op] ?? [], true)
+            $ok = in_array($action, self::staffOps($p, $companyId ?: null)[$op] ?? [], true)
                 && (empty($p['valid_to']) || $p['valid_to'] >= now()->toDateString())
                 && (! $companyId || in_array($companyId, array_map('intval', $p['companies'] ?? []), true));
             if ($ok) {
@@ -250,7 +279,7 @@ class Access
     {
         return self::activeUsers()->filter(fn (User $u) => ($u->hasRole('hr_mgr') && (! $u->hr_scope || ! $companyId || in_array($companyId, array_map('intval', (array) $u->hr_scope), true)))
             || ($u->hasRole('hr_staff') && in_array($companyId, array_map('intval', $u->perms['companies'] ?? []), true)
-                && (! $op || array_intersect(['view', 'approve'], $u->perms['ops'][$op] ?? []))))
+                && (! $op || array_intersect(['view', 'approve'], self::staffOps($u->perms ?? [], $companyId)[$op] ?? []))))
             ->pluck('id')->values()->all();
     }
 

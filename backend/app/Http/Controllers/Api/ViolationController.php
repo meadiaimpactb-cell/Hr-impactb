@@ -30,7 +30,7 @@ class ViolationController extends Controller
     public function index(Request $request)
     {
         abort_unless(Access::for()->canAny('VIO', 'view'), 403);
-        $ids = Access::for()->employees()->pluck('id');
+        $ids = Access::for()->employees('VIO')->pluck('id');
 
         return Violation::with('employee:id,name,emp_no', 'company:id,name')->whereIn('employee_id', $ids)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
@@ -64,7 +64,7 @@ class ViolationController extends Controller
         abort_unless(Access::for()->canAny('VIO', 'view'), 403);
         $period = $request->input('period', now()->subMonthNoOverflow()->format('Y-m'));
         $out = [];
-        $emps = Access::for()->employees()->where('status', '!=', 'terminated')->get();
+        $emps = Access::for()->employees('VIO')->where('status', '!=', 'terminated')->get();
         $last = now()->parse($period.'-01')->endOfMonth()->toDateString();
         foreach ($emps->where('punch_required', true) as $e) {
             $s = AttendanceService::summary($e, $period);
@@ -422,7 +422,7 @@ class ViolationController extends Controller
         abort_unless($acc->canAny('VIO', 'view') || $acc->canAny('PAY', 'view'), 403);
         $from = $request->input('from', now()->startOfYear()->format('Y-m'));
         $to = $request->input('to', now()->format('Y-m'));
-        $ids = $acc->employees()->pluck('id');
+        $ids = $acc->employees('VIO')->pluck('id');
         $rows = Violation::with('employee:id,name,emp_no', 'company:id,name')->whereIn('employee_id', $ids)->where('status', 'active')->where('amount', '>', 0)
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
             ->whereBetween('period', [substr($from, 0, 7), substr($to, 0, 7)])->orderBy('period')->orderBy('id')->get();

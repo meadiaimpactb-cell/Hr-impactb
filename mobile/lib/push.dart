@@ -12,6 +12,9 @@ class Push {
   static bool ready = false;
   static String? token;
   static void Function(Map<String, dynamic> data)? onOpen;
+  /// A message that arrives while the app is open (no system banner is shown then): the shell refreshes its badges,
+  /// shows the announcement pop-up or a snack bar.
+  static void Function(Map<String, dynamic> data, String title, String body)? onForeground;
 
   /// Set to true once ios/Runner/GoogleService-Info.plist and the APNs key are in place (needs the paid Apple account).
   static const bool iosConfigured = false;
@@ -28,9 +31,10 @@ class Push {
         token = t;
         register();
       });
-      FirebaseMessaging.onMessageOpenedApp.listen((msg) => onOpen?.call(msg.data));
+      FirebaseMessaging.onMessageOpenedApp.listen((msg) => onOpen?.call({...msg.data, 'title': msg.notification?.title ?? ''}));
+      FirebaseMessaging.onMessage.listen((msg) => onForeground?.call(msg.data, msg.notification?.title ?? '', msg.notification?.body ?? ''));
       final initial = await m.getInitialMessage();
-      if (initial != null) onOpen?.call(initial.data);
+      if (initial != null) onOpen?.call({...initial.data, 'title': initial.notification?.title ?? ''});
     } catch (e) {
       debugPrint('Push disabled: $e');
     }

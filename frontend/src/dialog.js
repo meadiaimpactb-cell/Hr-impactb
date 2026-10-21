@@ -69,4 +69,21 @@ export async function promptBox(title, { text, placeholder = '', value = '', req
   return r.isConfirmed ? (r.value || '').trim() : null
 }
 
-export default { confirm: confirmBox, alert: alertBox, prompt: promptBox }
+/** One choice out of a few. options: { key: label }. Returns the chosen key, or null when cancelled. */
+export async function chooseBox(title, options, { text, value, confirmText = 'متابعة' } = {}) {
+  const r = await (await swal()).fire({
+    title,
+    text,
+    input: 'radio',
+    inputOptions: options,
+    inputValue: value ?? Object.keys(options)[0],
+    showCancelButton: true,
+    confirmButtonText: confirmText,
+    cancelButtonText: 'إلغاء',
+    customClass: { ...BASE.customClass, input: 'hc-swal-radio' },
+    inputValidator: (v) => (v ? null : 'اختر واحدًا'),
+  })
+  return r.isConfirmed ? r.value : null
+}
+
+export default { confirm: confirmBox, alert: alertBox, prompt: promptBox, choose: chooseBox }

@@ -39,7 +39,7 @@ class LeaveController extends Controller
     public function report(Request $request)
     {
         $types = LeaveType::where('active', true)->whereIn('accrual', ['monthly', 'yearly'])->whereNotNull('quota_key')->orderBy('sort')->get();
-        $emps = Access::for()->employees()->where('status', '!=', 'terminated')->with('company.tier')
+        $emps = Access::for()->employees('LVE')->where('status', '!=', 'terminated')->with('company.tier')
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->orderBy('name')->get();
 
         return [
@@ -54,7 +54,7 @@ class LeaveController extends Controller
     public function calendar(Request $request)
     {
         $m = Carbon::parse($request->input('month', now()->format('Y-m')).'-01');
-        $ids = Access::for()->employees()->where('status', '!=', 'terminated')->pluck('id');
+        $ids = Access::for()->employees('LVE')->where('status', '!=', 'terminated')->pluck('id');
 
         return ApprovalRequest::with('employee:id,name')->whereIn('employee_id', $ids)->where('type', 'leave')->whereIn('status', ['pending', 'approved'])
             ->where('data->from', '<=', $m->copy()->endOfMonth()->toDateString())->where('data->to', '>=', $m->toDateString())
@@ -73,7 +73,7 @@ class LeaveController extends Controller
             'rows.*.available' => 'nullable|numeric|min:-365|max:3650', 'rows.*.used' => 'nullable|numeric|min:0|max:3650']);
         $lt = LeaveType::where('code', $d['type'])->firstOrFail();
         $year = $d['year'] ?? (int) now()->year;
-        $scope = Access::for()->employees()->where('status', '!=', 'terminated')->with('company.tier', 'schedule')->get();
+        $scope = Access::for()->employees('LVE')->where('status', '!=', 'terminated')->with('company.tier', 'schedule')->get();
         $out = [];
         foreach ($d['rows'] as $i => $row) {
             $e = ! empty($row['emp_no']) ? $scope->first(fn ($x) => (string) $x->emp_no === trim((string) $row['emp_no'])) : null;
@@ -113,7 +113,7 @@ class LeaveController extends Controller
     public function pastIndex(Request $request)
     {
         abort_unless($request->user()->isHr(), 403);
-        $ids = Access::for()->employees()->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->pluck('id');
+        $ids = Access::for()->employees('LVE')->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))->pluck('id');
 
         return LeaveLedger::with('employee:id,name,emp_no')->whereIn('employee_id', $ids)->where('entry', 'used')->whereNull('request_id')
             ->where('note', 'like', self::PAST.'%')->orderByDesc('occurred_on')->limit(500)->get()

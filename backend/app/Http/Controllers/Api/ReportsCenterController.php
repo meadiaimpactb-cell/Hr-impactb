@@ -28,8 +28,8 @@ class ReportsCenterController extends Controller
 {
     public const CATALOG = [
         'att_detail' => ['الحضور التفصيلي', 'ATT', 'range'], 'att_month' => ['ملخص الحضور الشهري', 'ATT', 'month'], 'lv_bal' => ['أرصدة الإجازات', 'LVE', 'none'],
-        'lv_moves' => ['حركات الإجازات', 'LVE', 'range'], 'payroll' => ['الرواتب', 'PAY', 'month'], 'custody' => ['العهد', 'CUS', 'none'], 'docs' => ['الوثائق غير السارية', 'DOC', 'none'],
-        'evals' => ['التقييمات المنشورة', 'PRF', 'range'], 'weekly' => ['التقارير الأسبوعية', 'PRF', 'range'], 'dev' => ['التطوير والتدريب', 'DEV', 'range'], 'alloc' => ['توزيع الموظفين', 'EMP', 'none'],
+        'lv_moves' => ['حركات الإجازات', 'LVE', 'range'], 'payroll' => ['الرواتب', 'PAY', 'month'], 'custody' => ['العهد', 'CUS', 'none'], 'docs' => ['الوثائق المنتهية وما ينتهي خلال الفترة', 'DOC', 'range'],
+        'evals' => ['التقييمات المنشورة', 'PRF', 'range'], 'weekly' => ['التقارير الأسبوعية', 'PRF', 'range'], 'dev' => ['التطوير والتدريب', 'DEV', 'range'], 'alloc' => ['توزيع الموظفين', 'EMP', 'asof'],
         'viol' => ['المخالفات', 'VIO', 'range'], 'turnover' => ['معدل الدوران', 'EMP', 'range'], 'requests' => ['الطلبات والاعتمادات', 'EMP', 'range'],
         'fines' => ['سجل الغرامات (§106)', 'VIO', 'range'],
     ];
@@ -110,7 +110,8 @@ class ReportsCenterController extends Controller
         $from = $request->input('from', now()->startOfMonth()->toDateString());
         $to = $request->input('to', now()->toDateString());
         $period = $request->input('period', now()->format('Y-m'));
-        $emps = $acc->employees()->when($request->integer('company_id'), fn ($q, $cid) => $q->where('company_id', $cid))->with('company:id,name', 'jobTitle:id,name')->orderBy('name')->get();
+        $op = $key === 'fines' && ! $acc->canAny('VIO', 'view') ? 'PAY' : $c[1];
+        $emps = $acc->employees($op)->when($request->integer('company_id'), fn ($q, $cid) => $q->where('company_id', $cid))->with('company:id,name', 'jobTitle:id,name')->orderBy('name')->get();
         $ids = $emps->pluck('id');
         $name = fn ($id) => $emps->firstWhere('id', $id)?->name;
         [$cols, $rows] = match ($key) {
@@ -130,13 +131,16 @@ class ReportsCenterController extends Controller
 
                 return [['الموظف', 'الشركة', 'الفترة', 'الإجمالي', 'الاستقطاعات', 'الصافي', 'الحالة'], Payslip::whereIn('employee_id', $ids)->where('period', $period)->get()->map(fn ($p) => [$emps->firstWhere('id', $p->employee_id)?->name, $emps->firstWhere('id', $p->employee_id)?->company?->name, $p->period, $p->line['gross'] ?? 0, $p->deductionsTotal(), $p->net(), $p->published ? 'منشورة' : 'غير منشورة'])];
             })(),
-            'custody' => [['العهدة', 'النوع', 'الشركة', 'الموظف', 'القيمة', 'الحالة'], CustodyItem::with('type:id,name', 'company:id,name', 'employee:id,name')->where(fn ($q) => $q->whereIn('company_id', $acc->companyIds())->orWhereIn('employee_id', $ids))->get()->map(fn ($i) => [$i->ident, $i->type?->name, $i->company?->name, $i->employee?->name, $i->value, CustodyItem::STATUSES[$i->status] ?? $i->status])],
-            'docs' => [['المالك', 'النطاق', 'النوع', 'الرقم', 'الانتهاء', 'الحالة'], Document::where(fn ($q) => $q->where(fn ($w) => $w->where('scope', 'employee')->whereIn('owner_id', $ids))->orWhere(fn ($w) => $w->where('scope', 'company')->whereIn('owner_id', $acc->companyIds())))->get()
-                ->map(fn ($d) => [$d->scope === 'employee' ? $name($d->owner_id) : \App\Models\Company::whereKey($d->owner_id)->value('name'), $d->scope === 'employee' ? 'موظف' : 'شركة', Lookup::name('document_types', $d->type), $d->number, $d->expiry_date?->toDateString(), DocumentController::state($d)['label']])->filter(fn ($r) => $r[5] !== 'سارية')->values()],
+            'custody' => [['العهدة', 'النوع', 'الشركة', 'الموظف', 'القيمة', 'الحالة'], CustodyItem::with('type:id,name', 'company:id,name', 'employee:id,name')->where(fn ($q) => $q->whereIn('company_id', $acc->companyIds('CUS'))->orWhereIn('employee_id', $ids))->get()->map(fn ($i) => [$i->ident, $i->type?->name, $i->company?->name, $i->employee?->name, $i->value, CustodyItem::STATUSES[$i->status] ?? $i->status])],
+            // documents already expired, or expiring by the end of the chosen period
+            'docs' => [['المالك', 'النطاق', 'النوع', 'الرقم', 'الانتهاء', 'الحالة'], Document::where(fn ($q) => $q->where(fn ($w) => $w->where('scope', 'employee')->whereIn('owner_id', $ids))->orWhere(fn ($w) => $w->where('scope', 'company')->whereIn('owner_id', $acc->companyIds('DOC'))))
+                ->whereNotNull('expiry_date')->whereDate('expiry_date', '<=', $to)->orderBy('expiry_date')->get()
+                ->map(fn ($d) => [$d->scope === 'employee' ? $name($d->owner_id) : \App\Models\Company::whereKey($d->owner_id)->value('name'), $d->scope === 'employee' ? 'موظف' : 'شركة', Lookup::name('document_types', $d->type), $d->number, $d->expiry_date?->toDateString(), $d->expiry_date?->toDateString() < $from ? 'منتهية قبل الفترة' : DocumentController::state($d)['label']])->values()],
             'evals' => [['الموظف', 'الشهر', 'إنجاز', 'حضور', 'تطوير', 'انضباط', 'الدرجة', 'التقدير', 'اعتراض'], Evaluation::whereIn('employee_id', $ids)->where('type', 'monthly')->whereBetween('period', [substr($from, 0, 7), substr($to, 0, 7)])->orderBy('period')->get()->map(fn ($e) => [$name($e->employee_id), $e->period, $e->axes['achieve'] ?? null, $e->axes['attend'] ?? 'معفى', $e->axes['dev'] ?? null, $e->axes['disc'] ?? null, $e->score, $e->grade, $e->objection_status])],
             'weekly' => [['الموظف', 'الأسبوع', 'الحالة', 'رُفع في'], WeeklyReport::whereIn('employee_id', $ids)->whereBetween('week_start', [$from, $to])->orderBy('week_start')->get()->map(fn ($w) => [$name($w->employee_id), $w->week_start->toDateString(), ['submitted' => 'في الموعد', 'late' => 'متأخر', 'missing' => 'لم يُرفع'][$w->status] ?? $w->status, $w->submitted_at?->toDateTimeString()])],
             'dev' => [['الموظف', 'البرنامج', 'الجهة', 'من', 'إلى', 'الساعات', 'التكلفة', 'الحالة'], DevRecord::whereIn('employee_id', $ids)->where(fn ($q) => $q->whereBetween('from', [$from, $to])->orWhereBetween('to', [$from, $to]))->get()->map(fn ($r) => [$name($r->employee_id), $r->program, $r->provider, $r->from?->toDateString(), $r->to?->toDateString(), $r->hours, $r->cost, DevRecord::STATUSES[$r->status] ?? $r->status])],
-            'alloc' => [['الشركة', 'الوظيفة', 'نوع التعاقد', 'العدد'], $emps->where('status', '!=', 'terminated')->groupBy(fn ($e) => ($e->company?->name ?? '').'|'.($e->jobTitle?->name ?? '—').'|'.$e->contract_type)->map(fn ($g, $k) => [...explode('|', $k), $g->count()])->values()],
+            // head count on a date: hired by then and not yet left
+            'alloc' => [['الشركة', 'الوظيفة', 'نوع التعاقد', 'العدد'], $emps->filter(fn ($e) => (! $e->hire_date || $e->hire_date->toDateString() <= $to) && ($e->status !== 'terminated' || ($e->last_working_day && $e->last_working_day->toDateString() >= $to)))->groupBy(fn ($e) => ($e->company?->name ?? '').'|'.($e->jobTitle?->name ?? '—').'|'.$e->contract_type)->map(fn ($g, $k) => [...explode('|', $k), $g->count()])->values()],
             'viol' => [['الموظف', 'النوع', 'التاريخ', 'الدرجة', 'الخصم', 'الحالة'], Violation::whereIn('employee_id', $ids)->whereBetween('occurred_on', [$from, $to])->get()->map(fn ($v) => [$name($v->employee_id), Lookup::name('violation_types', $v->type), $v->occurred_on->toDateString(), $v->signed_degree ? Lookup::name('penalty_degrees', (string) $v->signed_degree) : '—', $v->amount, Violation::STATUSES[$v->status] ?? $v->status])],
             'turnover' => (function () use ($emps, $from, $to) {
                 $rows = $emps->groupBy('company_id')->map(function ($g) use ($from, $to) {

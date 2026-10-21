@@ -154,7 +154,6 @@ const HINTS = {
 }
 const allEmpOptions = ref([])
 const myCustody = ref([])
-watch(handler, async (h) => { if (h === 'custody' && auth.emp) { try { myCustody.value = (await api.get('/custody/mine')).filter((c) => !['returned', 'available'].includes(c.status)) } catch { myCustody.value = [] } } })
 const CASE_LEAVES = ['newborn', 'marriage', 'bereavement', 'sibling', 'iddah']
 const needsEvent = computed(() => CASE_LEAVES.includes(f.leave_type))
 const typeName = (code) => { const d = defs.value.find((x) => x.code === code); return d ? (ui.lang === 'en' && d.name_en ? d.name_en : d.name) : code }
@@ -164,6 +163,8 @@ const letterKinds = computed(() => auth.meta?.lookups?.letter_kinds || [])
 const type = ref(null)
 const def = computed(() => defs.value.find((d) => d.code === type.value))
 const handler = computed(() => def.value?.handler)
+// custody requests list the employee's current custody (watch declared after handler: it is read at setup)
+watch(handler, async (h) => { if (h === 'custody' && auth.emp) { try { myCustody.value = (await api.get('/custody/mine')).filter((c) => !['returned', 'available'].includes(c.status)) } catch { myCustody.value = [] } } })
 const f = reactive({ leave_type: 'annual', delegate: false, kind: '', lang: 'ar', installments: 6, scope: 'domestic' })
 const file = ref(null)
 const errors = ref({})

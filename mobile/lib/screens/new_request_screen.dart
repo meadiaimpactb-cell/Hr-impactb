@@ -105,7 +105,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
       case 'select':
       case 'lookup':
         final opts = fd['type'] == 'select' ? List<String>.from(fd['options'] ?? []) : ((s.meta?['lookups']?[fd['group']] as List?) ?? []).map((o) => o['name'] as String).toList();
-        return Padding(padding: const EdgeInsets.only(bottom: 12), child: DropdownButtonFormField<String>(initialValue: f[k] as String?, decoration: InputDecoration(labelText: label, errorText: (errors[k] as List?)?.first), items: opts.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(), onChanged: (v) => setState(() => f[k] = v)));
+        return Padding(padding: const EdgeInsets.only(bottom: 12), child: SearchPicker<String>(label: label, value: f[k] as String?, errorText: (errors[k] as List?)?.first, items: [for (final o in opts) (o, o)], onChanged: (v) => setState(() => f[k] = v)));
       default:
         return _text(k, label);
     }
@@ -121,10 +121,10 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
       appBar: AppBar(title: Text(NewRequestScreen.titles(s)[widget.type] ?? tr('طلب جديد'))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         if (handler == 'leave') ...[
-          DropdownButtonFormField<String>(
-            initialValue: f['leave_type'],
-            decoration: InputDecoration(labelText: tr('النوع')),
-            items: [for (final lt in leaveTypes) DropdownMenuItem(value: lt['code'] as String, child: Text('${lt['name']}${balances.any((b) => b['type'] == lt['code']) ? ' — ${balances.firstWhere((b) => b['type'] == lt['code'])['available']}' : ''}'))],
+          SearchPicker<String>(
+            label: tr('النوع'),
+            value: f['leave_type'],
+            items: [for (final lt in leaveTypes) (lt['code'] as String, '${lt['name']}${balances.any((b) => b['type'] == lt['code']) ? ' — ${balances.firstWhere((b) => b['type'] == lt['code'])['available']}' : ''}')],
             onChanged: (v) => setState(() => f['leave_type'] = v),
           ),
           const SizedBox(height: 12),
@@ -134,7 +134,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
         ],
         if (handler == 'correction') ...[
           _dateField('date', 'اليوم', past: true),
-          DropdownButtonFormField<String>(initialValue: f['kind'], decoration: InputDecoration(labelText: tr('النوع')), items: ((meta?['correction_kinds'] as List?) ?? []).map((k) => DropdownMenuItem(value: k as String, child: Text(k))).toList(), onChanged: (v) => setState(() => f['kind'] = v)),
+          SearchPicker<String>(label: tr('النوع'), value: f['kind'], items: [for (final k in ((meta?['correction_kinds'] as List?) ?? [])) (k as String, k)], onChanged: (v) => setState(() => f['kind'] = v)),
           const SizedBox(height: 12),
           InkWell(
             onTap: () async {
@@ -149,12 +149,12 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
         if (handler == 'advance') ...[
           TextField(controller: text2, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr('المبلغ'), errorText: (errors['amount'] as List?)?.first)),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int>(initialValue: f['installments'] ?? 6, decoration: InputDecoration(labelText: tr('عدد الأقساط')), items: [for (var i = 1; i <= 12; i++) DropdownMenuItem(value: i, child: Text('$i'))], onChanged: (v) => f['installments'] = v),
+          SearchPicker<int>(label: tr('عدد الأقساط'), value: f['installments'] ?? 6, items: [for (var i = 1; i <= 12; i++) (i, '$i')], onChanged: (v) => setState(() => f['installments'] = v)),
           const SizedBox(height: 12),
           TextField(controller: reason, decoration: InputDecoration(labelText: tr('الغرض'))),
         ],
         if (handler == 'letter') ...[
-          DropdownButtonFormField<String>(initialValue: f['kind'], decoration: InputDecoration(labelText: tr('النوع')), items: letterKinds.map((k) => DropdownMenuItem(value: k['code'] as String, child: Text((s.locale == 'en' && k['name_en'] != null ? k['name_en'] : k['name']) as String))).toList(), onChanged: (v) => setState(() => f['kind'] = v)),
+          SearchPicker<String>(label: tr('النوع'), value: f['kind'], items: [for (final k in letterKinds) (k['code'] as String, (s.locale == 'en' && k['name_en'] != null ? k['name_en'] : k['name']) as String)], onChanged: (v) => setState(() => f['kind'] = v)),
           const SizedBox(height: 12),
           TextField(controller: reason, decoration: InputDecoration(labelText: tr('الجهة الموجّه إليها'))),
         ],

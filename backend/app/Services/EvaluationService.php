@@ -191,10 +191,23 @@ class EvaluationService
         return $e->weekly_report_required ?? (Settings::get('weeklyReportEnabled', $e->company_id, true) !== false);
     }
 
-    /** Due date of a week's report (§34): the first day of the following week, end of day. */
+    /**
+     * Due date of a week's report (§34 + owner's note): the direct manager chooses, per employee, the last day of the
+     * week or the first day of the following week (employees.weekly_due); otherwise the group / company rule.
+     */
     public static function weekDue(WeeklyReport $w): Carbon
     {
-        return $w->week_start->copy()->addDays(7)->endOfDay();
+        $e = $w->relationLoaded('employee') ? $w->employee : $w->employee()->first();
+        $rule = $e?->weekly_due ?: (Settings::get('weeklyDueRule', $e?->company_id, 'next') ?: 'next');
+
+        return $rule === 'end' ? Carbon::parse($w->week_end)->endOfDay() : $w->week_start->copy()->addDays(7)->endOfDay();
+    }
+
+    public static function weekDueLabel(?Employee $e): string
+    {
+        $rule = $e?->weekly_due ?: (Settings::get('weeklyDueRule', $e?->company_id, 'next') ?: 'next');
+
+        return $rule === 'end' ? 'آخر يوم في الأسبوع' : 'أول يوم من الأسبوع التالي';
     }
 
     /** Weekly reporting discipline for a month: only weeks already ended count. */
@@ -244,7 +257,7 @@ class EvaluationService
             $presence = $a['required'] ? (($a['required'] - $a['absent']) / $a['required']) * $sub['attend']['presence'] : $sub['attend']['presence'];
             $noLate = $a['late'] === 0 ? $sub['attend']['noLate'] : max(0, $sub['attend']['noLate'] - $a['late'] * 1);
             $noteReq = $e->daily_note_required || Settings::get('dailyNoteEnabled', $e->company_id, false);
-            $pendingNotes = $noteReq ? $e->attendance()->where('work_date', 'like', "$period-%")->where('note_required', true)->whereNull('note')->count() : 0;
+            $pendingNotes = $noteReq ? $e->attendance()->where('work_date', 'like', "$period-%")->where('note_pending', true)->count() : 0;
             $dn = $noteReq ? max(0, $sub['attend']['dailyNote'] - $pendingNotes) : $sub['attend']['dailyNote'];
             $att = $presence + $noLate + $dn;
             $parts['attend'] = ['presence' => $r1($presence), 'no_late' => $r1($noLate), 'daily_note' => $r1($dn), 'absent' => $a['absent'], 'late' => $a['late']];
@@ -256,6 +269,7 @@ class EvaluationService
         $parts['dev'] = ['points' => $dp['points'], 'carry' => $dp['carry'], 'total' => $dp['total'], 'level' => $dp['level_label'], 'records' => $dp['records'], 'score' => $r1($dev)];
 
         // discipline: weekly reports on time, cooperation (manager), conduct (no active non-financial violation)
+        self::ensureWeeks($e, $period); // weeks nobody opened yet still count as missing
         $ws = self::weeklyStats($e->id, $period);
         $weeklyOn = self::weeklyRequired($e);
         $weekly = $weeklyOn && $ws['total'] ? max(0, $sub['disc']['weekly'] * ($ws['on_time'] + $ws['late'] * 0.5) / $ws['total']) : $sub['disc']['weekly'];
@@ -484,7 +498,7 @@ class EvaluationService
         if (! self::weeklyRequired($e)) {
             return;
         }
-        $six = (string) $e->week_pattern === '6';
+        $six = $e->sixDayWeek();
         $start = Carbon::parse($period.'-01');
         $end = $start->copy()->endOfMonth();
         $hire = Carbon::parse($e->hire_date);
@@ -496,8 +510,11 @@ class EvaluationService
         }
         foreach (WeeklyReport::where('employee_id', $e->id)->where('week_start', 'like', "$period-%")->where('status', 'missing')->whereNull('noted_at')->get() as $wk) {
             if (now()->gt(self::weekDue($wk))) {
-                $e->career()->create(['type' => 'تقرير أسبوعي غير مرفوع', 'detail' => "أسبوع {$wk->week_start->toDateString()} لم يُرفع تقريره في موعده (§34)", 'occurred_on' => now()->toDateString()]);
+                // owner's note: a note in the personal file, the week turns red, and it weighs on the monthly evaluation
+                $e->career()->create(['type' => 'تقرير أسبوعي غير مرفوع', 'detail' => "أسبوع {$wk->week_start->format('d/m/Y')} لم يُرفع تقريره في موعده (§34) — يُخصم من محور الانضباط في التقييم الشهري", 'occurred_on' => now()->toDateString()]);
                 $wk->update(['noted_at' => now()]);
+                $who = array_filter([\App\Models\User::where('employee_id', $e->id)->value('id'), $e->manager_id ? \App\Models\User::where('employee_id', $e->manager_id)->value('id') : null]);
+                Audit::notify($who, 'تقرير أسبوعي لم يُرفع: '.$e->name, 'أسبوع '.$wk->week_start->format('d/m/Y').' — سُجّلت ملاحظة في الملف وأثّرت في التقييم الشهري', 'bad', ['screen' => 'reports']);
             }
         }
     }

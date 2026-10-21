@@ -9,7 +9,9 @@
             <div v-if="g.items.length > 1" class="tiny muted mb">منجز مشترك لـ {{ g.items.length }} مهام</div>
             <div v-for="it in g.items" :key="it.id" class="ri-task">
               <template v-if="mode === 'edit' && it.source === 'emp'">
-                <div class="row" style="gap:6px;flex-wrap:nowrap"><input v-model="it.title" class="in" placeholder="عنوان البند الشخصي" /><input v-model.number="it.weight" type="number" class="in" style="max-width:80px" :max="maxEmpWeight" /><button class="btn ghost xs bad" title="حذف" @click="$emit('remove', it)"><Icon name="trash" :size="14" /></button></div>
+                <div class="row" style="gap:6px;flex-wrap:nowrap"><input v-model="it.title" class="in" placeholder="البند (ما الذي ستعمل عليه)" aria-label="البند" /><input v-model.number="it.weight" type="number" class="in" style="max-width:80px" :max="maxEmpWeight" title="الوزن" aria-label="الوزن" /><button class="btn ghost xs bad" title="حذف" @click="$emit('remove', it)"><Icon name="trash" :size="14" /></button></div>
+                <div class="row mt" style="gap:6px"><input v-model="it.target" class="in grow" placeholder="المستهدف (مثال: 10 عملاء جدد)" aria-label="المستهدف" /><input v-model="it.indicator" class="in grow" placeholder="مؤشر النجاح (كيف يُقاس)" aria-label="مؤشر النجاح" /></div>
+                <div v-if="it.mgr_approved === false" class="tiny bad">رفض المشرف هذا البند</div><div v-else-if="it.mgr_approved == null" class="tiny muted">بند شخصي — يحتاج موافقة المشرف</div>
               </template>
               <template v-else>
                 <b>{{ it.title }}</b> <span class="pill gray">وزن {{ it.weight }}</span> <span v-if="it.source === 'emp'" class="pill purple">شخصي</span>

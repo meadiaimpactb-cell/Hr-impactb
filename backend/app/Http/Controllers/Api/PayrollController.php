@@ -35,7 +35,7 @@ class PayrollController extends Controller
     public function companies(Request $request)
     {
         $u = $request->user();
-        $ids = Access::for($u)->companyIds();
+        $ids = Access::for($u)->companyIds('PAY');
         if (! ($u->isHr() || $u->hasRole('fin'))) {
             $ids = array_values(array_filter($ids, fn ($id) => Access::for($u)->isCeoOf($id)));
         }
@@ -503,7 +503,7 @@ class PayrollController extends Controller
 
     public function advances(Request $request)
     {
-        $ids = Access::for($request->user())->employees()->pluck('id');
+        $ids = Access::for($request->user())->employees('PAY')->pluck('id');
 
         return Advance::with('employee:id,name,emp_no')->whereIn('employee_id', $ids)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->latest()->get();

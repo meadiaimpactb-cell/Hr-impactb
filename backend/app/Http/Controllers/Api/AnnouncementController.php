@@ -26,10 +26,25 @@ class AnnouncementController extends Controller
             'job' => $q->whereIn('job_title_id', array_map('intval', $a['jobs'] ?? [])),
             'contract' => $q->where('contract_type', $a['contract'] ?? 'full'),
             'people' => $q->whereIn('id', array_map('intval', $a['employee_ids'] ?? [])),
+            'dept' => $q->whereIn('dept', array_values(array_filter((array) ($a['depts'] ?? [])))),
+            'team' => $q->whereIn('id', ($a['employee_ids'] ?? []) ? array_intersect(array_map('intval', $a['employee_ids']), self::teamOf((int) ($a['manager'] ?? 0))) : self::teamOf((int) ($a['manager'] ?? 0))),
             default => null,
         };
 
         return User::whereIn('employee_id', $q->pluck('id'))->where('active', true)->pluck('id')->all();
+    }
+
+    /** Everyone under a manager: direct reports and their reports, down the whole chain. */
+    public static function teamOf(int $managerEmpId): array
+    {
+        $all = [];
+        $level = $managerEmpId ? [$managerEmpId] : [];
+        while ($level && count($all) < 5000) {
+            $level = array_values(array_diff(Employee::whereIn('manager_id', $level)->where('status', '!=', 'terminated')->pluck('id')->all(), $all, [$managerEmpId]));
+            $all = array_merge($all, $level);
+        }
+
+        return $all;
     }
 
     public function index(Request $request)
@@ -43,28 +58,41 @@ class AnnouncementController extends Controller
         return $rows->map(fn ($x) => $this->row($x, $receipts[$x->id] ?? null, $counts[$x->id] ?? null, $u));
     }
 
-    /** Announcements requiring acknowledgement that this user has not acknowledged yet (popup on login). */
+    /**
+     * Pop-up queue (web and mobile): announcements awaiting this user's acknowledgement, then unread ones the sender chose
+     * to show as a pop-up. Acknowledged / read ones never come back.
+     */
     public function pendingAck(Request $request)
     {
         $u = $request->user();
-        $ids = AnnouncementReceipt::where('user_id', $u->id)->whereNull('ack_at')->pluck('announcement_id');
+        $rec = AnnouncementReceipt::where('user_id', $u->id)->where(fn ($q) => $q->whereNull('ack_at')->orWhereNull('read_at'))->get()->keyBy('announcement_id');
 
-        return Announcement::with('sender:id,name')->whereIn('id', $ids)->where('require_ack', true)->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>=', now()->toDateString()))
-            ->orderBy('published_at')->get()->map(fn ($x) => $this->row($x, null, null, $u));
+        return Announcement::with('sender:id,name')->whereIn('id', $rec->keys())->where('sender_id', '!=', $u->id)
+            ->where(fn ($q) => $q->where('require_ack', true)->orWhere('popup', true))
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>=', now()->toDateString()))
+            ->where('published_at', '>=', now()->subDays(30))
+            ->orderByDesc('require_ack')->orderBy('published_at')->get()
+            ->filter(fn ($x) => $x->require_ack ? ! $rec[$x->id]->ack_at : ! $rec[$x->id]->read_at)
+            ->values()->map(fn ($x) => $this->row($x, $rec[$x->id], null, $u));
     }
 
     public function store(Request $request)
     {
         $u = $request->user();
         $acc = Access::for();
-        $d = $request->validate(['title' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'require_ack' => 'boolean', 'expires_at' => 'nullable|date|after:today',
-            'audience' => 'required|array', 'audience.scope' => ['required', Rule::in(['group', 'company', 'job', 'contract', 'people'])], 'audience.companies' => 'array', 'audience.jobs' => 'array',
-            'audience.contract' => 'nullable|string', 'audience.employee_ids' => 'array']);
+        $d = $request->validate(['title' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'require_ack' => 'boolean', 'popup' => 'boolean', 'expires_at' => 'nullable|date|after:today',
+            'audience' => 'required|array', 'audience.scope' => ['required', Rule::in(['group', 'company', 'job', 'contract', 'people', 'dept', 'team'])], 'audience.companies' => 'array', 'audience.jobs' => 'array',
+            'audience.contract' => 'nullable|string', 'audience.employee_ids' => 'array', 'audience.depts' => 'array']);
         $a = $d['audience'];
         // §115: group CEO and group-wide HR publish to anyone; the company CEO (and the publishers he designates) and
-        // company-scoped HR publish within their companies only. Direct managers no longer publish unless designated.
+        // company-scoped HR publish within their companies only. A direct manager alerts his own team (the people under him).
         $scope = self::publishScope($u);
-        abort_unless($scope !== null, 403, 'نشر الإعلانات للرئيس التنفيذي للمجموعة والموارد البشرية، وللرئيس التنفيذي للشركة أو من يحددهم من موظفيها (§115)');
+        if ($a['scope'] === 'team') {
+            abort_unless($u->employee_id && self::teamOf($u->employee_id), 403, 'لا يتبعك موظفون لإرسال تنبيه لهم');
+            $a['manager'] = $u->employee_id;
+            $scope = 'all'; // the audience itself is limited to his team
+        }
+        abort_unless($scope !== null, 403, 'نشر الإعلانات للرئيس التنفيذي للمجموعة والموارد البشرية، وللرئيس التنفيذي للشركة أو من يحددهم من موظفيها، والمدير المباشر لفريقه (§115)');
         if ($scope !== 'all') {
             abort_if($a['scope'] === 'group', 403, 'إعلان المجموعة للرئيس التنفيذي للمجموعة والموارد البشرية للمجموعة');
             if ($a['scope'] === 'company') {
@@ -79,11 +107,12 @@ class AnnouncementController extends Controller
         }
         abort_unless($users, 422, 'لا مستلمين لهذا الجمهور');
         $path = $request->file('attachment')?->store('announcements/'.now()->format('Y'), 'local');
-        $an = Announcement::create(['sender_id' => $u->id, 'title' => $d['title'], 'body' => $d['body'], 'audience' => $a, 'require_ack' => (bool) ($d['require_ack'] ?? false),
+        $an = Announcement::create(['sender_id' => $u->id, 'title' => $d['title'], 'body' => $d['body'], 'audience' => $a, 'require_ack' => (bool) ($d['require_ack'] ?? false), 'popup' => (bool) ($d['popup'] ?? true),
             'expires_at' => $d['expires_at'] ?? null, 'published_at' => now(), 'status' => 'published', 'attachment_path' => $path]);
         $now = now();
         AnnouncementReceipt::insert(array_map(fn ($uid) => ['announcement_id' => $an->id, 'user_id' => $uid, 'created_at' => $now, 'updated_at' => $now], $users));
-        Audit::notify($users, ($an->require_ack ? 'إعلان يتطلب إقرارك: ' : 'إعلان: ').$an->title, mb_substr($an->body, 0, 140), 'info', ['screen' => 'announcements']);
+        $kind = $a['scope'] === 'team' ? 'تنبيه من مديرك' : 'إعلان';
+        Audit::notify($users, ($an->require_ack ? $kind.' يتطلب تأكيد قراءتك: ' : $kind.': ').$an->title, mb_substr($an->body, 0, 140), 'info', ['screen' => 'announcements', 'id' => $an->id]);
         Audit::log('announcements', $an->id, 'publish', null, ['audience' => $a, 'recipients' => count($users)]);
         Audit::email($users, 'إعلان: '.$an->title, $an->title, $an->body, 'announcements', 'إعلان من '.$u->name.($an->require_ack ? ' — يتطلب تأكيد القراءة' : ''));
 
@@ -124,8 +153,14 @@ class AnnouncementController extends Controller
     {
         $s = self::publishScope($request->user());
 
-        return ['can' => $s !== null, 'all' => $s === 'all', 'companies' => $s === 'all' ? \App\Models\Company::pluck('id') : ($s ?? []),
-            'manage_publishers' => self::publisherCompanies($request->user())];
+        $u = $request->user();
+        $teamIds = $u->employee_id ? self::teamOf($u->employee_id) : [];
+        $team = count($teamIds);
+        $members = $team ? Employee::whereIn('id', $teamIds)->orderBy('name')->get(['id', 'name', 'emp_no', 'manager_id'])
+            ->map(fn ($e) => ['id' => $e->id, 'name' => $e->name, 'emp_no' => $e->emp_no, 'direct' => $e->manager_id === $u->employee_id]) : [];
+
+        return ['can' => $s !== null || $team > 0, 'team_members' => $members, 'all' => $s === 'all', 'companies' => $s === 'all' ? \App\Models\Company::pluck('id') : ($s ?? []),
+            'team' => $team, 'company' => $s !== null, 'manage_publishers' => self::publisherCompanies($u)];
     }
 
     /** Companies whose publishers this user manages: the company CEO for his company, the group CEO / group HR for all. */
@@ -228,7 +263,7 @@ class AnnouncementController extends Controller
 
     private function row(Announcement $x, ?AnnouncementReceipt $mine, $counts, User $u): array
     {
-        return $x->only('id', 'title', 'body', 'audience', 'require_ack', 'published_at', 'expires_at', 'status') + [
+        return $x->only('id', 'title', 'body', 'audience', 'require_ack', 'popup', 'published_at', 'expires_at', 'status') + [
             'sender' => $x->sender?->name, 'is_sender' => $x->sender_id === $u->id, 'has_attachment' => (bool) $x->attachment_path, 'file' => $x->attachment_path,
             'read_at' => $mine?->read_at, 'ack_at' => $mine?->ack_at, 'my_reaction' => $mine?->reaction,
             'recipients' => (int) ($counts->n ?? 0), 'reads' => (int) ($counts->r ?? 0), 'acks' => (int) ($counts->a ?? 0),

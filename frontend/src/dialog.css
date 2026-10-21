@@ -20,3 +20,5 @@
 
 /* multi-line alert messages (e.g. import results) */
 .swal2-html-container.swal-pre { white-space: pre-line; text-align: start; max-height: 50vh; overflow: auto; }
+.hc-swal .hc-swal-radio { display: grid !important; gap: 8px; justify-items: start; margin: 14px 8px 0; padding: 0; background: none; border: 0; text-align: right; }
+.hc-swal .hc-swal-radio label { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; color: var(--ink); cursor: pointer; }

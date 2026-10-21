@@ -13,6 +13,7 @@
     </select>
     <span class="spacer" />
     <button class="tbtn" :title="t('طلب جديد')" @click="newReq = true"><Icon name="plus" :size="16" /><span class="hide-sm">{{ t('طلب جديد') }}</span></button>
+    <RouterLink class="tbtn icon" to="/mail" :title="t('البريد الداخلي')" :aria-label="t('البريد الداخلي')"><Icon name="mail" /><span v-if="mailUnread" class="dot">{{ mailUnread }}</span></RouterLink>
     <RouterLink class="tbtn icon" to="/notifications" :title="t('مركز الإشعارات')"><Icon name="bell" /><span v-if="ui.unread" class="dot">{{ ui.unread }}</span></RouterLink>
     <RouterLink v-if="auth.isApprover" class="tbtn icon" to="/approvals" :title="t('صندوق الموافقات')"><Icon name="approvals" /><span v-if="inbox" class="dot">{{ inbox }}</span></RouterLink>
     <button class="tbtn icon lg-only" :title="t('الوضع الليلي')" @click="ui.toggleTheme()"><Icon :name="ui.dark ? 'sun' : 'moon'" /></button>
@@ -61,12 +62,18 @@
   <NewRequest v-if="newReq" @close="newReq = false" />
   <PolicyAckGate />
   <AssistantPanel />
-  <!-- Announcements that require acknowledgement block the UI until acknowledged -->
-  <div v-if="acks.length" class="mo" style="z-index:calc(var(--z-modal) + 4)">
+  <!-- New announcements / manager alerts pop up; those that require a read confirmation block the UI until confirmed -->
+  <div v-if="popup" class="mo" style="z-index:calc(var(--z-modal) + 4)">
     <div class="box">
-      <div class="mh"><h3 class="row" style="gap:8px;align-items:center"><img v-if="ackCo?.logo_url" :src="ackCo.logo_url" :alt="ackCo.name" style="height:28px;max-width:90px;object-fit:contain" /><Icon v-else name="megaphone" :size="18" /> {{ ackCo ? `إعلان من ${ackCo.name}` : 'إعلان يتطلب إقرارك' }}</h3></div>
-      <div class="mb"><b>{{ acks[0].title }}</b><div class="tiny muted">{{ acks[0].sender }}</div><p style="white-space:pre-wrap">{{ acks[0].body }}</p></div>
-      <div class="mf"><span class="tiny muted">{{ acks.length > 1 ? `و${acks.length - 1} إعلانات أخرى` : '' }}</span><button class="btn okb" @click="ackOne"><Icon name="check-circle" :size="15" /> أقرّ بالاطلاع</button></div>
+      <div class="mh"><h3 class="row" style="gap:8px;align-items:center"><img v-if="ackCo?.logo_url" :src="ackCo.logo_url" :alt="ackCo.name" style="height:28px;max-width:90px;object-fit:contain" /><Icon v-else name="megaphone" :size="18" /> {{ popup.audience?.scope === 'team' ? 'تنبيه من مديرك' : ackCo ? `إعلان من ${ackCo.name}` : 'إعلان جديد' }}</h3>
+        <button v-if="!popup.require_ack" type="button" class="x" aria-label="لاحقًا" title="لاحقًا" @click="later"><Icon name="x" :size="18" /></button></div>
+      <div class="mb"><b>{{ popup.title }}</b><div class="tiny muted">{{ popup.sender }} · {{ fmtDT(popup.published_at) }}</div><p style="white-space:pre-wrap">{{ popup.body }}</p>
+        <a v-if="popup.has_attachment" class="btn ghost xs" href="#" @click.prevent="fileUrl(popup.file)"><Icon name="download" :size="14" /> المرفق</a>
+        <div v-if="popup.require_ack" class="notice warn small mt">المرسل طلب تأكيد القراءة: يُسجَّل تأكيدك بالتاريخ والوقت إثباتًا لاطلاعك.</div></div>
+      <div class="mf"><span class="tiny muted">{{ popups.length > 1 ? `و${popups.length - 1} أخرى` : '' }}</span>
+        <button v-if="!popup.require_ack" class="btn sec" @click="later">لاحقًا</button>
+        <button v-if="popup.require_ack" class="btn okb" @click="ackOne"><Icon name="check-circle" :size="15" /> أؤكد قراءتي واطلاعي</button>
+        <button v-else class="btn pri" @click="readOne"><Icon name="check" :size="15" /> تمت القراءة</button></div>
     </div>
   </div>
 </template>
@@ -76,7 +83,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { lockScroll } from '../lib/scrollLock'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import api from '../api'
+import api, { fileUrl } from '../api'
+import { fmtDT } from '../utils'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import NewRequest from './NewRequest.vue'
@@ -95,8 +103,14 @@ const inbox = ref(0)
 const newReq = ref(false)
 const viewKey = ref(0)
 const mailUnread = ref(0)
-const acks = ref([])
-async function ackOne() { const a = acks.value[0]; await api.post(`/announcements/${a.id}/ack`); acks.value = acks.value.slice(1) }
+const popups = ref([])
+// "later" hides a plain announcement for this session only; it stays unread and pops up again next time
+const snoozed = new Set(JSON.parse(sessionStorage.getItem('hc.snoozed') || '[]'))
+const popup = computed(() => popups.value.find((a) => a.require_ack || !snoozed.has(a.id)) || null)
+const drop = (id) => { popups.value = popups.value.filter((a) => a.id !== id) }
+async function ackOne() { const a = popup.value; await api.post(`/announcements/${a.id}/ack`); drop(a.id); window.dispatchEvent(new Event('hc:announcements')) }
+async function readOne() { const a = popup.value; await api.post(`/announcements/${a.id}/read`); drop(a.id); window.dispatchEvent(new Event('hc:announcements')) }
+function later() { snoozed.add(popup.value.id); try { sessionStorage.setItem('hc.snoozed', JSON.stringify([...snoozed])) } catch { /* private mode */ } popups.value = [...popups.value] }
 const companies = computed(() => auth.meta?.companies || [])
 // the acknowledgement pop-up carries the official name and logo of the employee's own company
 const ackCo = computed(() => auth.user?.employee?.company || companies.value.find((c) => c.id === auth.user?.employee?.company_id) || null)
@@ -175,7 +189,7 @@ const NAV = [
     { to: '/users', ic: 'shield', label: 'المستخدمون والصلاحيات', roles: ['super', 'hr_mgr'] },
     { to: '/import', ic: 'upload', label: 'الاستيراد', roles: ['super', 'hr_mgr'] },
     { to: '/app-versions', ic: 'download', label: 'إصدارات التطبيق', roles: ['super', 'hr_mgr'] },
-    { to: '/companies', ic: 'building', label: 'الشركات والتصنيفات', roles: ['super', 'hr_mgr'] },
+    { to: '/companies', ic: 'building', label: 'الشركات وباقات المزايا', roles: ['super', 'hr_mgr'] },
     { to: '/lookups', ic: 'database', label: 'البيانات الأساسية', roles: ['super', 'hr_mgr'] },
     { to: '/flows', ic: 'workflow', label: 'أنواع الطلبات ومسارات الاعتماد', roles: ['super', 'hr_mgr'] },
     { to: '/integrations', ic: 'plug', label: 'التكامل مع أودو', roles: ['super', 'hr_mgr'] },
@@ -191,12 +205,12 @@ async function poll() {
     ui.unread = (await api.get('/notifications/unread')).count
     if (auth.isApprover) inbox.value = (await api.get('/requests/inbox')).length
     mailUnread.value = (await api.get('/mail/unread')).count
-    acks.value = await api.get('/announcements/pending-ack')
+    popups.value = await api.get('/announcements/pending-ack')
   } catch { /* ignore */ }
 }
 let timer
-onMounted(() => { poll(); timer = setInterval(poll, 60000); document.addEventListener('keydown', onKey); document.addEventListener('click', onDocClick); window.addEventListener('resize', onResize); window.addEventListener('hc:mail-read', poll) })
-onUnmounted(() => { clearInterval(timer); document.removeEventListener('keydown', onKey); document.removeEventListener('click', onDocClick); window.removeEventListener('resize', onResize); if (ui.sideOpen) lockScroll(false) })
+onMounted(() => { poll(); timer = setInterval(poll, 60000); document.addEventListener('keydown', onKey); document.addEventListener('click', onDocClick); window.addEventListener('resize', onResize); window.addEventListener('hc:mail-read', poll); window.addEventListener('hc:announcements', poll) })
+onUnmounted(() => { clearInterval(timer); window.removeEventListener('hc:mail-read', poll); window.removeEventListener('hc:announcements', poll); document.removeEventListener('keydown', onKey); document.removeEventListener('click', onDocClick); window.removeEventListener('resize', onResize); if (ui.sideOpen) lockScroll(false) })
 const reload = () => viewKey.value++
 async function logout() { await auth.logout(); window.location.assign('/') } // back to the public landing page (outside the SPA base)
 </script>

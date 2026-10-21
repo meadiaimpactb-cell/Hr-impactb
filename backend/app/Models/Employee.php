@@ -52,6 +52,41 @@ class Employee extends Model
         return $this->schedule?->hoursFor($dow);
     }
 
+    /**
+     * Owner's note: the week runs Sunday–Thursday, and Saturday–Thursday for employees who work six days. Read from the
+     * employee's own hours or his schedule (week_pattern is kept in step for older code and reports).
+     */
+    public function sixDayWeek(): bool
+    {
+        $n = 0;
+        for ($d = 0; $d < 7; $d++) {
+            $n += $this->isWorkDay($d) ? 1 : 0;
+        }
+
+        return $n >= 6 || ($n === 0 && (string) $this->week_pattern === '6');
+    }
+
+    public function weekStartsOn(): int
+    {
+        return $this->sixDayWeek() ? Carbon::SATURDAY : Carbon::SUNDAY;
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (Employee $e) {
+            if ($e->isDirty('schedule_id') || $e->isDirty('work_hours') || ! $e->exists) {
+                $e->unsetRelation('schedule');
+                $n = 0;
+                for ($d = 0; $d < 7; $d++) {
+                    $n += $e->isWorkDay($d) ? 1 : 0;
+                }
+                if ($n) {
+                    $e->week_pattern = $n >= 6 ? '6' : '5';
+                }
+            }
+        });
+    }
+
     public function isWorkDay(int $dow): bool
     {
         if ($this->hasCustomHours()) {

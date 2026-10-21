@@ -44,7 +44,7 @@ class UserController extends Controller
         return User::with('employee:id,name,emp_no,company_id', 'employee.company:id,name')
             ->when($f, fn ($q) => $q->where(fn ($w) => $w->whereHas('employee', fn ($e) => $e->where('company_id', $f))->orWhere('company_id', $f)))
             ->when($request->input('q'), fn ($q, $s) => $q->where(fn ($w) => $w->where('name', 'like', "%$s%")->orWhere('login', 'like', "%$s%")))
-            ->orderBy('id')->get()->map(fn (User $u) => $u->only('id', 'name', 'login', 'email', 'roles', 'perms', 'company_id', 'active', 'last_login_at', 'must_change_password', 'invited_at', 'invite_accepted_at', 'created_at', 'photo_url')
+            ->orderBy('id')->get()->map(fn (User $u) => $u->only('id', 'name', 'login', 'email', 'roles', 'perms', 'hr_scope', 'company_id', 'active', 'last_login_at', 'must_change_password', 'invited_at', 'invite_accepted_at', 'created_at', 'photo_url')
                 + ['employee' => $u->employee ? $u->employee->only('id', 'name', 'emp_no') + ['company' => $u->employee->company?->name] : null]);
     }
 
@@ -244,28 +244,56 @@ class UserController extends Controller
         return ['login' => $user->login, 'email' => $user->email, 'invite_url' => $inv['url'], 'emailed' => $inv['emailed'], 'expires_at' => $inv['expires_at']];
     }
 
-    /** Delegated permissions for HR staff: companies × ops × actions × limits × validity. */
+    /**
+     * Delegated permissions for HR staff: companies × ops × actions × limits × validity. per_company holds a company's
+     * own matrix when it differs from the shared one. A scoped HR manager can only grant inside his own companies.
+     */
     public function updatePerms(Request $request, User $user)
     {
         $this->authorizeAdmin($request);
+        abort_unless($user->hasRole('hr_staff'), 422, 'الصلاحيات المفوّضة لحسابات موظفي الموارد البشرية فقط');
         $d = $request->validate([
-            'companies' => 'array', 'companies.*' => 'integer|exists:companies,id',
+            'companies' => 'array', 'companies.*' => 'integer|exists:companies,id', 'per_company' => 'nullable|array',
             'ops' => 'array', 'limits' => 'array', 'valid_to' => 'nullable|date', 'reason' => 'required|string|max:300',
         ], ['reason.required' => 'اكتب سبب التفويض (§7)']);
-        $ops = [];
-        foreach ($d['ops'] ?? [] as $op => $actions) {
-            if (! isset(Access::OPS[$op]) || in_array($op, Access::NON_DELEGABLE, true)) {
-                continue;
-            }
-            $ops[$op] = array_values(array_intersect((array) $actions, Access::ACTIONS));
+        $mine = Access::for($request->user())->companyIds();
+        $companies = array_values(array_unique(array_map('intval', $d['companies'] ?? [])));
+        if ($outside = array_diff($companies, $mine)) {
+            throw ValidationException::withMessages(['companies' => 'لا يمكنك منح صلاحيات في شركة خارج نطاقك: '.\App\Models\Company::whereIn('id', $outside)->pluck('name')->join('، ')]);
         }
-        $before = $user->perms;
+        // companies outside my scope that someone else granted stay as they were
+        $before = $user->perms ?? [];
+        $kept = array_values(array_diff(array_map('intval', $before['companies'] ?? []), $mine));
+        $per = [];
+        foreach ($d['per_company'] ?? [] as $cid => $m) {
+            if (in_array((int) $cid, $companies, true)) {
+                $per[(int) $cid] = ['ops' => $this->cleanOps($m['ops'] ?? []), 'limits' => array_filter($m['limits'] ?? [], fn ($v) => $v !== null && $v !== '')];
+            }
+        }
+        foreach ($kept as $cid) {
+            if (isset($before['per_company'][$cid])) {
+                $per[$cid] = $before['per_company'][$cid];
+            }
+        }
         // Approvals this user can no longer make fall back to the original approvers automatically.
-        $user->update(['perms' => ['companies' => $d['companies'] ?? [], 'ops' => array_filter($ops), 'limits' => array_filter($d['limits'] ?? []),
+        $user->update(['perms' => ['companies' => array_values(array_unique([...$companies, ...$kept])), 'ops' => $this->cleanOps($d['ops'] ?? []),
+            'limits' => array_filter($d['limits'] ?? [], fn ($v) => $v !== null && $v !== ''), 'per_company' => $per ?: null,
             'valid_to' => $d['valid_to'] ?? null, 'granted_by' => $request->user()->id, 'granted_at' => now()->toDateString()]]);
         Audit::log('users', $user->id, 'permissions', $before, $user->perms, $d['reason'] ?? null);
 
         return $user;
+    }
+
+    private function cleanOps(array $in): array
+    {
+        $ops = [];
+        foreach ($in as $op => $actions) {
+            if (isset(Access::OPS[$op]) && ! in_array($op, Access::NON_DELEGABLE, true)) {
+                $ops[$op] = array_values(array_intersect((array) $actions, Access::ACTIONS));
+            }
+        }
+
+        return array_filter($ops);
     }
 
     public function roles(Request $request)

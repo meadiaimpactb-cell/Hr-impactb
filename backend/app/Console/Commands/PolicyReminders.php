@@ -18,18 +18,22 @@ use Illuminate\Console\Command;
  */
 class PolicyReminders extends Command
 {
-    protected $signature = 'hc:policy-reminders';
+    protected $signature = 'hc:policy-reminders {--force : run again even if it already ran today}';
 
     protected $description = 'Daily note, statutory leave scheduling and trip report reminders';
 
     public function handle(): int
     {
+        // once a day: from the scheduler, or from the first visit of the day when the server has no cron yet
+        if (! $this->option('force') && ! \Illuminate\Support\Facades\Cache::add('hc.ran.policy-reminders.'.now()->toDateString(), 1, now()->endOfDay())) {
+            return 0;
+        }
         $y = now()->subDay()->toDateString();
         $n = 0;
-        foreach (AttendanceRecord::where('work_date', $y)->where('note_required', true)->whereNull('note')->with('employee')->get() as $rec) {
+        foreach (AttendanceRecord::where('work_date', $y)->where('note_pending', true)->with('employee')->get() as $rec) {
             $u = User::where('employee_id', $rec->employee_id)->value('id');
             if ($u) {
-                Audit::notify($u, 'لم تكتب المنجز اليومي', 'منجز يوم '.$y.' غير مكتوب — يُخصم درجة من بند المنجز اليومي (§33). اكتبه من شاشة الحضور.', 'warn', ['screen' => 'attendance']);
+                Audit::notify($u, 'تحضير أمس معلّق: لم تكتب المنجز اليومي', 'منجز يوم '.\Illuminate\Support\Carbon::parse($y)->format('d/m/Y').' غير مكتوب، فلا يُعتمد تحضيره حتى تكتبه (ويُخصم من بند المنجز اليومي §33). اكتبه من شاشة الحضور.', 'warn', ['screen' => 'attendance']);
                 $n++;
             }
         }
