@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../announce.dart';
+import '../app_update.dart';
 import '../api.dart';
 import '../nav.dart';
 import '../presence.dart';
@@ -9,6 +10,7 @@ import '../push.dart';
 import '../l10n.dart';
 import '../state.dart';
 import '../theme.dart';
+import '../widgets.dart';
 import 'account_screens.dart';
 import 'attendance_screen.dart';
 import 'home_screen.dart';
@@ -41,7 +43,8 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
       if (mounted) await PolicyAckScreen.check(context);
       if (!mounted) return;
       await Presence.check(context);
-      if (mounted) Announce.check(context);
+      if (mounted) await Announce.check(context);
+      if (mounted) AppUpdate.auto(context); // a newer version is offered and installed in place
     });
     // tapping a push notification opens the screen it is about (announcement, mail, approval, report…)
     Push.onOpen = (data) {
@@ -81,8 +84,9 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       refreshUnread();
-      Presence.check(context).then((_) {
-        if (mounted) Announce.check(context);
+      Presence.check(context).then((_) async {
+        if (mounted) await Announce.check(context);
+        if (mounted) AppUpdate.auto(context);
       });
     }
   }
@@ -97,7 +101,7 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
   Widget _dest(IconData outline, IconData filled, String label, int idx, {int badge = 0}) {
     final active = _i == idx;
     Widget icon = Icon(active ? filled : outline);
-    if (badge > 0) icon = Badge(label: Text('$badge'), backgroundColor: HcColors.bad, child: icon);
+    if (badge > 0) icon = Badge(label: Text('$badge'), backgroundColor: brandOf(context), textColor: inkOn(brandOf(context)), child: icon);
     return NavigationDestination(
       icon: Column(mainAxisSize: MainAxisSize.min, children: [
         AnimatedContainer(duration: const Duration(milliseconds: 250), curve: Curves.easeOut, width: active ? 18 : 0, height: 3, margin: const EdgeInsets.only(bottom: 4), decoration: BoxDecoration(color: HcColors.deepBlue, borderRadius: BorderRadius.circular(2))),

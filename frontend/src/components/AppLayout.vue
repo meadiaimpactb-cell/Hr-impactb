@@ -124,6 +124,9 @@ const brandCo = computed(() => {
 const applyBrand = (c) => {
   const st = document.documentElement.style
   if (c?.color) st.setProperty('--brand', c.color); else st.removeProperty('--brand')
+  const hex = /^#[0-9a-f]{6}$/i.test(c?.color || '') ? c.color : null
+  const lum = hex ? [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i], 0) : 0
+  if (lum > 0.45) st.setProperty('--brand-ink', '#1A2363'); else st.removeProperty('--brand-ink')
   if (c?.color2) st.setProperty('--brand2', c.color2); else st.removeProperty('--brand2')
 }
 watch(brandCo, applyBrand, { immediate: true })

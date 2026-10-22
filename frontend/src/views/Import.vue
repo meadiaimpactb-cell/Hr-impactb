@@ -22,7 +22,7 @@
     <h3>سجل الدفعات</h3>
     <div v-if="!history.length" class="empty">لا دفعات</div>
     <div v-dt v-else class="tw"><table><thead><tr><th>#</th><th>القالب</th><th>الملف</th><th>بواسطة</th><th>الإجمالي</th><th>صحيح</th><th>خطأ</th><th>الحالة</th><th>التاريخ</th><th /></tr></thead>
-      <tbody><tr v-for="b in history" :key="b.id"><td>{{ b.id }}</td><td>{{ tplName(b.template) }}</td><td class="small">{{ b.file_name }}</td><td>{{ b.by }}</td><td>{{ b.total }}</td><td class="ok">{{ b.valid }}</td><td class="bad">{{ b.invalid }}</td><td><span class="pill" :class="b.status === 'done' ? 'ok' : 'gray'">{{ b.status === 'done' ? 'مكتملة' : 'مُلغاة' }}</span></td><td class="small">{{ fmtDT(b.created_at) }}</td><td><button v-if="b.status === 'done' && b.created_count" class="btn ghost xs bad" @click="undo(b)">تراجع ({{ b.created_count }})</button></td></tr></tbody></table></div>
+      <tbody><tr v-for="b in history" :key="b.id"><td>{{ b.id }}</td><td>{{ tplName(b.template) }}</td><td class="small">{{ b.file_name }}</td><td>{{ b.by }}</td><td>{{ b.total }}</td><td class="ok">{{ b.valid }}</td><td class="bad">{{ b.invalid }}</td><td><span class="pill" :class="b.status === 'done' ? 'ok' : 'gray'">{{ b.status === 'done' ? 'مكتملة' : 'مُلغاة' }}</span></td><td class="small">{{ fmtDT(b.created_at) }}</td><td><button v-if="b.status === 'done' && b.created_count" class="btn ghost xs bad" @click="undo(b)">تراجع <span class="cnt">{{ b.created_count }}</span></button></td></tr></tbody></table></div>
   </div>
 </template>
 

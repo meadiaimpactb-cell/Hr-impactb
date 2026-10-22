@@ -5,8 +5,8 @@
   </div>
 
   <div class="tabs">
-    <button :class="{ on: tab === '' }" @click="tab = ''">كل الملفات <span class="pill gray">{{ files.length }}</span></button>
-    <button v-for="(l, k) in categories" :key="k" :class="{ on: tab === k }" @click="tab = k">{{ l }} <span class="pill gray">{{ files.filter((f) => f.category === k).length }}</span></button>
+    <button :class="{ on: tab === '' }" @click="tab = ''">كل الملفات <span class="cnt">{{ files.length }}</span></button>
+    <button v-for="(l, k) in categories" :key="k" :class="{ on: tab === k }" @click="tab = k">{{ l }} <span class="cnt">{{ files.filter((f) => f.category === k).length }}</span></button>
   </div>
 
   <div class="card">

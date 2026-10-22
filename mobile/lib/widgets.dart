@@ -1,9 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'api.dart';
 import 'l10n.dart';
+import 'state.dart';
 import 'theme.dart';
 
 // ---------------------------------------------------------------- feedback
@@ -123,6 +125,33 @@ class StatusBadge extends StatelessWidget {
 }
 
 /// Status chip from a request/attendance status code.
+/// The company identity colour (the group's navy when none is set) and a readable text colour on it.
+Color brandOf(BuildContext context) {
+  try {
+    return context.watch<AppState>().brandColor ?? HcColors.navy;
+  } catch (_) {
+    return HcColors.navy;
+  }
+}
+
+Color inkOn(Color c) => c.computeLuminance() > 0.45 ? HcColors.navy : Colors.white;
+
+/// A count on the company identity colour — used for every counter in the app (owner's note).
+class CountPill extends StatelessWidget {
+  final String text;
+  const CountPill(this.text, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    final c = brandOf(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 22),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(999)),
+      child: Text(text, textAlign: TextAlign.center, style: TextStyle(color: inkOn(c), fontWeight: FontWeight.w800, fontSize: 12, height: 1.2)),
+    );
+  }
+}
+
 class StatusChip extends StatelessWidget {
   final String status;
   const StatusChip(this.status, {super.key});

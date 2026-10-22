@@ -70,8 +70,8 @@
     <div class="row mb" style="gap:8px;flex-wrap:wrap">
       <button v-if="auth.isHr" class="btn sec sm" @click="remind"><Icon name="bell" :size="14" /> تذكير المتأخرين عن {{ fmtYM(period) }}</button>
       <span class="spacer" />
-      <button class="btn sec sm" :disabled="!picked.length" :class="{ loading: dl === 'sel' }" @click="downloadReports(picked, 'sel')"><Icon name="download" :size="14" /> تحميل المحدد ({{ picked.length }})</button>
-      <button class="btn pri sm" :disabled="!team.length" :class="{ loading: dl === 'all' }" @click="downloadReports(team.map((x) => x.employee.id), 'all')"><Icon name="download" :size="14" /> تحميل تقارير الكل ({{ team.length }})</button>
+      <button class="btn sec sm" :disabled="!picked.length" :class="{ loading: dl === 'sel' }" @click="downloadReports(picked, 'sel')"><Icon name="download" :size="14" /> تحميل المحدد <span class="cnt">{{ picked.length }}</span></button>
+      <button class="btn pri sm" :disabled="!team.length" :class="{ loading: dl === 'all' }" @click="downloadReports(team.map((x) => x.employee.id), 'all')"><Icon name="download" :size="14" /> تحميل تقارير الكل <span class="cnt">{{ team.length }}</span></button>
     </div>
     <div class="card">
       <div v-dt class="tw"><table><thead><tr><th style="width:34px"><input type="checkbox" :checked="team.length && picked.length === team.length" title="تحديد الكل" @change="picked = $event.target.checked ? team.map((x) => x.employee.id) : []" /></th><th>الموظف</th><th>الشركة</th><th>الحالة</th><th>المرحلة الحالية</th><th>البنود</th><th /></tr></thead>

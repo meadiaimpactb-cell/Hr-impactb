@@ -147,7 +147,7 @@ class _BalancesScreen extends StatelessWidget {
   }
 }
 
-/// Small red counter next to a menu row (unread mail, announcements waiting).
+/// Counter next to a menu row (unread mail, announcements waiting), on the company identity colour.
 class _CountBadge extends StatelessWidget {
   final String path;
   final bool list;
@@ -158,7 +158,7 @@ class _CountBadge extends StatelessWidget {
         builder: (ctx, snap) {
           final n = !snap.hasData ? 0 : list ? (snap.data as List).length : ((snap.data as Map)['count'] ?? 0) as int;
           if (n == 0) return Icon(Icons.chevron_left, color: context.muted);
-          return Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: HcColors.bad, borderRadius: BorderRadius.circular(10)), child: Text('$n', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)));
+          return CountPill('$n');
         },
       );
 }

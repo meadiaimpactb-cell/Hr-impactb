@@ -96,7 +96,7 @@
     <template v-else-if="tab === '360'">
       <div v-if="!x"><div class="skel" v-for="i in 4" :key="i" /></div>
       <div v-else class="grid g2">
-        <div v-if="x.documents" class="card" style="grid-column:1/-1"><h3>الوثائق والمرفقات <span class="sub">{{ x.documents.length }}</span><span class="acts"><button v-if="d.can.hr" class="btn pri xs" @click="docForm = { type: '', number: '', issue_date: null, expiry_date: null, issuer: '', file: null }"><Icon name="plus" :size="14" /> إضافة وثيقة</button></span></h3>
+        <div v-if="x.documents" class="card" style="grid-column:1/-1"><h3>الوثائق والمرفقات <span class="cnt">{{ x.documents.length }}</span><span class="acts"><button v-if="d.can.hr" class="btn pri xs" @click="docForm = { type: '', number: '', issue_date: null, expiry_date: null, issuer: '', file: null }"><Icon name="plus" :size="14" /> إضافة وثيقة</button></span></h3>
           <div v-if="!x.documents.length" class="empty">لا وثائق — أضف الهوية والعقد والشهادات مع مرفقاتها</div>
           <div v-else class="tw"><table><thead><tr><th>النوع</th><th>الرقم</th><th>الإصدار</th><th>الانتهاء</th><th>الحالة</th><th>المرفق</th><th /></tr></thead>
             <tbody><tr v-for="dd in x.documents" :key="dd.id">
@@ -109,13 +109,13 @@
           <div v-if="!x.evaluations.length" class="empty">لا تقييمات منشورة</div>
           <div v-for="ev in x.evaluations" :key="ev.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2)"><span>{{ fmtYM(ev.period) }}</span><span><b class="num">{{ ev.score }}</b> {{ ev.grade }} · {{ ev.grade_label }}</span></div>
           <div v-if="x.reports?.length" class="tiny muted mt">التقارير: {{ x.reports.map((r) => `${fmtYM(r.period)} ${r.status_label}`).join(' · ') }}</div></div>
-        <div v-if="x.violations" class="card"><h3>المخالفات <span class="sub">{{ x.violations.length }}</span></h3>
+        <div v-if="x.violations" class="card"><h3>المخالفات <span class="cnt">{{ x.violations.length }}</span></h3>
           <div v-if="!x.violations.length" class="empty">لا مخالفات</div>
           <div v-for="v in x.violations" :key="v.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2)"><span>{{ v.type }} · {{ v.occurred_on }}</span><span>{{ v.degree || '—' }}{{ v.amount ? ` (${money(v.amount)})` : '' }} · {{ v.status }}</span></div></div>
-        <div v-if="x.custody" class="card"><h3>العهد <span class="sub">{{ x.custody.length }}</span></h3>
+        <div v-if="x.custody" class="card"><h3>العهد <span class="cnt">{{ x.custody.length }}</span></h3>
           <div v-if="!x.custody.length" class="empty">لا عهد</div>
           <div v-for="c in x.custody" :key="c.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2);cursor:pointer" title="فتح العهدة: إقرار الاستلام، طلب الإعادة، الاستلام للفحص" @click="custodyId = c.id"><span>{{ c.ident }} <span class="muted">{{ c.type }}</span></span><span class="num">{{ money(c.value) }} · {{ c.status }}</span></div></div>
-        <div v-if="x.development" class="card"><h3>التطوير <span class="sub">{{ x.development.length }}</span></h3>
+        <div v-if="x.development" class="card"><h3>التطوير <span class="cnt">{{ x.development.length }}</span></h3>
           <div v-if="!x.development.length" class="empty">لا سجلات</div>
           <div v-for="r in x.development" :key="r.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2)"><span>{{ r.program }} <span class="muted">{{ r.provider }}</span></span><span>{{ r.hours }} س · {{ r.status }}</span></div></div>
         <div v-if="x.letters" class="card"><h3>الخطابات</h3>

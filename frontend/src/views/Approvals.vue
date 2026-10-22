@@ -1,9 +1,9 @@
 <template>
   <div class="page-h">
     <div><h1>{{ t('صندوق الموافقات') }}</h1><p>مرتبة بالأقدمية — الأحمر تجاوز {{ sla }} أيام</p></div>
-    <div class="acts"><button class="btn pri sm" :disabled="!selected.length" @click="bulk"><Icon name="check-circle" :size="16" /> {{ t('اعتماد المحدد') }} ({{ selected.length }})</button></div>
+    <div class="acts"><button class="btn pri sm" :disabled="!selected.length" @click="bulk"><Icon name="check-circle" :size="16" /> {{ t('اعتماد المحدد') }} <span class="cnt">{{ selected.length }}</span></button></div>
   </div>
-  <div class="tabs"><button :class="{ on: tab === 'inbox' }" @click="tab = 'inbox'">بانتظاري ({{ rows.length }})</button><button v-if="auth.isHr" :class="{ on: tab === 'all' }" @click="tab = 'all'; loadAll()">متابعة كل الطلبات</button><button :class="{ on: tab === 'deleg' }" @click="tab = 'deleg'">تفويض اعتماداتي</button></div>
+  <div class="tabs"><button :class="{ on: tab === 'inbox' }" @click="tab = 'inbox'">بانتظاري <span class="cnt">{{ rows.length }}</span></button><button v-if="auth.isHr" :class="{ on: tab === 'all' }" @click="tab = 'all'; loadAll()">متابعة كل الطلبات</button><button :class="{ on: tab === 'deleg' }" @click="tab = 'deleg'">تفويض اعتماداتي</button></div>
   <DelegationPanel v-if="tab === 'deleg'" />
   <div v-else-if="tab === 'all'" class="card">
     <div class="row mb" style="gap:8px;flex-wrap:wrap;align-items:center">

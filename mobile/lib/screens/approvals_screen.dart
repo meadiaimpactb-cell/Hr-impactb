@@ -57,7 +57,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(tr('الاعتمادات'))),
+      appBar: AppBar(title: Row(mainAxisSize: MainAxisSize.min, children: [Text(tr('الاعتمادات')), if ((rows ?? const []).isNotEmpty) ...[const SizedBox(width: 8), CountPill('${rows!.length}')]])),
       body: RefreshIndicator(
         onRefresh: load,
         child: rows == null

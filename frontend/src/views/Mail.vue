@@ -17,7 +17,7 @@
       <div class="row" style="gap:6px;margin-bottom:8px;flex-wrap:nowrap"><input v-model.trim="q" class="in" placeholder="بحث بالموضوع أو المرسل…" style="min-width:0" /><label class="chk tiny" style="white-space:nowrap"><input v-model="onlyUnread" type="checkbox" /> غير المقروء</label></div>
       <div class="row" style="gap:6px;margin-bottom:8px;flex-wrap:wrap"><select v-model="fSender" class="in" style="flex:1;min-width:140px"><option value="">كل المرسلين</option><option v-for="x in senders" :key="x" :value="x">{{ x }}</option></select>
         <DateInput v-model="fFrom" placeholder="من تاريخ" /><DateInput v-model="fTo" placeholder="إلى تاريخ" /><button v-if="fSender || fFrom || fTo" class="btn ghost xs" @click="fSender = ''; fFrom = ''; fTo = ''">مسح</button></div>
-      <div class="tabs mb"><button :class="{ on: box === 'in' }" @click="box = 'in'">المحادثات</button><button :class="{ on: box === 'drafts' }" @click="box = 'drafts'; loadDrafts()">المسودات<span v-if="drafts.length"> ({{ drafts.length }})</span></button></div>
+      <div class="tabs mb"><button :class="{ on: box === 'in' }" @click="box = 'in'">المحادثات</button><button :class="{ on: box === 'drafts' }" @click="box = 'drafts'; loadDrafts()">المسودات<span v-if="drafts.length" class="cnt">{{ drafts.length }}</span></button></div>
       <template v-if="box === 'drafts'">
         <div class="notice info small">المسودة لم تُرسل بعد، ويمكنك تعديلها أو حذفها. الرسالة المرسلة لا تُحذف لأنها أصبحت سجلًا معتمدًا.</div>
         <div v-if="!drafts.length" class="empty">لا مسودات</div>

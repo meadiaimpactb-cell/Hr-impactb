@@ -199,13 +199,13 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             tooltip: tr('البريد الداخلي'),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MailScreen())).then((_) => load()),
-            icon: Badge(isLabelVisible: mailUnread > 0, label: Text('$mailUnread'), backgroundColor: HcColors.bad, child: Icon(Icons.mail_outline, color: context.text)),
+            icon: Badge(isLabelVisible: mailUnread > 0, label: Text('$mailUnread'), backgroundColor: brandOf(context), textColor: inkOn(brandOf(context)), child: Icon(Icons.mail_outline, color: context.text)),
           ),
           if (s.isApprover)
             IconButton(
               tooltip: tr('الاعتمادات'),
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalsScreen())).then((_) => load()),
-              icon: Badge(isLabelVisible: inbox > 0, label: Text('$inbox'), backgroundColor: HcColors.bad, child: Icon(Icons.task_alt_outlined, color: context.text)),
+              icon: Badge(isLabelVisible: inbox > 0, label: Text('$inbox'), backgroundColor: brandOf(context), textColor: inkOn(brandOf(context)), child: Icon(Icons.task_alt_outlined, color: context.text)),
             ),
         ]),
         const SizedBox(height: 16),

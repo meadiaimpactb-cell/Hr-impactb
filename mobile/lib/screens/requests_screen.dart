@@ -101,7 +101,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
       body: RefreshIndicator(
         onRefresh: load,
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 96), children: [
-          Row(children: [Expanded(child: Text(tr('طلباتي'), style: context.t.headlineMedium)), if (pending > 0) StatusBadge('$pending ${tr('معلّق')}', color: HcColors.warn)]),
+          Row(children: [Expanded(child: Text(tr('طلباتي'), style: context.t.headlineMedium)), if (pending > 0) CountPill('$pending ${tr('معلّق')}')]),
           const SizedBox(height: 12),
           Segmented<String>(items: [('all', tr('الكل')), ('pending', tr('معلّق')), ('approved', tr('معتمد')), ('closed', tr('مغلق'))], value: tab, onChanged: (v) => setState(() => tab = v)),
           const SizedBox(height: 16),

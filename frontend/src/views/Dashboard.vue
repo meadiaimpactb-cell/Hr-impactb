@@ -57,7 +57,7 @@
       </div>
 
       <div v-if="auth.isApprover" class="card">
-        <h3>{{ t('صندوق الموافقات') }} <span class="sub">{{ d.kpis.inbox }}</span><span class="acts"><RouterLink class="btn ghost sm" to="/approvals">{{ t('عرض الكل') }}</RouterLink></span></h3>
+        <h3>{{ t('صندوق الموافقات') }} <span class="cnt">{{ d.kpis.inbox }}</span><span class="acts"><RouterLink class="btn ghost sm" to="/approvals">{{ t('عرض الكل') }}</RouterLink></span></h3>
         <div v-if="!d.inbox.length" class="empty"><div class="ic"><Icon name="inbox" :size="44" :stroke="1.4" /></div>لا يوجد ما ينتظر اعتمادك</div>
         <div v-dt v-else class="tw"><table>
           <thead><tr><th>{{ t('الطلب') }}</th><th>{{ t('مقدّم الطلب') }}</th><th>{{ t('الانتظار') }}</th><th /></tr></thead>

@@ -19,7 +19,7 @@
     <transition name="dt-fade">
       <div v-if="selectable && selected.length" class="dt-bulk">
         <b>{{ selected.length }}</b> محدد
-        <button v-if="selected.length < filtered.length" type="button" class="btn ghost xs" @click="selectAllFiltered">تحديد كل النتائج ({{ filtered.length }})</button>
+        <button v-if="selected.length < filtered.length" type="button" class="btn ghost xs" @click="selectAllFiltered">تحديد كل النتائج <span class="cnt">{{ filtered.length }}</span></button>
         <button type="button" class="btn ghost xs" @click="clear">إلغاء التحديد</button>
         <span class="dt-sp" />
         <slot name="bulk" :selected="selectedRows" :clear="clear" />
