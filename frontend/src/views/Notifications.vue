@@ -10,7 +10,7 @@
       <span class="nicon" :class="n.kind"><Icon :name="icons[n.kind] || 'bell'" :size="18" /></span>
       <div class="grow"><b><span v-if="!n.read_at" class="udot" title="غير مقروء" />{{ n.title }}</b><div class="small muted">{{ n.body }}</div><div class="tiny muted">{{ fmtDT(n.created_at) }} · {{ n.read_at ? 'مقروء' : 'غير مقروء' }}</div></div>
       <button v-if="n.request_id" class="btn ghost xs" @click.stop="read(n); openId = n.request_id">فتح الطلب</button>
-      <RouterLink v-else-if="n.link?.screen" class="btn ghost xs" :to="'/' + (n.link.screen === 'dash' ? '' : n.link.screen)" @click="read(n)">فتح</RouterLink>
+      <RouterLink v-else-if="n.link?.screen" class="btn ghost xs" :to="{ path: '/' + (n.link.screen === 'dash' ? '' : n.link.screen), query: n.link.tab ? { tab: n.link.tab, date: n.link.date } : {} }" @click="read(n)">فتح</RouterLink>
     </div>
   </div>
   <RequestDetail v-if="openId" :id="openId" @close="openId = null" @changed="load" />

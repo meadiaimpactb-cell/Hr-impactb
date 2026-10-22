@@ -55,6 +55,21 @@ class AttendanceService
      * real location without HR assigning a site to each person. Only sites marked official count as a fallback:
      * the generic group entries (open field, whole city) apply solely to employees they are assigned to.
      */
+    /**
+     * Owner's note (22/10): a daily achievement reaches the employee's direct manager as soon as it is written (in the
+     * platform and by email) — HR when there is no manager. HR and the group CEO get the day's summary next morning.
+     */
+    public static function noteWritten(AttendanceRecord $rec, bool $edited = false): void
+    {
+        $e = $rec->employee;
+        if (! $e || trim((string) $rec->note) === '') {
+            return;
+        }
+        $mgr = $e->manager_id ? \App\Models\User::where('employee_id', $e->manager_id)->where('active', true)->value('id') : null;
+        \App\Services\Audit::notify($mgr ?: \App\Services\Access::hrManagersFor($e->company_id), 'المنجز اليومي'.($edited ? ' (معدّل)' : '').' — '.$e->name.' · '.$rec->work_date->format('d/m/Y'),
+            mb_substr((string) $rec->note, 0, 600), 'info', ['screen' => 'attendance', 'tab' => 'achievements', 'date' => $rec->work_date->toDateString()]);
+    }
+
     public static function fenceFor(Employee $e)
     {
         $own = $e->locations;
@@ -330,6 +345,7 @@ class AttendanceService
                 ->update(['status' => 'confirmed', 'responded_at' => $now, 'note' => 'سجّل حضوره '.$now->format('H:i'), 'updated_at' => $now]);
         } elseif (! $rec->check_out) {
             $note = trim((string) ($in['note'] ?? ''));
+            $noteBefore = (string) $rec->note;
             $min = (int) Settings::get('dailyNoteMin', $e->company_id, 20);
             // owner's note: the check-out is recorded, but when the daily achievement is required and not written the
             // day stays pending ("التحضير معلق") until the employee writes it
@@ -351,6 +367,9 @@ class AttendanceService
             throw ValidationException::withMessages(['punch' => 'سجّلت الحضور والانصراف لهذا اليوم']);
         }
         $rec->save();
+        if (isset($noteBefore) && $note !== '' && $note !== $noteBefore) { // a check-out with the day's achievement → the manager is told
+            self::noteWritten($rec->loadMissing('employee'), $noteBefore !== '');
+        }
         if ($rec->pending && $rec->wasRecentlyCreated) {
             Audit::notify(Access::hrUsersFor($e->company_id), 'بصمة خارج النطاق للمراجعة', $e->name.' — '.$geo['msg'], 'warn', ['screen' => 'attendance']);
         }

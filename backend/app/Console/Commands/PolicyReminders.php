@@ -106,6 +106,18 @@ class PolicyReminders extends Command
             }
         }
 
+        // owner's note (22/10): HR and the group CEO receive yesterday's daily achievements in one summary each morning
+        $recs = AttendanceRecord::with('employee:id,name,company_id')->where('work_date', $y)->where(fn ($q) => $q->where(fn ($w) => $w->whereNotNull('note')->where('note', '!=', ''))->orWhere('note_pending', true))->get();
+        if ($recs->isNotEmpty()) {
+            $line = fn ($r) => $r->note_pending ? ($r->employee?->name).': لم يكتب منجزه' : ($r->employee?->name).': '.mb_substr(preg_replace('/\s+/u', ' ', (string) $r->note), 0, 120);
+            $title = fn ($rs) => 'المنجزات اليومية — '.\Illuminate\Support\Carbon::parse($y)->format('d/m/Y').': '.$rs->where('note_pending', false)->count().' كتبوا'.($rs->where('note_pending', true)->count() ? ' · '.$rs->where('note_pending', true)->count().' لم يكتبوا' : '');
+            $link = ['screen' => 'attendance', 'tab' => 'achievements', 'date' => $y];
+            foreach ($recs->groupBy(fn ($r) => $r->employee?->company_id) as $cid => $rs) {
+                Audit::notify(Access::hrManagersFor((int) $cid), $title($rs), $rs->take(15)->map($line)->implode("\n"), 'info', $link);
+            }
+            Audit::notify(Access::usersWithRole('super'), $title($recs), $recs->take(15)->map($line)->implode("\n"), 'info', $link);
+        }
+
         // §49: a classification approved for the next benefits year takes effect on its date
         foreach (\App\Models\Company::whereNotNull('next_tier_id')->where('next_tier_from', '<=', now()->toDateString())->get() as $co) {
             if ($tier = \App\Models\Tier::find($co->next_tier_id)) {

@@ -138,6 +138,32 @@
     </table></div></div>
   </template>
 
+  <template v-else-if="tab === 'achievements'">
+    <div class="row mb" style="gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="small">من</span><DateInput v-model="achFrom" style="max-width:170px" @update:model-value="load" />
+      <span class="small">إلى</span><DateInput v-model="achTo" style="max-width:170px" @update:model-value="load" />
+      <button class="btn ghost sm" @click="achFrom = todayStr; achTo = todayStr; load()">اليوم</button>
+      <span class="tiny muted">يصل المنجز لمدير الموظف المباشر فور كتابته، وتصل الموارد البشرية والرئيس التنفيذي للمجموعة خلاصة اليوم صباح اليوم التالي.</span>
+    </div>
+    <div class="grid g3 mb">
+      <Kpi icon="check-circle" label="منجزات مكتوبة" :value="ach.filter((a) => !a.note_pending).length" color="g" />
+      <Kpi icon="warning" label="لم يُكتب بعد" :value="ach.filter((a) => a.note_pending).length" color="r" />
+      <Kpi icon="users" label="موظفون" :value="new Set(ach.map((a) => a.employee?.id)).size" color="n" />
+    </div>
+    <div class="card">
+      <div v-if="!ach.length" class="empty">لا منجزات في هذه الفترة</div>
+      <div v-dt v-else class="tw"><table>
+        <thead><tr><th>اليوم</th><th>{{ t('الموظف') }}</th><th>{{ t('الشركة') }}</th><th>{{ t('الحضور') }}</th><th>{{ t('الانصراف') }}</th><th>المنجز اليومي</th></tr></thead>
+        <tbody><tr v-for="a in ach" :key="a.id">
+          <td class="num">{{ fmtD(a.work_date) }}</td>
+          <td><RouterLink :to="`/employees/${a.employee?.id}`">{{ a.employee?.name }}</RouterLink></td><td class="small">{{ a.company }}</td>
+          <td class="num">{{ fmtT(a.check_in) }}</td><td class="num">{{ a.check_out ? fmtT(a.check_out) : '—' }}</td>
+          <td style="min-width:320px"><span v-if="a.note_pending" class="pill bad">لم يكتب منجزه بعد</span><div v-else style="white-space:pre-wrap;line-height:1.8">{{ a.note }}</div></td>
+        </tr></tbody>
+      </table></div>
+    </div>
+  </template>
+
   <template v-else-if="tab === 'pending'">
     <div class="card"><h3>سجلات تحتاج مراجعة <span class="sub">دون اتصال · دقة ضعيفة · خارج النطاق</span></h3>
       <div v-if="auth.isHr" class="notice info small row" style="gap:8px;align-items:center">
@@ -177,6 +203,7 @@ import Kpi from '../components/Kpi.vue'
 import NewRequest from '../components/NewRequest.vue'
 import Modal from '../components/Modal.vue'
 import PunchModal from '../components/PunchModal.vue'
+import { useRoute } from 'vue-router'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import { csv, curYM, download, fmtD, fmtT, today as today_ } from '../utils'
@@ -191,7 +218,7 @@ const auth = useAuth()
 const ui = useUi()
 const isHr = computed(() => auth.has('super', 'hr_mgr', 'hr_staff'))
 const team = computed(() => auth.isApprover && auth.canView('ATT'))
-const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], team.value && ['today', 'اليوم'], team.value && ['month', 'ملخص الشهر'], team.value && ['pending', 'خارج النطاق للمراجعة'],
+const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], team.value && ['today', 'اليوم'], team.value && ['achievements', 'المنجز اليومي'], team.value && ['month', 'ملخص الشهر'], team.value && ['pending', 'خارج النطاق للمراجعة'],
   team.value && ['corrections', 'طلبات التصحيح'], isHr.value && ['paper', 'السجل البديل']].filter(Boolean))
 const hm = (m) => `${Math.floor((m || 0) / 60)}:${String((m || 0) % 60).padStart(2, '0')}`
 const excuses = computed(() => (mine.value?.records || []).filter((r) => r.status === 'excuse_requested'))
@@ -244,8 +271,11 @@ async function savePaper() {
     if (!r.errors.length) paperRows.value = []
   } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') } finally { busy.value = false }
 }
-const tab = ref(auth.isApprover && auth.canView('ATT') ? 'today' : 'mine') // managers and HR open on today's log
+const route = useRoute()
+// a notification can open a given tab and day (e.g. a daily achievement → «المنجز اليومي» of that day)
+const tab = ref(route.query.tab && ['mine', 'today', 'achievements', 'month', 'pending', 'corrections', 'paper'].includes(route.query.tab) ? route.query.tab : auth.isApprover && auth.canView('ATT') ? 'today' : 'mine')
 const todayStr = today_()
+const ach = ref([]); const achFrom = ref(/^\d{4}-\d{2}-\d{2}$/.test(route.query.date || '') ? route.query.date : todayStr); const achTo = ref(achFrom.value === todayStr ? todayStr : achFrom.value)
 const day = ref(todayStr)
 const period = ref(curYM())
 const mine = ref(null)
@@ -285,6 +315,7 @@ const cp = () => ({ company_id: ui.company || undefined })
 
 async function load() {
   if (tab.value === 'mine') mine.value = await api.get('/attendance/me', { params: { period: period.value } })
+  else if (tab.value === 'achievements') ach.value = await api.get('/attendance/achievements', { params: { from: achFrom.value, to: achTo.value, ...cp() } })
   else if (tab.value === 'today') { loadChecks(); today.value = await api.get('/attendance/today', { params: { ...cp(), date: day.value } }) }
   else if (tab.value === 'month') month.value = await api.get('/attendance/month', { params: { period: period.value, ...cp() } })
   else if (tab.value === 'corrections') corrections.value = await api.get('/attendance/corrections')

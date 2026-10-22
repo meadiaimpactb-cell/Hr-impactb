@@ -263,10 +263,36 @@ class AttendanceController extends Controller
         $min = (int) \App\Services\Settings::get('dailyNoteMin', $cid, 20);
         $d = $request->validate(['note' => "required|string|min:$min|max:2000"], ['note.min' => "اكتب المنجز في $min حرفًا على الأقل (§33)"]);
         $was = $record->note_pending;
+        $edited = trim((string) $record->note) !== '';
         $record->update(['note' => $d['note'], 'note_pending' => false]);
         \App\Services\Audit::log('attendance', $record->id, $was ? 'note_completed' : 'note');
+        AttendanceService::noteWritten($record->loadMissing('employee'), $edited);
 
         return $record->fresh();
+    }
+
+    /**
+     * The daily achievements of the team (manager) or of the scope (HR, group CEO) for a range of days — the full
+     * text, plus who still owes one (owner's note, 22/10).
+     */
+    public function achievements(Request $request)
+    {
+        $u = $request->user();
+        $acc = Access::for();
+        $team = $u->employee_id ? \App\Models\Employee::where('manager_id', $u->employee_id)->pluck('id') : collect();
+        abort_unless($acc->canAny('ATT', 'view') || $team->isNotEmpty(), 403);
+        $to = $request->date('to')?->toDateString() ?? now()->toDateString();
+        $from = $request->date('from')?->toDateString() ?? now()->subDays(6)->toDateString();
+        $ids = ($acc->canAny('ATT', 'view') ? $acc->employees('ATT')->pluck('id') : collect())->merge($team)->unique();
+        if ($c = $request->integer('company_id')) {
+            $ids = \App\Models\Employee::whereIn('id', $ids)->where('company_id', $c)->pluck('id');
+        }
+
+        return \App\Models\AttendanceRecord::with('employee:id,name,emp_no,company_id,manager_id', 'employee.company:id,name')->whereIn('employee_id', $ids)
+            ->whereBetween('work_date', [$from, $to])->where(fn ($q) => $q->where(fn ($w) => $w->whereNotNull('note')->where('note', '!=', ''))->orWhere('note_pending', true))
+            ->orderByDesc('work_date')->orderBy('employee_id')->limit(1000)->get()
+            ->map(fn ($r) => ['id' => $r->id, 'work_date' => $r->work_date->toDateString(), 'check_in' => $r->check_in, 'check_out' => $r->check_out, 'note' => $r->note, 'note_pending' => (bool) $r->note_pending,
+                'employee' => $r->employee?->only('id', 'name', 'emp_no'), 'company' => $r->employee?->company?->name])->values();
     }
 
     /** My days still pending for a missing daily achievement (web + mobile banner). */

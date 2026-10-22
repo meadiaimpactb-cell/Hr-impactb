@@ -81,6 +81,7 @@ Route::prefix('v1')->group(function () {
         Route::get('attendance/pending', [AttendanceController::class, 'pending']);
         Route::get('attendance/employee/{employee}', [AttendanceController::class, 'employee']);
         Route::post('attendance/review-many', [AttendanceController::class, 'reviewMany']);
+        Route::get('attendance/achievements', [AttendanceController::class, 'achievements']);
         Route::post('attendance/{record}/review', [AttendanceController::class, 'review']);
         // §28 presence checks and location tracking
         Route::get('attendance/presence', [App\Http\Controllers\Api\PresenceController::class, 'index']);
