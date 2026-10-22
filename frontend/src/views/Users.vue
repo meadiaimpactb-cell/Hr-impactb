@@ -69,10 +69,10 @@
             <button v-if="permCompany && perm.per_company[permCompany]" class="btn ghost xs" @click="uncustomize"><Icon name="repeat" :size="14" /> إلغاء التخصيص والعودة للأساس</button>
           </div>
           <div class="row mb" style="gap:6px;flex-wrap:wrap">
-            <button class="btn pri xs" :disabled="!mat.editable" @click="setAll(true)"><Icon name="check-circle" :size="13" /> منح كل الصلاحيات</button>
+            <button class="btn pri xs" @click="grantEverything"><Icon name="check-circle" :size="13" /> منح كل الصلاحيات</button>
             <button class="btn sec xs" :disabled="!mat.editable" @click="setAll(false); setCol('view', true)">عرض فقط في الكل</button>
-            <button class="btn ghost xs bad" :disabled="!mat.editable" @click="setAll(false)">مسح الكل</button>
-            <span class="tiny muted">امنح الكل بضغطة، ثم أزل ما لا تريده بإلغاء علامته.</span>
+            <button class="btn ghost xs bad" :disabled="!mat.editable" @click="setAll(false)">مسح العمليات</button>
+            <span class="tiny muted">«منح كل الصلاحيات» يحدد كل الشركات وكل العمليات وكل الصفحات بضغطة واحدة — ثم أزل ما لا تريده بإلغاء علامته.</span>
           </div>
           <div v-if="permCompany && !perm.per_company[permCompany]" class="notice info small">هذه الشركة تتبع الصلاحيات الأساسية. اضغط «تخصيص» لتفعيل أو إيقاف صلاحيات معينة له داخل هذه الشركة فقط.</div>
           <div v-dt class="tw"><table>
@@ -92,10 +92,10 @@
             <div style="max-width:420px"><SearchSelect :model-value="null" :options="empOptions.filter((o) => !perm.employees.includes(o.value))" placeholder="أضف موظفًا تقتصر عليه الصلاحيات…" @update:model-value="(v) => v && perm.employees.push(v)" /></div>
             <div v-if="perm.employees.length" class="row mt" style="gap:6px;flex-wrap:wrap"><span v-for="id in perm.employees" :key="id" class="pill info">{{ empName(id) }} <a style="cursor:pointer" @click="perm.employees = perm.employees.filter((x) => x !== id)">×</a></span></div>
           </div>
-          <div class="card mt" style="margin-bottom:0"><h3>4 · الصفحات المخفية عنه <span class="sub">تختفي من قائمته ولا تُفتح له حتى لو كان دوره يسمح بها</span>
-            <span class="acts"><button class="btn ghost xs" @click="perm.hidden_pages = []">إظهار كل الصفحات</button></span></h3>
-            <div v-for="g in pageGroups" :key="g.g" class="mb"><label class="chk small b"><input type="checkbox" :checked="g.items.every((i) => perm.hidden_pages.includes(i.to))" :indeterminate.prop="g.items.some((i) => perm.hidden_pages.includes(i.to)) && !g.items.every((i) => perm.hidden_pages.includes(i.to))" @change="hideGroup(g, $event.target.checked)" /> {{ g.g }} — إخفاء القسم كله</label>
-              <div class="row" style="gap:4px 14px;flex-wrap:wrap"><label v-for="pg in g.items" :key="pg.to" class="chk small"><input v-model="perm.hidden_pages" type="checkbox" :value="pg.to" :disabled="pg.to === '/'" /> {{ pg.label }}</label></div>
+          <div class="card mt" style="margin-bottom:0"><h3>4 · الصفحات التي تظهر له <span class="sub">كلها ظاهرة افتراضيًا — أزل العلامة عن أي صفحة أو قسم لإخفائه عنه (لا يراها ولا تُفتح له)</span>
+            <span class="acts"><label class="chk small b" style="margin:0"><input type="checkbox" :checked="!perm.hidden_pages.length" :indeterminate.prop="perm.hidden_pages.length > 0 && perm.hidden_pages.length < allPages.length" @change="perm.hidden_pages = $event.target.checked ? [] : [...allPages]" /> كل الصفحات</label></span></h3>
+            <div v-for="g in pageGroups" :key="g.g" class="mb"><label class="chk small b"><input type="checkbox" :checked="g.items.every((p) => !perm.hidden_pages.includes(p.to))" :indeterminate.prop="g.items.some((p) => perm.hidden_pages.includes(p.to)) && !g.items.every((p) => perm.hidden_pages.includes(p.to))" @change="hideGroup(g, !$event.target.checked)" /> {{ g.g }} — القسم كله</label>
+              <div class="row" style="gap:4px 14px;flex-wrap:wrap"><label v-for="pg in g.items" :key="pg.to" class="chk small"><input type="checkbox" :checked="!perm.hidden_pages.includes(pg.to)" @change="hideGroup({ items: [pg] }, !$event.target.checked)" /> {{ pg.label }}</label></div>
             </div>
           </div>
           <div class="fr mt">
@@ -352,6 +352,14 @@ const allState = () => stateOf(opKeys().flatMap((op) => actKeys().map((a) => has
 function setRow(op, on) { mat.value.ops[op] = on ? actKeys() : [] }
 function setCol(a, on) { opKeys().forEach((op) => toggleOp(op, a, on)) }
 function setAll(on) { opKeys().forEach((op) => setRow(op, on)) }
+const allPages = pageGroups.flatMap((g) => g.items.map((p) => p.to))
+// one click: every company, every operation with every action, every page shown — then untick the few to keep out
+function grantEverything() {
+  perm.value.companies = meta.value.companies.map((c) => c.id)
+  permCompany.value = ''
+  setAll(true)
+  perm.value.hidden_pages = []
+}
 function hideGroup(g, on) { const set = new Set(perm.value.hidden_pages); g.items.forEach((i) => (on ? set.add(i.to) : set.delete(i.to))); perm.value.hidden_pages = [...set] }
 function toggleOp(op, a, on) {
   const m = mat.value
