@@ -80,11 +80,13 @@ Route::prefix('v1')->group(function () {
         Route::get('attendance/month', [AttendanceController::class, 'month']);
         Route::get('attendance/pending', [AttendanceController::class, 'pending']);
         Route::get('attendance/employee/{employee}', [AttendanceController::class, 'employee']);
+        Route::post('attendance/review-many', [AttendanceController::class, 'reviewMany']);
         Route::post('attendance/{record}/review', [AttendanceController::class, 'review']);
         // §28 presence checks and location tracking
         Route::get('attendance/presence', [App\Http\Controllers\Api\PresenceController::class, 'index']);
         Route::get('attendance/presence/pending', [App\Http\Controllers\Api\PresenceController::class, 'pending']);
-        Route::post('attendance/presence/{employee}', [App\Http\Controllers\Api\PresenceController::class, 'request']);
+        Route::post('attendance/presence/many', [App\Http\Controllers\Api\PresenceController::class, 'requestMany']);
+        Route::post('attendance/presence/{employee}', [App\Http\Controllers\Api\PresenceController::class, 'request'])->where('employee', '[0-9]+');
         Route::post('attendance/presence/{check}/confirm', [App\Http\Controllers\Api\PresenceController::class, 'confirm'])->where('check', '[0-9]+');
         Route::post('attendance/track', [App\Http\Controllers\Api\PresenceController::class, 'track'])->middleware('throttle:60,1');
         Route::get('attendance/movement/{employee}', [App\Http\Controllers\Api\PresenceController::class, 'movement']);

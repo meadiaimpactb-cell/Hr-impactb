@@ -58,10 +58,12 @@ class AttendanceService
     public static function fenceFor(Employee $e)
     {
         $own = $e->locations;
-        if ($own->isNotEmpty()) {
-            return $own;
-        }
         $company = \App\Models\Location::where('company_id', $e->company_id)->where('is_main', true)->get();
+        if ($own->isNotEmpty()) {
+            // owner's note (22/10): the company's official site always counts too — an employee at his own company's
+            // site is inside, whatever other site he is also assigned to
+            return $own->merge($company)->unique('id')->values();
+        }
 
         return $company->isNotEmpty() ? $company : \App\Models\Location::whereNull('company_id')->where('is_main', true)->get();
     }
@@ -324,6 +326,8 @@ class AttendanceService
                 'pending' => ! $geo['ok'] || (bool) $rec->voided_check_in, 'note_required' => $noteRequired, 'note_pending' => $noteRequired,
                 'client_time' => isset($in['client_time']) ? Carbon::parse($in['client_time']) : null,
             ]);
+            \Illuminate\Support\Facades\DB::table('presence_checks')->where('employee_id', $e->id)->where('kind', 'checkin')->where('status', 'pending')
+                ->update(['status' => 'confirmed', 'responded_at' => $now, 'note' => 'سجّل حضوره '.$now->format('H:i'), 'updated_at' => $now]);
         } elseif (! $rec->check_out) {
             $note = trim((string) ($in['note'] ?? ''));
             $min = (int) Settings::get('dailyNoteMin', $e->company_id, 20);

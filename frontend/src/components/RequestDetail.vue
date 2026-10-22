@@ -121,6 +121,7 @@ const stepCls = (i) => (r.value.status === 'returned' && i === r.value.stage ? '
 
 onMounted(async () => {
   r.value = await api.get(`/requests/${props.id}`)
+  window.dispatchEvent(new CustomEvent('hc:mail-read')) // its notifications are now read → the header counters refresh
   changes.value = Object.fromEntries(Object.keys(r.value.can_adjust || {}).map((k) => [k, r.value.data?.[k] ?? null]))
 })
 async function decide() {

@@ -57,8 +57,9 @@
     <div class="card">
       <h3>طلبات تصحيح الحضور <span class="sub">اللائحة §27: يُقدَّم الطلب خلال {{ auth.meta?.policy?.correction_days || 3 }} أيام عمل من العلم بالخلل — المتأخر يُميَّز ولا يُرفض، ويجوز قبوله بدليل</span></h3>
       <div v-if="!corrections.length" class="empty small">لا طلبات تصحيح</div>
-      <div v-dt v-else class="tw"><table><thead><tr><th>الموظف</th><th>اليوم المعني</th><th>النوع</th><th>السبب</th><th>تاريخ التقديم</th><th>المهلة</th><th>الحالة</th></tr></thead>
-        <tbody><tr v-for="c in corrections" :key="c.id"><td>{{ c.employee?.name }}</td><td class="num">{{ fmtD(c.date) }}</td><td class="small">{{ c.kind }}</td><td class="small">{{ c.reason }}</td><td class="num">{{ fmtD(c.filed_at) }}</td>
+      <div v-if="pickC.length" class="bulkbar"><b><span class="cnt">{{ pickC.length }}</span> محدد</b><button class="btn okb xs" :class="{ loading: busyBulk }" @click="approveCorrections">اعتماد المحدد</button><button class="btn ghost xs" @click="pickC = []">إلغاء التحديد</button></div>
+      <div v-dt v-if="corrections.length" class="tw"><table><thead><tr><th style="width:34px"><input type="checkbox" title="تحديد كل الطلبات القابلة للاعتماد" :checked="pickC.length > 0 && pickC.length === corrections.filter((c) => c.status === 'pending').length" @change="pickC = $event.target.checked ? corrections.filter((c) => c.status === 'pending').map((c) => c.id) : []" /></th><th>الموظف</th><th>اليوم المعني</th><th>النوع</th><th>السبب</th><th>تاريخ التقديم</th><th>المهلة</th><th>الحالة</th></tr></thead>
+        <tbody><tr v-for="c in corrections" :key="c.id"><td><input v-if="c.status === 'pending'" v-model="pickC" type="checkbox" :value="c.id" /></td><td>{{ c.employee?.name }}</td><td class="num">{{ fmtD(c.date) }}</td><td class="small">{{ c.kind }}</td><td class="small">{{ c.reason }}</td><td class="num">{{ fmtD(c.filed_at) }}</td>
           <td><span v-if="c.late" class="pill warn">{{ c.late_label }}</span><span v-else class="pill ok">ضمن المهلة</span></td><td><span class="pill gray">{{ { pending: 'قيد الاعتماد', approved: 'معتمد', rejected: 'مرفوض', cancelled: 'ملغى', returned: 'مُعاد' }[c.status] || c.status }}</span></td></tr></tbody></table></div>
     </div>
   </template>
@@ -71,13 +72,21 @@
       <Kpi icon="late" :label="t('متأخر')" :value="today.stats.late" color="y" />
       <Kpi icon="absent" label="لم يسجّلوا بعد" :value="today.stats.missing" :hint="`${today.stats.on_leave} في إجازة`" color="r" />
     </div>
+    <div v-if="lateRows.length" class="bulkbar">
+      <span><b><span class="cnt">{{ lateRows.length }}</span> متأخر</b> لم يسجّل حضوره بعد</span>
+      <button class="btn sec xs" @click="pickT = lateRows.map((r) => r.employee.id)">تحديد كل المتأخرين</button>
+      <button class="btn pri xs" :disabled="!pickT.length" :class="{ loading: busyBulk }" @click="presenceMany"><Icon name="bell" :size="13" /> إرسال طلب تحضير للمحددين <span class="cnt">{{ pickT.length }}</span></button>
+      <button v-if="pickT.length" class="btn ghost xs" @click="pickT = []">إلغاء التحديد</button>
+    </div>
     <div class="card"><div v-dt class="tw"><table>
-      <thead><tr><th>{{ t('الموظف') }}</th><th>{{ t('الشركة') }}</th><th>{{ t('الحضور') }}</th><th>{{ t('الانصراف') }}</th><th>{{ t('الحالة') }}</th><th>{{ t('الموقع') }}</th><th>المنجز اليومي</th><th /></tr></thead>
+      <thead><tr><th style="width:34px"><input v-if="lateRows.length" type="checkbox" title="تحديد كل المتأخرين" :checked="pickT.length > 0 && pickT.length === lateRows.length" @change="pickT = $event.target.checked ? lateRows.map((r) => r.employee.id) : []" /></th><th>{{ t('الموظف') }}</th><th>{{ t('الشركة') }}</th><th>{{ t('الحضور') }}</th><th>{{ t('الانصراف') }}</th><th>{{ t('الحالة') }}</th><th>{{ t('الموقع') }}</th><th>المنجز اليومي</th><th /></tr></thead>
       <tbody><tr v-for="r in today?.rows || []" :key="r.employee.id">
+        <td><input v-if="canAsk(r)" v-model="pickT" type="checkbox" :value="r.employee.id" /></td>
         <td><RouterLink :to="`/employees/${r.employee.id}`">{{ r.employee.name }}</RouterLink></td><td>{{ r.company }}</td>
         <td class="num">{{ fmtT(r.record?.check_in) }}</td><td class="num">{{ r.record?.check_out ? fmtT(r.record.check_out) : '—' }}</td>
-        <td><span v-if="r.on_leave" class="pill info">إجازة</span><span v-else-if="!r.record" class="pill gray">لم يُسجَّل</span>
+        <td><span v-if="r.on_leave" class="pill info">إجازة</span><span v-else-if="!r.record && r.late_now" class="pill warn">متأخر — لم يسجّل</span><span v-else-if="!r.record" class="pill gray">لم يُسجَّل</span>
           <span v-else-if="r.record.late_minutes > grace" class="pill warn">متأخر {{ r.record.late_minutes }} د</span><span v-else class="pill ok">حاضر</span>
+          <span v-if="r.checkin_request && !r.record?.check_in" class="pill" :class="r.checkin_request.status === 'missed' ? 'bad' : 'info'" :title="'أُرسل ' + fmtT(r.checkin_request.at)">{{ r.checkin_request.status === 'missed' ? 'لم يسجّل بعد طلب التحضير' : 'طُلب تحضيره ' + fmtT(r.checkin_request.at) }}</span>
           <span v-if="r.record?.pending" class="pill bad" title="البصمة خارج نطاق موقع التحضير، وهي محتسبة وظاهرة، وتحتاج مراجعة فقط">خارج النطاق</span></td>
         <td>
           <template v-if="r.record?.check_in"><span :class="r.record.geo_fail ? 'bad' : 'ok'">{{ r.record.geo_fail ? 'خارج النطاق' : 'داخل النطاق' }}</span><span v-if="r.record.distance_m != null" class="tiny muted num"> · {{ dist(r.record.distance_m) }}</span> <a v-if="r.record.lat" :href="`https://www.google.com/maps?q=${r.record.lat},${r.record.lng}`" target="_blank" rel="noopener" class="tiny">خريطة</a></template>
@@ -85,17 +94,17 @@
         </td>
         <td class="small" style="max-width:260px"><a v-if="r.record?.note" href="#" :title="r.record.note" @click.prevent="alertBox(r.record.note, { title: 'المنجز اليومي — ' + r.employee.name, icon: 'info' })">{{ r.record.note.length > 50 ? r.record.note.slice(0, 50) + '…' : r.record.note }}</a><span v-else class="muted">—</span></td>
         <td class="row" style="gap:4px;flex-wrap:nowrap;justify-content:flex-end">
-          <button v-if="auth.meta?.policy?.presence_check !== false && r.record?.check_in && !r.record?.check_out" class="btn sec xs" title="طلب تحضير: يصل تنبيه للموظف ليؤكد تواجده بموقعه خلال المهلة (§28)" @click="presence(r)"><Icon name="map-pin" :size="13" /> طلب تحضير</button>
+          <button v-if="canAsk(r)" class="btn sec xs" title="الموظف متأخر ولم يسجّل حضوره: يصله تنبيه ليسجّل حضوره الآن، ويُغلق الطلب تلقائيًا عند تسجيله" @click="presence(r)"><Icon name="bell" :size="13" /> طلب تحضير</button>
           <button v-if="auth.has('super', 'hr_mgr') || r.employee.track_viewer" class="btn ghost xs" title="مسار الحركة اليوم (سري — §28)" @click="movement(r)"><Icon name="clock" :size="13" /> المسار</button>
         </td>
       </tr></tbody>
     </table></div></div>
     <div class="card">
-      <h3>طلبات التحضير <span class="sub">اللائحة §28: من لم يستجب خلال {{ auth.meta?.policy?.presence_minutes || 30 }} دقيقة يُعدّ مغادرًا دون إذن، ويُعلَّق حضوره للمراجعة ويُطلب منه إعادة التحضير</span></h3>
+      <h3>طلبات التحضير <span class="sub">تُرسل للمتأخرين الذين لم يسجّلوا حضورهم؛ يصل الموظف تنبيه ليسجّل حضوره خلال {{ auth.meta?.policy?.presence_minutes || 30 }} دقيقة، ويُغلق الطلب تلقائيًا عند تسجيله — ومن سجّل حضوره لا يُطلب منه شيء</span></h3>
       <div v-if="!checks.length" class="empty small">لا طلبات تحضير في هذا اليوم</div>
       <div v-dt v-else class="tw"><table><thead><tr><th>الموظف</th><th>طلبه</th><th>الوقت</th><th>المهلة</th><th>الحالة</th><th>الرد</th><th>الموقع</th></tr></thead>
         <tbody><tr v-for="c in checks" :key="c.id"><td><b>{{ c.employee_name }}</b></td><td class="small">{{ c.requested_by_name }}</td><td class="num">{{ fmtT(c.requested_at) }}</td><td class="num">{{ fmtT(c.due_at) }}</td>
-          <td><span class="pill" :class="{ pending: 'warn', confirmed: c.inside ? 'ok' : 'bad', missed: 'bad' }[c.status]">{{ c.status_label }}{{ c.status === 'confirmed' ? (c.inside ? ' · داخل النطاق' : ' · خارج النطاق') : '' }}</span></td>
+          <td><span class="pill" :class="{ pending: 'warn', confirmed: c.kind === 'checkin' || c.inside ? 'ok' : 'bad', missed: 'bad', cancelled: 'gray' }[c.status]">{{ c.status_label }}{{ c.status === 'confirmed' ? (c.inside ? ' · داخل النطاق' : ' · خارج النطاق') : '' }}</span></td>
           <td class="num">{{ c.responded_at ? fmtT(c.responded_at) : '—' }}</td><td><a v-if="c.lat" :href="`https://www.google.com/maps?q=${c.lat},${c.lng}`" target="_blank" rel="noopener" class="tiny">خريطة</a><span v-if="c.distance_m != null" class="tiny muted"> · {{ dist(c.distance_m) }}</span></td></tr></tbody></table></div>
     </div>
   </template>
@@ -136,9 +145,14 @@
         <button class="btn sec xs" :class="{ loading: rechecking }" @click="recheckGeo"><Icon name="refresh" :size="13" /> إعادة فحص النطاق</button>
       </div>
       <div v-if="!pending.length" class="empty"><div class="ic"><Icon name="check-circle" :size="44" :stroke="1.4" /></div>لا سجلات معلّقة</div>
-      <div v-dt v-else class="tw"><table>
-        <thead><tr><th>{{ t('الموظف') }}</th><th>اليوم</th><th>{{ t('الحضور') }}</th><th>السبب</th><th /></tr></thead>
+      <div v-if="pickP.length" class="bulkbar"><b><span class="cnt">{{ pickP.length }}</span> محدد</b>
+        <button class="btn okb xs" :class="{ loading: busyBulk }" @click="reviewMany(true)">قبول المحدد</button>
+        <button class="btn dan xs" :class="{ loading: busyBulk }" @click="reviewMany(false)">رفض المحدد وطلب العذر</button>
+        <button class="btn ghost xs" @click="pickP = []">إلغاء التحديد</button></div>
+      <div v-dt v-if="pending.length" class="tw"><table>
+        <thead><tr><th v-if="canReview" style="width:34px"><input type="checkbox" title="تحديد الكل" :checked="pickP.length > 0 && pickP.length === pending.length" @change="pickP = $event.target.checked ? pending.map((r) => r.id) : []" /></th><th>{{ t('الموظف') }}</th><th>اليوم</th><th>{{ t('الحضور') }}</th><th>السبب</th><th /></tr></thead>
         <tbody><tr v-for="r in pending" :key="r.id">
+          <td v-if="canReview"><input v-model="pickP" type="checkbox" :value="r.id" /></td>
           <td>{{ r.employee?.name }}</td><td class="num">{{ fmtD(r.work_date) }}</td><td class="num">{{ fmtT(r.check_in) }}</td>
           <td class="small">{{ [r.offline && 'دون اتصال', r.geo_fail && `حضور خارج النطاق${r.distance_m != null ? ' (يبعد ' + dist(r.distance_m) + ')' : ''}`, r.out_geo_fail && `انصراف خارج النطاق${r.out_distance_m != null ? ' (يبعد ' + dist(r.out_distance_m) + ')' : ''}`, r.low_accuracy && 'دقة ضعيفة'].filter(Boolean).join(' · ') }}
             <div v-if="r.status === 'excuse_requested'" class="mt"><span class="pill warn">بانتظار عذر الموظف حتى {{ fmtD(r.excuse_due) }}</span><div v-if="r.excuse" class="tiny">العذر: {{ r.excuse }}</div></div><div class="tiny"><a v-if="r.lat" :href="`https://www.google.com/maps?q=${r.lat},${r.lng}`" target="_blank" rel="noopener">موقع الحضور على الخريطة</a><a v-if="r.out_lat" :href="`https://www.google.com/maps?q=${r.out_lat},${r.out_lng}`" target="_blank" rel="noopener" style="margin-inline-start:8px">موقع الانصراف</a></div></td>
@@ -194,6 +208,30 @@ async function giveExcuse(r) {
   try { await api.post(`/attendance/${r.id}/excuse`, { excuse: text }); ui.toast('أُرسل العذر إلى الموارد البشرية', 'ok'); load() } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') }
 }
 const corrections = ref([])
+// multi-select (owner's note): pending corrections, late employees to ask, out-of-range records to review
+const pickC = ref([]); const pickT = ref([]); const pickP = ref([]); const busyBulk = ref(false)
+const canReview = computed(() => auth.has('hr_mgr', 'hr_staff', 'super'))
+const canAsk = (r) => auth.meta?.policy?.presence_check !== false && r.late_now && !r.record?.check_in && r.checkin_request?.status !== 'pending'
+const lateRows = computed(() => (today.value?.rows || []).filter(canAsk))
+const bulkDone = (n, skipped, verb) => {
+  ui.toast(`${verb} ${n}${skipped?.length ? ` — لم يُنفَّذ ${skipped.length}` : ''}`, skipped?.length ? 'warn' : 'ok', 6000)
+  if (skipped?.length) alertBox(skipped.join('\n'), { title: 'لم يُنفَّذ على', icon: 'info' })
+}
+async function approveCorrections() {
+  busyBulk.value = true
+  try { const r = await api.post('/requests/bulk-approve', { ids: pickC.value }); bulkDone(r.approved, pickC.value.length > r.approved ? [`${pickC.value.length - r.approved} طلب ليس في مرحلتك`] : [], 'اعتُمد'); pickC.value = []; load() } catch (e) { ui.toast(e.message, 'bad') } finally { busyBulk.value = false }
+}
+async function presenceMany() {
+  if (!await confirmBox(`إرسال طلب تحضير إلى ${pickT.value.length} موظف متأخر؟ يصل كل واحد تنبيه ليسجّل حضوره الآن.`)) return
+  busyBulk.value = true
+  try { const r = await api.post('/attendance/presence/many', { employee_ids: pickT.value }); bulkDone(r.sent, r.skipped, 'أُرسل طلب التحضير إلى'); pickT.value = []; load(); loadChecks() } catch (e) { ui.toast(e.message, 'bad') } finally { busyBulk.value = false }
+}
+async function reviewMany(accept) {
+  const reason = accept ? null : await promptBox(`سبب رفض ${pickP.value.length} سجل (يصل الموظفين مع طلب إبداء العذر):`)
+  if (!accept && !reason) return
+  busyBulk.value = true
+  try { const r = await api.post('/attendance/review-many', { ids: pickP.value, accept, reason }); bulkDone(r.done, r.skipped, accept ? 'قُبل' : 'طُلب العذر من'); pickP.value = []; load() } catch (e) { ui.toast(e.message, 'bad') } finally { busyBulk.value = false }
+}
 const empOpts = ref([]); const paperRows = ref([]); const busy = ref(false)
 function addPaper() { const last = paperRows.value[paperRows.value.length - 1]; paperRows.value.push({ employee_id: null, date: last?.date || today_(), in: last?.in || '', out: last?.out || '', note: '' }) }
 async function savePaper() {
@@ -214,8 +252,8 @@ const mine = ref(null)
 const today = ref(null)
 const checks = ref([]); const mv = ref(null); const mapEl = ref(null)
 async function presence(r) {
-  if (!await confirmBox(`إرسال طلب تحضير إلى ${r.employee.name}؟ يصله تنبيه فوري ليؤكد تواجده بموقعه الحالي.`)) return
-  try { const x = await api.post(`/attendance/presence/${r.employee.id}`); ui.toast(`أُرسل الطلب — المهلة ${x.minutes} دقيقة`, 'ok'); loadChecks() } catch (e) { ui.toast(e.message || 'تعذر الإرسال', 'bad') }
+  if (!await confirmBox(`إرسال طلب تحضير إلى ${r.employee.name}؟ هو متأخر ولم يسجّل حضوره، فيصله تنبيه ليسجّل حضوره الآن.`)) return
+  try { const x = await api.post(`/attendance/presence/${r.employee.id}`); ui.toast(`أُرسل الطلب — المهلة ${x.minutes} دقيقة`, 'ok'); load(); loadChecks() } catch (e) { ui.toast(e.message || 'تعذر الإرسال', 'bad') }
 }
 async function loadChecks() { if (!auth.isApprover) return; try { checks.value = await api.get('/attendance/presence', { params: { date: day.value } }) } catch { checks.value = [] } }
 async function movement(r) {

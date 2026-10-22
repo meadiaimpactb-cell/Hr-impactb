@@ -65,6 +65,9 @@ a{color:var(--deep);text-decoration:none}
 /* counts everywhere carry the company identity colour (owner's note) */
 .cnt{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 7px;border-radius:999px;background:var(--brand);color:var(--brand-ink);font-size:11.5px;font-weight:800;line-height:1;margin-inline-start:6px;font-variant-numeric:tabular-nums;vertical-align:middle;box-sizing:border-box}
 .navi .cnt{margin-inline-start:auto}
+/* multi-select action bar above a table */
+.bulkbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;margin-bottom:10px;border-radius:12px;background:color-mix(in srgb,var(--brand) 8%,var(--card));border:1px solid color-mix(in srgb,var(--brand) 25%,transparent)}
+.bulkbar .cnt{margin-inline-start:0;margin-inline-end:4px}
 .btn.pri .cnt,.btn.okb .cnt,.btn.dan .cnt,.tabs button.on .cnt.inv{background:#fff;color:var(--brand)}
 .main{flex:1;min-width:0;padding:clamp(14px,2vw,18px) clamp(12px,3vw,20px) calc(80px + var(--safe-b));max-width:100%}
 /* very wide screens: the shell is capped and centred so nothing stretches (1920 and below unchanged) */

@@ -48,6 +48,7 @@ class RequestController extends Controller
     {
         $r = $approvalRequest->load('employee.company:id,name', 'actions.user:id,name', 'actions.actingFor:id,name');
         $u = $request->user();
+        \App\Services\Audit::readFor($u->id, ['request' => $r->id]); // opening the request clears its notifications
         $approvers = ApprovalService::approvers($r);
         abort_unless($r->employee_id === $u->employee_id || in_array($u->id, $approvers, true) || Access::for()->canSeeEmployee($r->employee), 403);
         $extra = [];

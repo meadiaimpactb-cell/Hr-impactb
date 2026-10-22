@@ -86,7 +86,8 @@ async function open(id) {
   const th = threads.value.find((x) => x.id === id)
   if (th?.unread) { th.unread = false; window.dispatchEvent(new CustomEvent('hc:mail-read')) } // the header counter drops right away
 }
-function fd(obj) { const x = new FormData(); Object.entries(obj).forEach(([k, v]) => { if (Array.isArray(v)) v.forEach((i) => x.append(k + '[]', i)); else if (v !== null && v !== '') x.append(k, v) }); if (file.value) x.append('attachment', file.value); return x }
+// form data for messages with an attachment: yes/no options go as 1/0 (a form cannot carry true/false)
+function fd(obj) { const x = new FormData(); Object.entries(obj).forEach(([k, v]) => { if (Array.isArray(v)) v.forEach((i) => x.append(k + '[]', i)); else if (typeof v === 'boolean') x.append(k, v ? 1 : 0); else if (v !== null && v !== undefined && v !== '') x.append(k, v) }); if (file.value) x.append('attachment', file.value); return x }
 async function send() { if (!reply.value.trim()) return; busy.value = true; try { cur.value = await api.post(`/mail/${cur.value.id}/reply`, fd({ body: reply.value })); reply.value = ''; file.value = null; load() } finally { busy.value = false } }
 async function openNew(manager) { nf.value = { to: manager?.user_id ? [manager.user_id] : [], subject: '', body: '', group: false }; if (!users.value.length) users.value = await api.get('/mail/recipients') }
 async function create() {

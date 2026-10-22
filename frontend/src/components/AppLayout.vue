@@ -130,6 +130,7 @@ const applyBrand = (c) => {
   if (c?.color2) st.setProperty('--brand2', c.color2); else st.removeProperty('--brand2')
 }
 watch(brandCo, applyBrand, { immediate: true })
+watch(() => route.fullPath, () => pollCounts()) // the counters follow what was just opened (pop-ups keep their own pace)
 onUnmounted(() => applyBrand(null))
 // drawer + "more" menu behaviour on small screens: scroll lock, Escape, outside click, close on route change, focus handling
 const moreOpen = ref(false); const moreWrap = ref(null); const sideEl = ref(null); const hamBtn = ref(null)
@@ -202,17 +203,21 @@ const NAV = [
 ]
 const nav = computed(() => NAV.map((g) => ({ ...g, items: g.items.filter((i) => (i.approver ? auth.isApprover : auth.has(...i.roles))) })).filter((g) => g.items.length))
 
-async function poll() {
+// the counters on the bell, the approvals and the mail icons
+async function pollCounts() {
   try {
     ui.unread = (await api.get('/notifications/unread')).count
     if (auth.isApprover) inbox.value = (await api.get('/requests/inbox')).length
     mailUnread.value = (await api.get('/mail/unread')).count
-    popups.value = await api.get('/announcements/pending-ack')
   } catch { /* ignore */ }
 }
+async function poll() {
+  await pollCounts()
+  try { popups.value = await api.get('/announcements/pending-ack') } catch { /* ignore */ }
+}
 let timer
-onMounted(() => { poll(); timer = setInterval(poll, 60000); document.addEventListener('keydown', onKey); document.addEventListener('click', onDocClick); window.addEventListener('resize', onResize); window.addEventListener('hc:mail-read', poll); window.addEventListener('hc:announcements', poll) })
-onUnmounted(() => { clearInterval(timer); window.removeEventListener('hc:mail-read', poll); window.removeEventListener('hc:announcements', poll); document.removeEventListener('keydown', onKey); document.removeEventListener('click', onDocClick); window.removeEventListener('resize', onResize); if (ui.sideOpen) lockScroll(false) })
+onMounted(() => { poll(); timer = setInterval(poll, 60000); document.addEventListener('keydown', onKey); document.addEventListener('click', onDocClick); window.addEventListener('resize', onResize); window.addEventListener('hc:mail-read', pollCounts); window.addEventListener('hc:announcements', poll) })
+onUnmounted(() => { clearInterval(timer); window.removeEventListener('hc:mail-read', pollCounts); window.removeEventListener('hc:announcements', poll); document.removeEventListener('keydown', onKey); document.removeEventListener('click', onDocClick); window.removeEventListener('resize', onResize); if (ui.sideOpen) lockScroll(false) })
 const reload = () => viewKey.value++
 async function logout() { await auth.logout(); window.location.assign('/') } // back to the public landing page (outside the SPA base)
 </script>

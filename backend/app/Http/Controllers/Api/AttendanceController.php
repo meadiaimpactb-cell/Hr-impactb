@@ -57,11 +57,18 @@ class AttendanceController extends Controller
         $emps = Access::for()->employees('ATT')->where('status', '!=', 'terminated')->where('punch_required', true)
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
             ->with(['company:id,name', 'attendance' => fn ($q) => $q->whereDate('work_date', $today)->with('location:id,name')])
-            ->orderBy('name')->get(['id', 'name', 'emp_no', 'company_id', 'track_viewers']);
+            ->with('schedule', 'company.tier')->orderBy('name')->get();
         $me = $request->user()->id;
+        // owner's note (22/10): «طلب تحضير» is offered for whoever is late and has not checked in; its status is shown
+        \App\Http\Controllers\Api\PresenceController::expire();
+        $isToday = $today === now()->toDateString();
+        $asks = \Illuminate\Support\Facades\DB::table('presence_checks')->whereIn('employee_id', $emps->pluck('id'))->where('kind', 'checkin')->whereDate('requested_at', $today)
+            ->orderBy('id')->get()->keyBy('employee_id');
         // §28: the movement route is shown to the HR manager and the group CEO, and to a manager the group CEO granted it to
         $rows = $emps->map(fn ($e) => ['employee' => $e->only('id', 'name', 'emp_no') + ['track_viewer' => in_array($me, array_map('intval', (array) ($e->track_viewers ?? [])), true)], 'company' => $e->company?->name,
-            'record' => $e->attendance->first(), 'on_leave' => AttendanceService::onLeave($e->id, $today)]);
+            'record' => $e->attendance->first(), 'on_leave' => AttendanceService::onLeave($e->id, $today),
+            'late_now' => $isToday && ! $e->attendance->first()?->check_in && (bool) \App\Http\Controllers\Api\PresenceController::lateNow($e),
+            'checkin_request' => isset($asks[$e->id]) ? ['status' => $asks[$e->id]->status, 'at' => $asks[$e->id]->requested_at, 'due_at' => $asks[$e->id]->due_at] : null]);
         $grace = (int) Settings::get('graceMinutes', null, 0);
 
         return [
@@ -103,14 +110,39 @@ class AttendanceController extends Controller
             ->where('pending', true)->orderByDesc('work_date')->limit(200)->get();
     }
 
+    /** Multi-select (owner's note): accept, or ask for an excuse on, several records at once with one reason. */
+    public function reviewMany(Request $request)
+    {
+        $d = $request->validate(['ids' => 'required|array|min:1|max:500', 'ids.*' => 'integer', 'accept' => 'required|boolean', 'reason' => 'required_if:accept,false|nullable|string|max:500']);
+        $done = 0;
+        $skipped = [];
+        foreach (AttendanceRecord::with('employee')->whereIn('id', $d['ids'])->get() as $r) {
+            try {
+                $this->decideRecord($r, (bool) $d['accept'], $d['reason'] ?? null, $request->user());
+                $done++;
+            } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+                $skipped[] = ($r->employee?->name ?? '#'.$r->id).': '.($e->getMessage() ?: 'غير مسموح');
+            }
+        }
+
+        return ['done' => $done, 'skipped' => $skipped];
+    }
+
     public function review(Request $request, AttendanceRecord $record)
     {
-        $record->load('employee');
+        $data = $request->validate(['accept' => 'required|boolean', 'reason' => 'required_if:accept,false|nullable|string|max:500']);
+
+        return $this->decideRecord($record, (bool) $data['accept'], $data['reason'] ?? null, $request->user());
+    }
+
+    private function decideRecord(AttendanceRecord $record, bool $accept, ?string $reason, \App\Models\User $u)
+    {
+        $record->loadMissing('employee');
         // attendance and absence are decided by HR only: the HR manager, or HR staff granted attendance approval
-        $u = $request->user();
         abort_unless($u->hasRole('hr_mgr', 'super') || ($u->hasRole('hr_staff') && Access::for()->can('ATT', 'approve', ['employee' => $record->employee])), 403, 'قرارات الحضور والغياب صلاحية مدير الموارد البشرية');
         abort_if($record->employee->user?->id === $u->id, 403, 'لا يمكنك مراجعة سجل حضورك');
-        $data = $request->validate(['accept' => 'required|boolean', 'reason' => 'required_if:accept,false|nullable|string|max:500']);
+        abort_if(! $accept && blank($reason), 422, 'سبب الرفض إلزامي');
+        $data = ['accept' => $accept, 'reason' => $reason];
         $date = $record->work_date->format('d/m/Y');
         if ($data['accept']) {
             $record->update(['pending' => false, 'status' => $record->status === 'excuse_requested' ? 'present' : $record->status, 'reviewed_by' => $u->id]);

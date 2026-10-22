@@ -227,6 +227,7 @@ class AnnouncementController extends Controller
     {
         $r = AnnouncementReceipt::where('announcement_id', $announcement->id)->where('user_id', $request->user()->id)->firstOrFail();
         $r->update(['read_at' => $r->read_at ?? now(), 'device' => mb_substr($request->userAgent() ?? '', 0, 80)]);
+        Audit::readFor($request->user()->id, ['screen' => 'announcements', 'id' => $announcement->id]);
 
         return ['ok' => true];
     }
@@ -235,6 +236,7 @@ class AnnouncementController extends Controller
     {
         $r = AnnouncementReceipt::where('announcement_id', $announcement->id)->where('user_id', $request->user()->id)->firstOrFail();
         $r->update(['read_at' => $r->read_at ?? now(), 'ack_at' => now(), 'device' => mb_substr($request->userAgent() ?? '', 0, 80)]);
+        Audit::readFor($request->user()->id, ['screen' => 'announcements', 'id' => $announcement->id]);
         Audit::log('announcements', $announcement->id, 'ack', null, ['user' => $request->user()->id]);
 
         return ['ok' => true];

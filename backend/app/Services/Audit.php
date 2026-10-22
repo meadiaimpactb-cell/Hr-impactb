@@ -30,6 +30,26 @@ class Audit
      *
      * @param  int|array<int|null>|null  $userIds
      */
+    /**
+     * Owner's note: whatever the user opens (a request, a mail conversation, an announcement) clears the notifications
+     * about it, so the counter on the bell goes down by itself. $match: ['request' => id] | ['screen' => 'mail', 'thread' => id] …
+     */
+    public static function readFor(?int $userId, array $match): void
+    {
+        if (! $userId) {
+            return;
+        }
+        $q = \App\Models\AppNotification::where('user_id', $userId)->whereNull('read_at');
+        if (isset($match['request'])) {
+            $q->where('request_id', $match['request']);
+        } else {
+            foreach ($match as $k => $v) {
+                $q->where('link->'.$k, $v);
+            }
+        }
+        $q->update(['read_at' => now()]);
+    }
+
     public static function notify(int|array|null $userIds, string $title, ?string $body = null, string $kind = 'info', ?array $link = null, ?int $requestId = null, bool $mail = true): void
     {
         $ids = array_unique(array_filter((array) $userIds));

@@ -105,14 +105,25 @@ class MailController extends Controller
         if (! in_array($u->id, $thread->read_by ?? [], true)) {
             $thread->update(['read_by' => [...($thread->read_by ?? []), $u->id]]);
         }
+        // the «رسالة داخلية من…» notification of this conversation is read with it; older ones (sent before they carried
+        // the conversation) are cleared once no conversation is left unread
+        Audit::readFor($u->id, ['screen' => 'mail', 'thread' => $thread->id]);
+        if (! MailThread::whereJsonContains('participants', $u->id)->get()->contains(fn ($t) => ! in_array($u->id, $t->read_by ?? [], true))) {
+            \App\Models\AppNotification::where('user_id', $u->id)->whereNull('read_at')->where('link->screen', 'mail')->whereNull('link->thread')->update(['read_at' => now()]);
+        }
 
         return $this->row($thread, $u) + ['messages' => $thread->messages()->with('sender:id,name')->get()->map(fn ($m) => ['id' => $m->id, 'from' => $m->sender?->only('id', 'name'), 'mine' => $m->from_user_id === $u->id, 'body' => $m->body, 'file' => $m->attachment_path, 'at' => $m->created_at])];
     }
 
+    private const ATTACHMENT = 'nullable|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic,gif,doc,docx,xls,xlsx,csv,ppt,pptx,txt,zip';
+
     public function store(Request $request)
     {
         $u = $request->user();
-        $d = $request->validate(['to' => 'required|array|min:1|max:20', 'to.*' => 'exists:users,id', 'subject' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'group' => 'nullable|boolean', 'draft_id' => 'nullable|integer']);
+        // a form with an attachment sends the «shared conversation» option as text ("true"/"false"/"1"/"0")
+        $request->merge(['group' => $request->boolean('group')]);
+        $d = $request->validate(['to' => 'required|array|min:1|max:20', 'to.*' => 'exists:users,id', 'subject' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'group' => 'nullable|boolean', 'draft_id' => 'nullable|integer',
+            'attachment' => self::ATTACHMENT]);
         $allowed = collect($this->recipients($request))->pluck('id')->all();
         if (array_diff(array_map('intval', $d['to']), $allowed)) {
             throw \Illuminate\Validation\ValidationException::withMessages(['to' => 'أحد المستلمين خارج نطاق مراسلاتك (موظفو شركتك فقط)']);
@@ -139,7 +150,7 @@ class MailController extends Controller
     {
         $u = $request->user();
         abort_unless(in_array($u->id, $thread->participants, true), 403);
-        $d = $request->validate(['body' => 'required|string|max:10000']);
+        $d = $request->validate(['body' => 'required|string|max:10000', 'attachment' => self::ATTACHMENT]);
         $this->addMessage($request, $thread, $d['body']);
 
         return $this->show($request, $thread->fresh());
@@ -152,7 +163,7 @@ class MailController extends Controller
         MailMessage::create(['thread_id' => $thread->id, 'from_user_id' => $u->id, 'body' => $body, 'attachment_path' => $path]);
         $thread->update(['last_at' => now(), 'read_by' => [$u->id]]);
         $others = array_values(array_diff($thread->participants, [$u->id]));
-        Audit::notify($others, 'رسالة داخلية من '.$u->name, $thread->subject.' — '.mb_substr($body, 0, 100), 'info', ['screen' => 'mail'], null, false);
+        Audit::notify($others, 'رسالة داخلية من '.$u->name, $thread->subject.' — '.mb_substr($body, 0, 100), 'info', ['screen' => 'mail', 'thread' => $thread->id], null, false);
         // the full message to each recipient's official address, in the recipient's company identity (owner's note)
         Audit::email($others, 'رسالة داخلية: '.$thread->subject, $thread->subject, 'من: '.$u->name."\n\n".$body, 'mail', 'البريد الداخلي — منصة HC');
     }

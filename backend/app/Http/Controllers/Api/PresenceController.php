@@ -23,34 +23,79 @@ use Illuminate\Support\Facades\DB;
  */
 class PresenceController extends Controller
 {
-    // ---------- presence checks ----------
+    // ---------- check-in requests ----------
+    /**
+     * Owner's note (22/10): «طلب تحضير» goes to an employee who is late and has not checked in — it asks him to check in
+     * now. Whoever has checked in is not asked again. The request closes by itself when he checks in.
+     */
     public function request(Request $request, Employee $employee)
     {
-        $u = $request->user();
-        abort_unless(Settings::get('presenceCheckEnabled', $employee->company_id, true), 422, 'خاصية طلب التحضير غير مفعّلة');
-        abort_unless(Access::for()->isManagerOf($employee) || ($u->isHr() && Access::for()->can('ATT', 'approve', ['employee' => $employee])) || $u->hasRole('super') || Access::for()->isCeoOf($employee->company_id), 403, 'طلب التحضير للمشرف المباشر أو الموارد البشرية');
-        // §28: only during the employee's working hours, and only once they have checked in today (and not checked out)
-        $employee->loadMissing('schedule', 'company.tier');
-        $shift = null;
-        foreach ([now(), now()->subDay()] as $day) { // a night shift that started yesterday is still running
-            $s = AttendanceService::isWorkDay($employee, $day) ? AttendanceService::shift($employee, $day) : null;
-            if ($s && now()->between($s[0], $s[1])) {
-                $shift = $s;
-                break;
-            }
-            $shift ??= $s;
-        }
-        abort_unless($shift && now()->between($shift[0], $shift[1]), 422, 'لا يُرسل طلب التحضير إلا خلال ساعات دوام الموظف'.($shift ? ' ('.$shift[0]->format('H:i').' - '.$shift[1]->format('H:i').')' : ''));
-        $rec = AttendanceRecord::where('employee_id', $employee->id)->whereDate('work_date', $shift[0]->toDateString())->first();
-        abort_unless($rec && $rec->check_in && ! $rec->check_out, 422, $rec?->check_out ? 'سجّل الموظف انصرافه اليوم — لا يُرسل طلب تحضير بعد الانصراف' : 'لم يسجّل الموظف حضوره اليوم — طلب التحضير يُرسل لمن سجّل حضوره فقط');
-        $open = DB::table('presence_checks')->where('employee_id', $employee->id)->where('status', 'pending')->where('due_at', '>', now())->exists();
-        abort_if($open, 422, 'يوجد طلب تحضير قائم لهذا الموظف لم تنتهِ مهلته بعد');
-        $minutes = (int) Settings::get('presenceCheckMinutes', $employee->company_id, 30);
-        $id = DB::table('presence_checks')->insertGetId(['employee_id' => $employee->id, 'company_id' => $employee->company_id, 'requested_by' => $u->id, 'requested_at' => now(), 'due_at' => now()->addMinutes($minutes), 'status' => 'pending', 'created_at' => now(), 'updated_at' => now()]);
-        Audit::log('presence_checks', $id, 'request', null, ['employee' => $employee->id]);
-        Audit::notify(User::where('employee_id', $employee->id)->value('id'), 'طلب تحضير — أكّد تواجدك الآن', "طلب {$u->name} تأكيد تواجدك في موقع العمل خلال $minutes دقيقة، من التطبيق", 'warn', ['screen' => 'presence'], null);
+        $r = self::send($employee, $request->user());
+        abort_unless($r['ok'], 422, $r['msg']);
 
-        return ['id' => $id, 'due_at' => now()->addMinutes($minutes)->toDateTimeString(), 'minutes' => $minutes];
+        return $r;
+    }
+
+    /** The same for several employees at once (multi-select): sends to those it applies to, explains the others. */
+    public function requestMany(Request $request)
+    {
+        $ids = $request->validate(['employee_ids' => 'required|array|min:1|max:500', 'employee_ids.*' => 'integer'])['employee_ids'];
+        $sent = 0;
+        $skipped = [];
+        foreach (Employee::whereIn('id', $ids)->get() as $e) {
+            $r = self::send($e, $request->user());
+            $r['ok'] ? $sent++ : $skipped[] = $e->name.': '.$r['msg'];
+        }
+
+        return ['sent' => $sent, 'skipped' => $skipped];
+    }
+
+    /** Whether an employee is late right now without a check-in (the request applies only then). */
+    public static function lateNow(Employee $e, ?\Illuminate\Support\Carbon $now = null): ?array
+    {
+        $now ??= now();
+        if (! $e->punch_required || ! AttendanceService::isWorkDay($e, $now) || AttendanceService::onLeave($e->id, $now->toDateString())) {
+            return null;
+        }
+        $s = AttendanceService::shift($e, $now);
+        $grace = (int) Settings::get('graceMinutes', $e->company_id, 0);
+        if (! $s || $now->lte($s[0]->copy()->addMinutes($grace)) || $now->gte($s[1])) {
+            return null;
+        }
+        $rec = AttendanceRecord::where('employee_id', $e->id)->whereDate('work_date', $now->toDateString())->first();
+
+        return $rec?->check_in ? null : $s;
+    }
+
+    private static function send(Employee $employee, User $u): array
+    {
+        $acc = Access::for($u);
+        if (! ($acc->isManagerOf($employee) || ($u->isHr() && $acc->can('ATT', 'approve', ['employee' => $employee])) || $u->hasRole('super') || $acc->isCeoOf($employee->company_id))) {
+            return ['ok' => false, 'msg' => 'طلب التحضير للمشرف المباشر أو الموارد البشرية'];
+        }
+        if (! Settings::get('presenceCheckEnabled', $employee->company_id, true)) {
+            return ['ok' => false, 'msg' => 'خاصية طلب التحضير غير مفعّلة'];
+        }
+        $employee->loadMissing('schedule', 'company.tier');
+        $rec = AttendanceRecord::where('employee_id', $employee->id)->whereDate('work_date', now()->toDateString())->first();
+        if ($rec?->check_in) {
+            return ['ok' => false, 'msg' => 'سجّل حضوره اليوم — لا يُطلب منه تحضير'];
+        }
+        $shift = self::lateNow($employee);
+        if (! $shift) {
+            return ['ok' => false, 'msg' => 'ليس متأخرًا الآن (لم يبدأ دوامه بعد، أو في إجازة، أو ليس يوم عمل له)'];
+        }
+        if (DB::table('presence_checks')->where('employee_id', $employee->id)->where('kind', 'checkin')->where('status', 'pending')->whereDate('requested_at', now()->toDateString())->exists()) {
+            return ['ok' => false, 'msg' => 'أُرسل له طلب تحضير اليوم ولم يسجّل بعد'];
+        }
+        $minutes = (int) Settings::get('presenceCheckMinutes', $employee->company_id, 30);
+        $id = DB::table('presence_checks')->insertGetId(['employee_id' => $employee->id, 'company_id' => $employee->company_id, 'kind' => 'checkin', 'requested_by' => $u->id,
+            'requested_at' => now(), 'due_at' => now()->addMinutes($minutes), 'status' => 'pending', 'created_at' => now(), 'updated_at' => now()]);
+        Audit::log('presence_checks', $id, 'request', null, ['employee' => $employee->id, 'kind' => 'checkin']);
+        Audit::notify(User::where('employee_id', $employee->id)->value('id'), 'طلب تحضير — سجّل حضورك الآن',
+            'بدأ دوامك الساعة '.$shift[0]->format('H:i').' ولم تسجّل حضورك بعد. سجّل حضورك من التطبيق خلال '.$minutes.' دقيقة — طلبه '.$u->name, 'warn', ['screen' => 'attendance']);
+
+        return ['ok' => true, 'id' => $id, 'due_at' => now()->addMinutes($minutes)->toDateTimeString(), 'minutes' => $minutes, 'msg' => 'أُرسل'];
     }
 
     /** The employee's open check (the app shows the confirmation dialog). */
@@ -59,7 +104,7 @@ class PresenceController extends Controller
         $e = $request->user()->employee;
         abort_unless($e, 404);
         self::expire($e->id);
-        $c = DB::table('presence_checks')->where('employee_id', $e->id)->where('status', 'pending')->orderByDesc('id')->first();
+        $c = DB::table('presence_checks')->where('employee_id', $e->id)->where('kind', 'presence')->where('status', 'pending')->orderByDesc('id')->first();
 
         return ['check' => $c ? ['id' => $c->id, 'requested_at' => $c->requested_at, 'due_at' => $c->due_at, 'by' => User::where('id', $c->requested_by)->value('name')] : null,
             'tracking' => (bool) Settings::get('locationTrackingEnabled', $e->company_id, false), 'track_interval' => (int) Settings::get('trackIntervalMinutes', $e->company_id, 10)];
@@ -97,7 +142,9 @@ class PresenceController extends Controller
 
         return DB::table('presence_checks')->join('employees', 'employees.id', '=', 'presence_checks.employee_id')->whereIn('presence_checks.employee_id', $ids)->whereDate('requested_at', $date)
             ->orderByDesc('presence_checks.id')->get(['presence_checks.*', 'employees.name as employee_name', 'employees.emp_no'])
-            ->map(fn ($c) => (array) $c + ['requested_by_name' => $names[$c->requested_by] ?? '', 'status_label' => ['pending' => 'بانتظار التأكيد', 'confirmed' => 'أكّد', 'missed' => 'لم يستجب'][$c->status] ?? $c->status]);
+            ->map(fn ($c) => (array) $c + ['requested_by_name' => $names[$c->requested_by] ?? '', 'status_label' => ($c->kind ?? 'presence') === 'checkin'
+                ? (['pending' => 'بانتظار تسجيل الحضور', 'confirmed' => 'سجّل حضوره', 'missed' => 'لم يسجّل خلال المهلة', 'cancelled' => 'أُلغي'][$c->status] ?? $c->status)
+                : (['pending' => 'بانتظار التأكيد', 'confirmed' => 'أكّد', 'missed' => 'لم يستجب', 'cancelled' => 'أُلغي'][$c->status] ?? $c->status)]);
     }
 
     /** Overdue checks → missed: the day goes to review, HR and the employee are told, and the employee must check in again (§28/§99). */
@@ -109,8 +156,15 @@ class PresenceController extends Controller
         }
         $n = 0;
         foreach ($q->get() as $c) {
-            DB::table('presence_checks')->where('id', $c->id)->update(['status' => 'missed', 'note' => 'لم يستجب خلال المهلة', 'updated_at' => now()]);
             $e = Employee::find($c->employee_id);
+            if (($c->kind ?? 'presence') === 'checkin') {
+                DB::table('presence_checks')->where('id', $c->id)->update(['status' => 'missed', 'note' => 'لم يسجّل حضوره خلال المهلة', 'updated_at' => now()]);
+                Audit::notify($c->requested_by, 'لم يسجّل حضوره بعد طلب التحضير', ($e?->name ?? '').' — انتهت المهلة '.\Illuminate\Support\Carbon::parse($c->due_at)->format('H:i'), 'warn', ['screen' => 'attendance']);
+                $n++;
+
+                continue;
+            }
+            DB::table('presence_checks')->where('id', $c->id)->update(['status' => 'missed', 'note' => 'لم يستجب خلال المهلة', 'updated_at' => now()]);
             if (! $e) {
                 continue;
             }

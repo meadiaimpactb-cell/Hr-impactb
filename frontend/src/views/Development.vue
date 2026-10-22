@@ -99,8 +99,13 @@
     <div class="card">
       <div class="row mb"><select v-model="status" class="in" style="width:auto" @change="load"><option value="">كل الحالات</option><option value="pending">بانتظار التحقق</option><option value="planned">مخطط</option><option value="verified">موثَّق</option><option value="rejected">مرفوض</option></select></div>
       <div v-if="!all.length" class="empty">لا سجلات</div>
-      <div v-dt v-else class="tw"><table><thead><tr><th>الموظف</th><th>النشاط</th><th>النوع</th><th>الفترة</th><th>الساعات</th><th>النقاط</th><th>الإثبات</th><th>الحالة</th><th /></tr></thead>
+      <div v-if="pickD.length" class="bulkbar"><b><span class="cnt">{{ pickD.length }}</span> محدد</b>
+        <button class="btn okb xs" :class="{ loading: busyD }" @click="verifyMany('verified')">اعتماد إثبات المحدد</button>
+        <button class="btn ghost xs bad" :class="{ loading: busyD }" @click="verifyMany('rejected')">رفض المحدد</button>
+        <button class="btn ghost xs" @click="pickD = []">إلغاء التحديد</button></div>
+      <div v-dt v-if="all.length" class="tw"><table><thead><tr><th style="width:34px"><input v-if="verifiable.length" type="checkbox" title="تحديد كل ما ينتظر التحقق" :checked="pickD.length > 0 && pickD.length === verifiable.length" @change="pickD = $event.target.checked ? verifiable.map((r) => r.id) : []" /></th><th>الموظف</th><th>النشاط</th><th>النوع</th><th>الفترة</th><th>الساعات</th><th>النقاط</th><th>الإثبات</th><th>الحالة</th><th /></tr></thead>
         <tbody><tr v-for="r in all" :key="r.id">
+          <td><input v-if="r.status === 'pending' && canVerify(r)" v-model="pickD" type="checkbox" :value="r.id" /></td>
           <td><b>{{ r.employee?.name }}</b><span class="tiny muted">{{ r.company }}</span></td><td>{{ r.program }}<div class="tiny muted">{{ r.provider }}</div></td><td class="small">{{ actName(r.activity) }}</td><td class="num small">{{ fmtD(r.from) }} → {{ fmtD(r.to) }}</td><td>{{ r.hours }}</td><td class="num">{{ r.status === 'verified' ? r.points : '—' }}</td>
           <td><a v-if="r.certificate_path" href="#" class="tiny" @click.prevent="fileUrl(r.certificate_path)"><Icon name="download" :size="12" /> عرض</a><span v-else class="tiny muted">—</span></td>
           <td><span class="pill" :class="COLOR[r.status]">{{ r.status_label }}</span></td>
@@ -171,6 +176,18 @@ const kindName = (k) => (auth.meta?.lookups?.dev_kinds || []).find((x) => x.code
 const LEVEL_HINT = { gold: '150 نقطة — الدرجة القصوى (30) وإشادة في لوحة المتميزين', silver: '125–149 — درجة تزيد على الكاملة', bronze: '100–124 — الدرجة الكاملة', below: '50–99 — درجة جزئية', alert: 'أقل من 50 — علامة برتقالية وجلسة توجيه' }
 const activities = computed(() => mine.value?.activities || auth.meta?.lookups?.dev_activities || [])
 const actName = (c) => activities.value.find((a) => a.code === c)?.name || c || '—'
+// multi-select (owner's note): verify or reject several proofs at once
+const pickD = ref([]); const busyD = ref(false)
+const verifiable = computed(() => all.value.filter((r) => r.status === 'pending' && canVerify(r)))
+async function verifyMany(decision) {
+  const note = decision === 'rejected' ? await promptBox(`سبب رفض ${pickD.value.length} سجل:`) : null
+  if (decision === 'rejected' && !note) return
+  busyD.value = true
+  const res = await Promise.allSettled(pickD.value.map((id) => api.post(`/development/${id}/verify`, { decision, note })))
+  const ok = res.filter((x) => x.status === 'fulfilled').length
+  ui.toast(`${decision === 'verified' ? 'اعتُمد' : 'رُفض'} ${ok}${ok < res.length ? ` — لم يُنفَّذ ${res.length - ok}` : ''}`, ok < res.length ? 'warn' : 'ok')
+  pickD.value = []; busyD.value = false; load()
+}
 const canVerify = (r) => auth.has('super') || auth.isHr || (auth.emp && r.employee?.manager_id === auth.emp.id)
 async function load() {
   if (tab.value === 'plan') { const p = await api.get('/dev-plans/mine', { params: { year: planYear.value } }); if (!p.tracks?.length) p.tracks = [{ title: '', month: '', apply: '' }]; plan.value = p; return }
