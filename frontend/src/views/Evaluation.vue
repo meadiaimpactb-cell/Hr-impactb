@@ -191,7 +191,7 @@ const OBJ = { none: '—', open: 'قيد النظر', accepted: 'قُبل', reje
 const SCOPE = { group: 'المجموعة', company: 'شركة', job: 'وظيفة' }
 const prevMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 const period = ref(prevMonth()); const year = ref(new Date().getFullYear())
-const tabs = computed(() => [auth.emp && ['my', 'تقييماتي'], auth.isApprover && ['monthly', 'التقييم الشهري'], auth.isApprover && ['annual', 'التقييم السنوي'], auth.isApprover && ['sim', 'محاكاة «ماذا لو»'], ['weights', 'الأوزان والتقديرات']].filter(Boolean))
+const tabs = computed(() => [auth.emp && ['my', 'تقييماتي'], auth.isApprover && auth.canView('PRF') && ['monthly', 'التقييم الشهري'], auth.isApprover && auth.canView('PRF') && ['annual', 'التقييم السنوي'], auth.isApprover && auth.canView('PRF') && ['sim', 'محاكاة «ماذا لو»'], ['weights', 'الأوزان والتقديرات']].filter(Boolean))
 const tab = ref(auth.emp ? 'my' : 'monthly')
 const my = ref(null); const rows = ref([]); const annual = ref([]); const templates = ref([]); const detail = ref(null); const tplForm = ref(null)
 const annualKind = ref('fiscal'); const goalsForm = ref(null); const annualObj = ref(null)

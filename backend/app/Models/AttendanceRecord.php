@@ -11,7 +11,7 @@ class AttendanceRecord extends Model
     protected function casts(): array
     {
         return [
-            'work_date' => 'date:Y-m-d', 'check_in' => 'datetime', 'check_out' => 'datetime', 'client_time' => 'datetime',
+            'work_date' => 'date:Y-m-d', 'check_in' => 'datetime', 'voided_check_in' => 'datetime', 'check_out' => 'datetime', 'client_time' => 'datetime',
             'offline' => 'boolean', 'geo_fail' => 'boolean', 'low_accuracy' => 'boolean', 'pending' => 'boolean',
             'corrected' => 'boolean', 'note_required' => 'boolean', 'note_pending' => 'boolean', 'remote' => 'boolean', 'excuse_due' => 'datetime', 'excuse_at' => 'datetime', 'lat' => 'float', 'lng' => 'float',
         ];

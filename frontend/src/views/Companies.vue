@@ -1,9 +1,9 @@
 <template>
   <div class="page-h">
-    <div><h1>{{ t('الشركات وباقات المزايا') }}</h1><p>لكل شركة هويتها (الشعار والألوان) التي يراها موظفوها · وتصنيفها (تأسيس / تمكين / أثر) الذي تنزل مزاياه تلقائيًا على موظفيها — اللائحة §47–52</p></div>
-    <div class="acts"><button class="btn pri sm" @click="edit({})"><Icon name="plus" :size="16" /> شركة</button></div>
+    <div><h1>{{ t('الشركات والتصنيفات') }}</h1><p>لكل شركة هويتها (الشعار والألوان) التي يراها موظفوها · وتصنيفها (تأسيس / تمكين / أثر) الذي تنزل مزاياه تلقائيًا على موظفيها — اللائحة §47–52</p></div>
+    <div class="acts"><button v-if="auth.has('super')" class="btn pri sm" @click="edit({})"><Icon name="plus" :size="16" /> شركة</button></div>
   </div>
-  <div class="tabs"><button :class="{ on: tab === 'c' }" @click="tab = 'c'">الشركات</button><button :class="{ on: tab === 't' }" @click="tab = 't'">الباقات ومزايا كل باقة (الإجازات والبدلات…)</button></div>
+  <div class="tabs"><button :class="{ on: tab === 'c' }" @click="tab = 'c'">الشركات</button><button :class="{ on: tab === 't' }" @click="tab = 't'">التصنيفات ومزايا كل تصنيف (الإجازات والبدلات…)</button></div>
 
   <div v-if="tab === 'c'" class="card">
     <DataTable :rows="companies" :columns="columns" :selectable="auth.has('super')" store-key="companies" export-name="companies" search-placeholder="ابحث بالرمز أو الاسم أو الموقع…" @row-click="view = $event">
@@ -22,13 +22,13 @@
         <a v-if="c.website" :href="c.website" target="_blank" rel="noopener" class="site" dir="ltr" title="فتح موقع الشركة" @click.stop>{{ c.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '') }} <Icon name="external" :size="12" /></a>
       </template>
       <template #cell-ceo="{ row: c }">{{ c.ceo?.name || '—' }}</template>
-      <template #cell-tier="{ row: c }"><span v-if="c.tier" class="pill" :style="{ background: c.tier.color + '22', color: c.tier.color }">{{ c.tier.name }}</span><span v-else class="pill warn">بلا تصنيف</span></template>
+      <template #cell-tier="{ row: c }"><span v-if="c.tier" class="pill" :style="{ background: c.tier.color + '22', color: c.tier.color }">{{ c.tier.name }}</span><span v-else class="pill warn">بلا تصنيف</span><div v-if="c.next_tier_id" class="tiny muted" title="تصنيف معتمد يسري في تاريخه (§49)">← {{ tiers.find((t) => t.id === c.next_tier_id)?.name }} من {{ fmtD(c.next_tier_from) }}</div></template>
       <template #cell-status="{ row: c }"><span class="pill" :class="c.active ? 'ok' : 'gray'">{{ c.active ? 'نشطة' : 'موقوفة' }}</span></template>
       <template #cell-actions="{ row: c }">
         <div class="row" style="gap:2px;flex-wrap:nowrap;justify-content:flex-end" @click.stop>
           <a v-if="c.website" class="btn ghost xs" :href="c.website" target="_blank" rel="noopener" title="فتح الموقع"><Icon name="external" :size="15" /></a>
           <button class="btn ghost xs" title="عرض" @click="view = c"><Icon name="eye" :size="15" /></button>
-          <button class="btn ghost xs" title="تعديل" @click="edit(c)"><Icon name="edit" :size="15" /></button>
+          <button v-if="auth.has('super')" class="btn ghost xs" title="تعديل" @click="edit(c)"><Icon name="edit" :size="15" /></button>
           <ActionMenu :items="menu(c)" />
         </div>
       </template>
@@ -53,7 +53,7 @@
     <template #foot>
       <RouterLink class="btn ghost" :to="{ path: '/employees' }" @click="ui.company = view.id">موظفو الشركة</RouterLink>
       <button class="btn sec" @click="view = null">إغلاق</button>
-      <button class="btn pri" @click="edit(view); view = null"><Icon name="edit" :size="15" /> تعديل</button>
+      <button v-if="auth.has('super')" class="btn pri" @click="edit(view); view = null"><Icon name="edit" :size="15" /> تعديل</button>
     </template>
   </Modal>
 
@@ -78,7 +78,7 @@
         </div>
       </th></tr></thead>
       <tbody><tr v-for="k in benefitKeys" :key="k">
-        <td><div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start"><input v-if="auth.has('super')" v-model="selBen" type="checkbox" :value="k" style="margin-top:4px" /><div><b>{{ BEN[k] || k }}</b><span class="tiny muted">{{ k }}</span><span v-if="ALLOW.includes(k) || TYPES[k] === 'allowance'" class="pill info" style="font-size:10.5px" title="يُضاف تلقائيًا إلى راتب كل موظف في شركات الباقة">بدل شهري يُصرف مع الراتب</span></div><button v-if="auth.has('super')" class="btn ghost xs" style="margin-inline-start:auto" title="حذف البند من كل الفئات" @click="selBen = [k]; removeBenefits()"><Icon name="trash" :size="12" /></button></div></td>
+        <td><div class="row" style="gap:6px;flex-wrap:nowrap;align-items:flex-start"><input v-if="auth.has('super')" v-model="selBen" type="checkbox" :value="k" style="margin-top:4px" /><div><b>{{ BEN[k] || k }}</b><span class="tiny muted">{{ k }}</span><span v-if="ALLOW.includes(k) || TYPES[k] === 'allowance'" class="pill info" style="font-size:10.5px" title="يُضاف تلقائيًا إلى راتب كل موظف في شركات التصنيف">بدل شهري يُصرف مع الراتب</span></div><button v-if="auth.has('super')" class="btn ghost xs" style="margin-inline-start:auto" title="حذف البند من كل الفئات" @click="selBen = [k]; removeBenefits()"><Icon name="trash" :size="12" /></button></div></td>
         <td v-for="tr in tiers" :key="tr.id"><input v-model="tr.benefits[k]" class="in" style="min-height:32px;padding:3px 8px" :disabled="!auth.has('super')" /></td>
       </tr></tbody>
     </table></div>
@@ -96,7 +96,7 @@
     <p v-if="delCompanies" class="small">اختر الفئة التي تنتقل إليها الشركات المرتبطة ({{ delCompanies }} شركة)، وستتحدث مزايا موظفيها فورًا.</p>
     <div v-if="delCompanies" class="fg"><label>نقل الشركات إلى *</label><select v-model="delTarget" class="in"><option :value="null">—</option><option v-for="tr in moveTargets" :key="tr.id" :value="tr.id">{{ tr.name }}</option></select></div>
     <div v-if="delCompanies && !moveTargets.length" class="notice bad small">لا توجد فئة أخرى تنتقل إليها الشركات — أنشئ فئة أولًا أو لا تحذف كل الفئات.</div>
-    <div class="fg"><label>سبب الحذف *</label><input v-model="delReason" class="in" placeholder="مثال: إلغاء الباقات القديمة بعد اعتماد اللائحة" /></div>
+    <div class="fg"><label>سبب الحذف *</label><input v-model="delReason" class="in" placeholder="مثال: إلغاء التصنيفات القديمة بعد اعتماد اللائحة" /></div>
     <template #foot><button class="btn sec" @click="delTier = null">إلغاء</button><button class="btn dan" :class="{ loading: saving }" :disabled="saving || (delCompanies && !delTarget) || !delReason.trim()" @click="confirmRemoveTier">حذف</button></template>
   </Modal>
 
@@ -152,6 +152,7 @@ import Modal from '../components/Modal.vue'
 import SearchSelect from '../components/SearchSelect.vue'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
+import { fmtD } from '../utils'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -181,10 +182,10 @@ const bodyOf = (c, patch = {}) => ({ code: c.code, name: c.name, name_en: c.name
 function menu(c) {
   return [
     { label: 'عرض البيانات', icon: 'eye', action: () => (view.value = c) },
-    { label: 'تعديل', icon: 'edit', action: () => edit(c) },
+    { label: 'تعديل', icon: 'edit', hidden: !auth.has('super'), action: () => edit(c) },
     { label: 'فتح موقع الشركة', icon: 'external', hidden: !c.website, action: () => window.open(c.website, '_blank', 'noopener') },
     { divider: true },
-    { label: c.active ? 'إيقاف الشركة' : 'تفعيل الشركة', icon: c.active ? 'ban' : 'check-circle', disabled: c.is_holding, action: () => setActive(c, !c.active) },
+    { label: c.active ? 'إيقاف الشركة' : 'تفعيل الشركة', icon: c.active ? 'ban' : 'check-circle', hidden: !auth.has('super'), disabled: c.is_holding, action: () => setActive(c, !c.active) },
     { label: 'حذف الشركة', icon: 'trash', danger: true, hidden: !auth.has('super'), disabled: c.is_holding || c.employees_count > 0, action: () => remove(c) },
   ]
 }
@@ -302,10 +303,10 @@ async function newBenefit() {
   if (!label) return
   const labels = { ...(auth.meta?.benefit_labels || {}) }
   if (Object.values(labels).some((l) => String(l).trim() === label)) return ui.toast('يوجد بند بهذا الاسم', 'warn')
-  const raw = ((await promptBox(`القيمة الافتراضية لـ«${label}» في كل الباقات`, { text: 'رقم (مبلغ أو عدد أيام)، ويمكن تعديله لكل باقة لاحقًا', multiline: false, required: false, confirmText: 'إضافة البند' })) ?? '0').trim()
+  const raw = ((await promptBox(`القيمة الافتراضية لـ«${label}» في كل التصنيفات`, { text: 'رقم (مبلغ أو عدد أيام)، ويمكن تعديله لكل تصنيف لاحقًا', multiline: false, required: false, confirmText: 'إضافة البند' })) ?? '0').trim()
   const val = raw === '' ? 0 : Number(raw.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
   if (Number.isNaN(val)) return ui.toast('القيمة يجب أن تكون رقمًا', 'warn')
-  const kind = await chooseBox(`نوع «${label}»`, { allowance: 'بدل شهري يُصرف مع الراتب (مبلغ بالريال)', other: 'ميزة أو رصيد آخر (أيام، عدد، سقف…)' }, { text: 'البدل الشهري يُضاف تلقائيًا إلى رواتب كل موظفي شركات الباقة، وتتحدث قيمته عند تعديل الباقة.', confirmText: 'إضافة البند' })
+  const kind = await chooseBox(`نوع «${label}»`, { allowance: 'بدل شهري يُصرف مع الراتب (مبلغ بالريال)', other: 'ميزة أو رصيد آخر (أيام، عدد، سقف…)' }, { text: 'البدل الشهري يُضاف تلقائيًا إلى رواتب كل موظفي شركات التصنيف، وتتحدث قيمته عند تعديل التصنيف.', confirmText: 'إضافة البند' })
   if (!kind) return
   let key = 'custom' + Date.now().toString(36)
   while (benefitKeys.value.includes(key)) key += '1'
@@ -314,7 +315,7 @@ async function newBenefit() {
   if (kind === 'allowance') await api.put('/settings', { key: 'benefitTypes', value: { ...(auth.meta?.benefit_types || {}), [key]: 'allowance' }, reason })
   for (const tr of tiers.value) await api.put(`/tiers/${tr.id}`, { benefits: { ...tr.benefits, [key]: val }, reason })
   await Promise.all([auth.loadMeta(), load()])
-  ui.toast(`أُضيف «${label}» إلى كل الباقات وحُفظ — عدّل قيمته لأي باقة ثم «حفظ نسخة جديدة»`, 'ok', 6000)
+  ui.toast(`أُضيف «${label}» إلى كل التصنيفات وحُفظ — عدّل قيمته لأي تصنيف ثم «حفظ نسخة جديدة»`, 'ok', 6000)
 }
 async function saveCompany() {
   const f = form.value
@@ -335,7 +336,7 @@ async function saveTiers() {
   const cast = (v) => (v === 'true' ? true : v === 'false' ? false : v !== '' && !isNaN(v) ? Number(v) : v)
   let synced = 0
   for (const tr of tiers.value) synced += (await api.put(`/tiers/${tr.id}`, { benefits: Object.fromEntries(Object.entries(tr.benefits).map(([k, v]) => [k, cast(v)])), reason: reason.value })).benefits_synced || 0
-  ui.toast(synced ? `حُفظت الباقات وتحدّثت بدلات ${synced} موظف تلقائيًا` : 'حُفظت الباقات — لا بدلات تغيّرت على الموظفين', 'ok', 6000); reason.value = ''; load()
+  ui.toast(synced ? `حُفظت التصنيفات وتحدّثت بدلات ${synced} موظف تلقائيًا` : 'حُفظت التصنيفات — لا بدلات تغيّرت على الموظفين', 'ok', 6000); reason.value = ''; load()
 }
 onMounted(load)
 </script>

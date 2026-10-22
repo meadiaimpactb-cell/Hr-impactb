@@ -34,6 +34,17 @@ class AnnouncementController extends Controller
         return User::whereIn('employee_id', $q->pluck('id'))->where('active', true)->pluck('id')->all();
     }
 
+    /** The leaders of an audience: its direct managers, the HR of its companies, finance, the company CEOs and the group CEO. */
+    public static function leadersOf(array $userIds): array
+    {
+        $emps = Employee::whereIn('id', User::whereIn('id', $userIds)->whereNotNull('employee_id')->pluck('employee_id'))->get(['id', 'company_id', 'manager_id']);
+        $cids = $emps->pluck('company_id')->unique()->filter()->values();
+        $empIds = [...$emps->pluck('manager_id')->filter()->all(), ...\App\Models\Company::whereIn('id', $cids)->whereNotNull('ceo_employee_id')->pluck('ceo_employee_id')->all()];
+
+        return array_values(array_unique(array_map('intval', [...User::whereIn('employee_id', $empIds)->where('active', true)->pluck('id')->all(),
+            ...$cids->flatMap(fn ($c) => \App\Services\Access::hrUsersFor((int) $c))->all(), ...\App\Services\Access::usersWithRole('fin'), ...\App\Services\Access::usersWithRole('super')])));
+    }
+
     /** Everyone under a manager: direct reports and their reports, down the whole chain. */
     public static function teamOf(int $managerEmpId): array
     {
@@ -82,7 +93,7 @@ class AnnouncementController extends Controller
         $acc = Access::for();
         $d = $request->validate(['title' => 'required|string|max:200', 'body' => 'required|string|max:10000', 'require_ack' => 'boolean', 'popup' => 'boolean', 'expires_at' => 'nullable|date|after:today',
             'audience' => 'required|array', 'audience.scope' => ['required', Rule::in(['group', 'company', 'job', 'contract', 'people', 'dept', 'team'])], 'audience.companies' => 'array', 'audience.jobs' => 'array',
-            'audience.contract' => 'nullable|string', 'audience.employee_ids' => 'array', 'audience.depts' => 'array']);
+            'audience.contract' => 'nullable|string', 'audience.employee_ids' => 'array', 'audience.depts' => 'array', 'audience.leaders' => 'boolean']);
         $a = $d['audience'];
         // §115: group CEO and group-wide HR publish to anyone; the company CEO (and the publishers he designates) and
         // company-scoped HR publish within their companies only. A direct manager alerts his own team (the people under him).
@@ -104,6 +115,9 @@ class AnnouncementController extends Controller
         if ($scope !== 'all') { // job / contract / people audiences are narrowed to the publisher's companies too
             $allowed = User::whereIn('employee_id', Employee::whereIn('company_id', $scope ?: [0])->pluck('id'))->pluck('id')->all();
             $users = array_values(array_intersect($users, $allowed));
+        }
+        if (! empty($a['leaders'])) { // owner's note: the audience's leaders get it too — direct managers, HR, finance, company CEOs and the group CEO
+            $users = array_values(array_diff(array_unique([...$users, ...self::leadersOf($users)]), [$u->id]));
         }
         abort_unless($users, 422, 'لا مستلمين لهذا الجمهور');
         $path = $request->file('attachment')?->store('announcements/'.now()->format('Y'), 'local');

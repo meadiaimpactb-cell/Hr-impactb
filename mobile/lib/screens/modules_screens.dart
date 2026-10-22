@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
@@ -289,19 +290,44 @@ class DevelopmentScreen extends StatelessWidget {
               if (!ctx.mounted) return;
               final prov = await promptText(ctx, tr('الجهة'), lines: 1);
               if (!ctx.mounted) return;
-              act(ctx, () => Api.post('/development', {'program': p, 'provider': prov}), reload, ok: 'أُرسل للتحقق');
+              final hours = await promptText(ctx, tr('عدد الساعات'), lines: 1);
+              if (!ctx.mounted) return;
+              // §78: an activity counts only with its proof (certificate, attendance record, summary…)
+              final proof = await _pickProof(ctx);
+              if (proof == null || !ctx.mounted) return;
+              act(ctx, () => Api.postMultipart('/development', {'program': p, 'provider': prov ?? '', if (num.tryParse(hours ?? '') != null) 'hours': hours!}, files: {proof: 'certificate'}), reload, ok: 'أُرسل لاعتماد مشرفك');
             }),
             for (final r in list)
               Card(child: ListTile(
                 title: Text(r['program'], style: const TextStyle(fontWeight: FontWeight.w800)),
                 subtitle: Text('${r['provider'] ?? ''} · ${r['from'] ?? ''} → ${r['to'] ?? ''} · ${r['hours']} ${tr('ساعة')}'),
                 trailing: r['status'] == 'planned'
-                    ? FilledButton(onPressed: () => act(ctx, () => Api.post('/development/${r['id']}/complete'), reload, ok: 'أُرسل للتحقق'), child: Text(tr('أكملته')))
+                    ? FilledButton(
+                        onPressed: () async {
+                          // §81: what was learned and how it will be applied, with the proof of completion
+                          final sum = await promptText(ctx, tr('ملخص ما تعلمته والتطبيق المتوقع في عملك'), lines: 5);
+                          if (sum == null || sum.trim().length < 30) {
+                            if (sum != null && ctx.mounted) toast(ctx, tr('الملخص قصير — 30 حرفًا على الأقل'), error: true);
+                            return;
+                          }
+                          if (!ctx.mounted) return;
+                          final proof = await _pickProof(ctx);
+                          if (proof == null || !ctx.mounted) return;
+                          act(ctx, () => Api.postMultipart('/development/${r['id']}/complete', {'summary': sum}, files: {proof: 'certificate'}), reload, ok: 'أُرسل لاعتماد مشرفك');
+                        },
+                        child: Text(tr('أكملته')))
                     : Text(r['status_label'], style: TextStyle(color: colors[r['status']], fontWeight: FontWeight.w700)),
               )),
           ]);
         }),
       );
+}
+
+/// Photo of the certificate / attendance proof of a development activity.
+Future<String?> _pickProof(BuildContext ctx) async {
+  final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1800, imageQuality: 80);
+  if (x == null && ctx.mounted) toast(ctx, tr('أرفق صورة الشهادة أو إثبات الحضور'), error: true);
+  return x?.path;
 }
 
 // ---------------- Mail ----------------

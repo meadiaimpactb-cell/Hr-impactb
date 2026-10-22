@@ -71,6 +71,7 @@
           <div v-if="d.settlement_due" class="notice small" :class="d.settlement_due < today() && ['open', 'settled'].includes(d.status) ? 'bad' : 'info'">موعد تسوية المستحقات: <b>{{ fmtD(d.settlement_due) }}</b> — {{ d.settlement_due_rule }} · لا يُعلَّق صرف المستحقات غير المتنازع عليها على اكتمال إخلاء الطرف (§111)</div>
           <h3 style="margin-top:14px">التصفية النهائية <span class="sub">v{{ d.settlement?.version }}</span><span v-if="d.can_manage && d.status === 'open' && d.stage < 4" class="acts"><button class="btn ghost xs" @click="rebuild">إعادة بناء البنود</button></span></h3>
           <div v-dt class="tw"><table><tbody><tr v-for="(l, i) in d.settlement?.lines || []" :key="i"><td>{{ l.name }}</td><td class="num" :class="l.amount < 0 ? 'bad' : ''">{{ money(l.amount) }}</td></tr><tr><th>الصافي</th><th class="num">{{ money(d.settlement?.total) }}</th></tr></tbody></table></div>
+          <p class="tiny" :class="d.employee?.bank_iban ? 'muted' : 'bad'">الآيبان: <b class="num" style="direction:ltr;display:inline-block">{{ d.employee?.bank_iban || 'غير مسجل — يُستكمل قبل الصرف' }}</b></p>
         </div>
       </div>
       <div v-if="d.approvals?.length" class="mt"><b class="small">اعتمادات التصفية:</b> <span v-for="a in d.approvals" :key="a.role" class="pill ok">{{ a.label }} — {{ a.by }}</span></div>

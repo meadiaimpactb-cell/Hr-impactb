@@ -57,8 +57,10 @@ class AttendanceController extends Controller
         $emps = Access::for()->employees('ATT')->where('status', '!=', 'terminated')->where('punch_required', true)
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
             ->with(['company:id,name', 'attendance' => fn ($q) => $q->whereDate('work_date', $today)->with('location:id,name')])
-            ->orderBy('name')->get(['id', 'name', 'emp_no', 'company_id']);
-        $rows = $emps->map(fn ($e) => ['employee' => $e->only('id', 'name', 'emp_no'), 'company' => $e->company?->name,
+            ->orderBy('name')->get(['id', 'name', 'emp_no', 'company_id', 'track_viewers']);
+        $me = $request->user()->id;
+        // §28: the movement route is shown to the HR manager and the group CEO, and to a manager the group CEO granted it to
+        $rows = $emps->map(fn ($e) => ['employee' => $e->only('id', 'name', 'emp_no') + ['track_viewer' => in_array($me, array_map('intval', (array) ($e->track_viewers ?? [])), true)], 'company' => $e->company?->name,
             'record' => $e->attendance->first(), 'on_leave' => AttendanceService::onLeave($e->id, $today)]);
         $grace = (int) Settings::get('graceMinutes', null, 0);
 
@@ -106,7 +108,7 @@ class AttendanceController extends Controller
         $record->load('employee');
         // attendance and absence are decided by HR only: the HR manager, or HR staff granted attendance approval
         $u = $request->user();
-        abort_unless($u->hasRole('hr_mgr') || ($u->hasRole('hr_staff') && Access::for()->can('ATT', 'approve', ['employee' => $record->employee])), 403, 'قرارات الحضور والغياب صلاحية مدير الموارد البشرية');
+        abort_unless($u->hasRole('hr_mgr', 'super') || ($u->hasRole('hr_staff') && Access::for()->can('ATT', 'approve', ['employee' => $record->employee])), 403, 'قرارات الحضور والغياب صلاحية مدير الموارد البشرية');
         abort_if($record->employee->user?->id === $u->id, 403, 'لا يمكنك مراجعة سجل حضورك');
         $data = $request->validate(['accept' => 'required|boolean', 'reason' => 'required_if:accept,false|nullable|string|max:500']);
         $date = $record->work_date->format('d/m/Y');

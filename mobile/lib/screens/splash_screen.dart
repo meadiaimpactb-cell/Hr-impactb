@@ -32,12 +32,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 Container(
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 30, offset: Offset(0, 12))]),
-                  child: Image.asset('assets/logo-mark.png', width: 96, height: 96, errorBuilder: (_, __, ___) => const Icon(Icons.business, size: 72, color: navy)),
+                  child: Image.asset('assets/logo-hc.png', width: 260, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.business, size: 72, color: navy)),
                 ),
-                const SizedBox(height: 22),
-                const Text('HC', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: 2)),
-                const SizedBox(height: 6),
-                const Text('منصة إدارة رأس المال البشري', style: TextStyle(color: Colors.white70, fontSize: 14)),
                 const SizedBox(height: 30),
                 const SizedBox(width: 26, height: 26, child: CircularProgressIndicator(color: cyan, strokeWidth: 2.5)),
               ]),

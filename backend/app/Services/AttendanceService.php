@@ -126,10 +126,22 @@ class AttendanceService
         return $d->copy()->startOfDay()->startOfWeek($e ? $e->weekStartsOn() : Carbon::SUNDAY);
     }
 
-    /** §29/30: the flex allowance is a weekly budget of minutes (tier benefit flexMinutes), not a daily one. */
+    /**
+     * §29/30: the flex allowance is a weekly budget of minutes, not a daily one. It comes with the company's
+     * classification (tier benefit flexMinutes) automatically; «الساعة المرنة» on the employee grants the default
+     * allowance to someone whose classification gives none (an approved flexible arrangement).
+     */
     public static function flexBudget(Employee $e): int
     {
-        return $e->flex_enabled ? (int) ($e->benefit('flexMinutes') ?? Settings::get('flexMinutes', $e->company_id, 0)) : 0;
+        $tier = (int) ($e->benefit('flexMinutes') ?? 0);
+
+        return $tier > 0 ? $tier : ($e->flex_enabled ? (int) Settings::get('flexMinutes', $e->company_id, 0) : 0);
+    }
+
+    /** §60: a nursing mother's daily hour (nursingMinutes) until employees.nursing_until — taken at the start or the end of the day. */
+    public static function nursingMinutes(Employee $e, Carbon $d): int
+    {
+        return $e->nursing_until && $e->nursing_until->gte($d->copy()->startOfDay()) ? (int) Settings::get('nursingMinutes', $e->company_id, 60) : 0;
     }
 
     /** Flex minutes already absorbed this week, the given day excluded. */
@@ -152,7 +164,7 @@ class AttendanceService
         if (! $s) {
             return 0;
         }
-        $late = max(0, (int) floor($s[0]->diffInMinutes($in, false)));
+        $late = max(0, (int) floor($s[0]->diffInMinutes($in, false)) - self::nursingMinutes($e, $in)); // §60: the nursing hour is not lateness
         if ($late > 0 && ($budget = self::flexBudget($e)) > 0) {
             $absorbed = min($late, max(0, $budget - self::flexUsed($e, $in)));
         }
@@ -167,13 +179,16 @@ class AttendanceService
             return 0;
         }
 
-        return max(0, (int) floor($out->diffInMinutes($s[1], false)));
+        // §60: what is left of the nursing hour after a late start covers an early leave
+        $nursing = max(0, self::nursingMinutes($e, $in) - max(0, (int) floor($s[0]->diffInMinutes($in, false))));
+
+        return max(0, (int) floor($out->diffInMinutes($s[1], false)) - $nursing);
     }
 
-    /** §30: athar-tier employees with flex enabled get one remote working day a week. */
+    /** §30: employees whose classification grants it (athar) get one remote working day a week. */
     public static function remoteEligible(Employee $e): bool
     {
-        return (bool) $e->flex_enabled && (int) ($e->benefit('remote') ?? 0) >= 1;
+        return (int) ($e->benefit('remote') ?? 0) >= 1;
     }
 
     public static function remoteUsed(Employee $e, Carbon $d): bool
@@ -272,6 +287,15 @@ class AttendanceService
         $now = now();
         $day = $now->toDateString();
         $rec = AttendanceRecord::firstOrNew(['employee_id' => $e->id, 'work_date' => $day]);
+        if (! $rec->check_in) {
+            // §24: a shift that runs past midnight is closed on the day it started — a check-out after midnight belongs to
+            // yesterday's open attendance (night shift, or checked in less than 16 hours ago) instead of opening a new day
+            $open = AttendanceRecord::where('employee_id', $e->id)->whereDate('work_date', $now->copy()->subDay()->toDateString())
+                ->whereNotNull('check_in')->whereNull('check_out')->first();
+            if ($open && ($e->schedule?->cross_midnight || ($now->hour < 6 && $open->check_in->gt($now->copy()->subHours(16))))) {
+                $rec = $open;
+            }
+        }
         $geo = self::geoCheck($e, $in['lat'] ?? null, $in['lng'] ?? null, $in['accuracy'] ?? null);
         $lowAcc = ($in['accuracy'] ?? 0) > 50;
         $offline = (bool) ($in['offline'] ?? false);
@@ -297,7 +321,7 @@ class AttendanceService
                 'accuracy' => $in['accuracy'] ?? null, 'distance_m' => $geo['dist'], 'device' => substr((string) ($in['device'] ?? request()->userAgent()), 0, 190),
                 'offline' => $offline, 'geo_fail' => ! $geo['ok'], 'low_accuracy' => $lowAcc,
                 // shown at once; only a punch outside the allowed range is flagged for review (low accuracy / offline sync are just recorded)
-                'pending' => ! $geo['ok'], 'note_required' => $noteRequired, 'note_pending' => $noteRequired,
+                'pending' => ! $geo['ok'] || (bool) $rec->voided_check_in, 'note_required' => $noteRequired, 'note_pending' => $noteRequired,
                 'client_time' => isset($in['client_time']) ? Carbon::parse($in['client_time']) : null,
             ]);
         } elseif (! $rec->check_out) {

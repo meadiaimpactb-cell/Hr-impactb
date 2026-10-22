@@ -8,7 +8,7 @@ const en = {
   'إدارة رأس المال البشري': 'Human Capital Management', 'مجموعة وادي الأثر المالية': 'Impact Valley Capital Group', 'العودة إلى صفحة التعريف وتحميل التطبيق': 'Back to the overview page and app download',
   'الرئيسية': 'Home', 'التواصل': 'Communication', 'الموظفون': 'Employees', 'التشغيل اليومي': 'Daily operations', 'الإدارة': 'Administration',
   'لوحة المعلومات': 'Dashboard', 'صندوق الموافقات': 'Approvals inbox', 'طلباتي': 'My requests', 'ملفي': 'My profile',
-  'مركز الإشعارات': 'Notifications', 'الحضور والانصراف': 'Attendance', 'الإجازات': 'Leaves', 'الشركات والباقات': 'Companies & tiers', 'الشركات والتصنيفات': 'Companies & tiers', 'الشركات وباقات المزايا': 'Companies & benefit packages',
+  'مركز الإشعارات': 'Notifications', 'الحضور والانصراف': 'Attendance', 'الإجازات': 'Leaves', 'الشركات والتصنيفات': 'Companies & tiers',
   'الإعدادات والسياسات': 'Settings & policies', 'سجل التدقيق': 'Audit log',
   'حفظ': 'Save', 'إلغاء': 'Cancel', 'إضافة': 'Add', 'تعديل': 'Edit', 'اعتماد': 'Approve', 'إرجاع': 'Return', 'إرسال': 'Submit',
   'إغلاق': 'Close', 'تأكيد': 'Confirm', 'بحث': 'Search', 'تصدير Excel': 'Export Excel', 'تفاصيل': 'Details', 'الملف': 'Profile',

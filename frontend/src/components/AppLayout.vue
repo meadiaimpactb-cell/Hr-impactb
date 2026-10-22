@@ -1,11 +1,10 @@
 <template>
   <header class="topbar">
     <button ref="hamBtn" class="tbtn icon ham" aria-label="القائمة" :aria-expanded="ui.sideOpen" @click="ui.sideOpen = !ui.sideOpen"><Icon name="menu" /></button>
-    <div class="brand" :title="brandCo ? brandCo.name : ''">
+    <div class="brand" :title="brandCo ? brandCo.name : 'HC — إدارة رأس المال البشري'">
       <img v-if="brandCo?.logo_url" class="co-logo" :src="brandCo.logo_url" :alt="brandCo.name" />
-      <img v-else src="/logo-mark.png" alt="" />
-      <div v-if="brandCo"><div>{{ ui.lang === 'en' && brandCo.name_en ? brandCo.name_en : brandCo.name }}</div><small>HC — {{ t('إدارة رأس المال البشري') }} · {{ t('مجموعة وادي الأثر المالية') }}</small></div>
-      <div v-else><div>HC — {{ t('إدارة رأس المال البشري') }}</div><small>{{ t('مجموعة وادي الأثر المالية') }}</small></div>
+      <span v-else-if="brandCo" class="co-name">{{ ui.lang === 'en' && brandCo.name_en ? brandCo.name_en : brandCo.name }}</span>
+      <img v-else class="hc-logo" src="/logo-hc.png" alt="HC — إدارة رأس المال البشري" />
     </div>
     <select v-if="companies.length > 1" class="tsel hide-sm" :value="ui.company" @change="ui.setCompany($event.target.value); reload()">
       <option :value="0">{{ t('كل الشركات') }}</option>
@@ -189,7 +188,7 @@ const NAV = [
     { to: '/users', ic: 'shield', label: 'المستخدمون والصلاحيات', roles: ['super', 'hr_mgr'] },
     { to: '/import', ic: 'upload', label: 'الاستيراد', roles: ['super', 'hr_mgr'] },
     { to: '/app-versions', ic: 'download', label: 'إصدارات التطبيق', roles: ['super', 'hr_mgr'] },
-    { to: '/companies', ic: 'building', label: 'الشركات وباقات المزايا', roles: ['super', 'hr_mgr'] },
+    { to: '/companies', ic: 'building', label: 'الشركات والتصنيفات', roles: ['super', 'hr_mgr'] },
     { to: '/lookups', ic: 'database', label: 'البيانات الأساسية', roles: ['super', 'hr_mgr'] },
     { to: '/flows', ic: 'workflow', label: 'أنواع الطلبات ومسارات الاعتماد', roles: ['super', 'hr_mgr'] },
     { to: '/integrations', ic: 'plug', label: 'التكامل مع أودو', roles: ['super', 'hr_mgr'] },

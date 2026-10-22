@@ -386,7 +386,7 @@ class PayrollController extends Controller
     {
         return match ($to) {
             'hr_review' => Access::for($u)->can('PAY', 'edit', ['company_id' => $run->company_id]),
-            'hr_approved' => $u->hasRole('hr_mgr') || ($u->hasRole('super') && ! Access::usersWithRole('hr_mgr')),
+            'hr_approved' => ($u->hasRole('hr_mgr') && in_array($u->id, Access::hrManagersFor($run->company_id), true)) || ($u->hasRole('super') && ! Access::usersWithRole('hr_mgr')), // §7: the HR manager of that company
             'fin_approved' => $u->hasRole('fin') || ($u->hasRole('super') && ! Access::usersWithRole('fin')),
             'approved' => $u->hasRole('super'),
             default => false,

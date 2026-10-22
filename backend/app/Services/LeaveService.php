@@ -19,7 +19,10 @@ class LeaveService
         if ($lt->code === 'annual' && $e->hire_date && $e->hire_date->diffInYears(Carbon::create($year, 12, 31)) >= 5) {
             // §56: at least 30 calendar days after five continuous years — compared in calendar-day equivalents, so a
             // work-day package (tiers 2–3) is raised only when it is worth less than 30 calendar days
-            $quota = self::unit($e) === 'work' ? max($quota, (float) ceil(30 * 5 / 7)) : max($quota, 30);
+            $raised = self::unit($e) === 'work' ? max($quota, (float) ceil(30 * 5 / 7)) : max($quota, 30);
+            $fifth = $e->hire_date->copy()->addYears(5);
+            // the year the fifth anniversary falls in: the higher entitlement counts only from the anniversary month
+            $quota = $fifth->year === $year ? round(($quota * ($fifth->month - 1) + $raised * (13 - $fifth->month)) / 12, 2) : $raised;
         }
         if ($lt->code === 'sick') {
             $quota = 120; // §59: 30 days full pay + 60 days at three quarters + 30 days unpaid, per year from the first sick leave
@@ -55,10 +58,20 @@ class LeaveService
         $available = $lt->accrual === 'none' ? 0 : round($opening + $accrued + $adjusted - $used - $reserved, 2);
 
         $carried = (float) $ledger->where('entry', 'carry')->sum('days');
-        $available += $lt->accrual === 'none' ? 0 : $carried;
+        $lapsed = 0.0;
+        if ($carried > 0) {
+            // §57: deferred days are taken within the first three months of the next year; what is still unused after that lapses
+            $until = $ledger->where('entry', 'carry')->map(fn ($l) => $l->request_id ? (ApprovalRequest::find($l->request_id)?->data['until'] ?? null) : null)->filter()->max() ?: "$year-03-31";
+            if (now()->toDateString() > $until) {
+                $takenBy = (float) -$ledger->where('entry', 'used')->filter(fn ($l) => $l->occurred_on && $l->occurred_on->toDateString() <= $until)->sum('days')
+                    + $reqs->where('status', 'approved')->whereNotIn('id', $ledgerRefs)->filter(fn ($r) => ($r->data['from'] ?? '') <= $until)->sum(fn ($r) => $r->data['days'] ?? 0);
+                $lapsed = round(max(0, $carried - $takenBy), 2);
+            }
+        }
+        $available += $lt->accrual === 'none' ? 0 : $carried - $lapsed;
 
         return [
-            'type' => $lt->code, 'name' => $lt->name, 'accrual' => $lt->accrual, 'quota' => $quota, 'part_factor' => $factor, 'unit' => self::unit($e), 'carried' => $carried,
+            'type' => $lt->code, 'name' => $lt->name, 'accrual' => $lt->accrual, 'quota' => $quota, 'part_factor' => $factor, 'unit' => self::unit($e), 'carried' => $carried, 'carry_lapsed' => $lapsed,
             'unit_label' => self::unit($e) === 'work' ? 'أيام عمل' : 'أيام تقويمية',
             'opening' => $opening, 'accrued' => $accrued, 'adjusted' => $adjusted, 'used' => $used, 'reserved' => $reserved,
             'available' => $available,
@@ -119,6 +132,12 @@ class LeaveService
      */
     public static function setBalance(Employee $e, LeaveType $lt, int $year, $available, $used, string $reason, ?int $userId = null): array
     {
+        if ($available !== null && $available !== '' && (float) $available < 0) { // a leave balance set by HR is never negative
+            throw \Illuminate\Validation\ValidationException::withMessages(['available' => 'لا يمكن أن يكون الرصيد المتاح أقل من صفر']);
+        }
+        if ($used !== null && $used !== '' && (float) $used < 0) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['used' => 'لا يمكن أن يكون المستهلك أقل من صفر']);
+        }
         $before = self::balance($e, $lt, $year);
         $date = $year === (int) now()->year ? now()->toDateString() : "$year-12-31";
         if ($used !== null && $used !== '' && (float) $used !== (float) $before['used']) {

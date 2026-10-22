@@ -168,7 +168,7 @@
     <template v-if="decision === 'refund'">
       <div class="fr">
         <div class="fg"><label>المبلغ المردود *</label><input v-model.number="refundAmount" type="number" min="0.01" step="0.01" class="in" /></div>
-        <div class="fg"><label>تاريخ الرد *</label><input v-model="refundDate" type="date" class="in" /></div>
+        <div class="fg"><label>تاريخ الرد *</label><DateInput v-model="refundDate" /></div>
       </div>
       <div class="fg"><label>مرجع التحويل</label><input v-model="refundRef" class="in" /></div>
       <p v-if="refundAmount && refundAmount < decideTarget.remainder" class="tiny muted">يُخصم الفرق ({{ money(decideTarget.remainder - refundAmount) }}) من أجر الشهر التالي ضمن الحدود النظامية.</p>

@@ -77,9 +77,10 @@
       <button class="btn sec" @click="$emit('close')">إغلاق</button>
       <!-- employee actions -->
       <button v-if="isMine && d?.status === 'pending_ack'" class="btn okb" :class="{ loading: busy }" @click="doAck"><Icon name="check-circle" :size="15" /> أقرّ بالاستلام</button>
-      <button v-if="isMine && d?.status === 'in_use' && !d.type.is_cash" class="btn sec" :class="{ loading: busy }" @click="act('request-return')">طلب استرداد</button>
+      <button v-if="isMine && d?.status === 'in_use' && !d.type.is_cash" class="btn sec" :class="{ loading: busy }" @click="act('request-return')">طلب إعادة العهدة</button>
       <button v-if="isMine && d?.status === 'in_use' && d.type.is_cash && !hasPendingClaim" class="btn pri" @click="claimOpen = true"><Icon name="money" :size="15" /> رفع فواتير التسوية</button>
       <!-- keeper actions -->
+      <button v-if="d?.can_hand && !d?.can_manage" class="btn pri" @click="pick = 'hand'"><Icon name="user-check" :size="15" /> تسليم لموظف</button>
       <template v-if="d?.can_manage">
         <button v-if="d.status === 'available'" class="btn pri" @click="pick = 'hand'"><Icon name="user-check" :size="15" /> تسليم لموظف</button>
         <button v-if="d.status === 'in_use'" class="btn ghost" @click="pick = 'transfer'">نقل لموظف آخر</button>
@@ -92,7 +93,7 @@
 
   <Modal v-if="pick" :title="pick === 'hand' ? 'تسليم العهدة لموظف' : 'نقل العهدة'" size="narrow" @close="pick = null">
     <div class="fg"><label>الموظف *</label><SearchSelect v-model="pickEmp" :options="empOptions" /></div>
-    <div v-if="pick === 'hand' && d.type.is_cash" class="fg"><label>تاريخ انتهاء الغرض (اختياري)</label><input v-model="pickEnd" type="date" class="in" /><span class="tiny muted">يبدأ منه احتساب مهلة التسوية (10 أيام عمل)، وبحد أقصى 30 يومًا من الصرف.</span></div>
+    <div v-if="pick === 'hand' && d.type.is_cash" class="fg"><label>تاريخ انتهاء الغرض (اختياري)</label><DateInput v-model="pickEnd" /><span class="tiny muted">يبدأ منه احتساب مهلة التسوية (10 أيام عمل)، وبحد أقصى 30 يومًا من الصرف.</span></div>
     <p class="tiny muted">{{ d.type.requires_ack ? 'يصل الموظف طلب إقرار استلام قبل أن تصبح قيد الاستخدام.' : 'تصبح قيد الاستخدام مباشرة.' }}</p>
     <template #foot><button class="btn sec" @click="pick = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="doPick">تأكيد</button></template>
   </Modal>
@@ -104,7 +105,7 @@
   </Modal>
 
   <Modal v-if="purposeOpen" title="تاريخ انتهاء الغرض / العودة من المهمة" size="narrow" @close="purposeOpen = false">
-    <div class="fg"><label>التاريخ *</label><input v-model="purposeDate" type="date" class="in" /></div>
+    <div class="fg"><label>التاريخ *</label><DateInput v-model="purposeDate" /></div>
     <template #foot><button class="btn sec" @click="purposeOpen = false">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="doPurpose">حفظ</button></template>
   </Modal>
 
@@ -136,6 +137,7 @@
     </div>
     <button class="btn sec sm mb" @click="invoices.push({ name: '', amount: 0 })"><Icon name="plus" :size="14" /> فاتورة</button>
     <div class="fg"><label>تفاصيل الصرف *</label><textarea v-model="claimDetails" class="in" /></div>
+    <div class="fg"><label>صور الفواتير والمستندات * <span class="tiny muted">(ملف PDF أو صورة — §44)</span></label><input type="file" class="in" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" @change="claimFile = $event.target.files[0]" /></div>
     <template #foot><button class="btn sec" @click="claimOpen = false">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="doClaim">رفع للمالية</button></template>
   </Modal>
 </template>
@@ -170,6 +172,7 @@ const newSecret = ref('')
 const claimOpen = ref(false)
 const claimDetails = ref('')
 const invoices = ref([{ name: '', amount: 0 }])
+const claimFile = ref(null)
 
 const STATUS_COLOR = { available: 'gray', pending_ack: 'warn', in_use: 'ok', return_requested: 'warn', inspecting: 'info', lost: 'bad', damaged: 'bad' }
 const CLAIM_STATUS = { pending_finance: 'بانتظار المالية', settled: 'مسوّاة ومُقفلة', refunded: 'أُقفلت برد المتبقي لحساب الشركة', to_salary: 'أُقفلت بخصم المتبقي من الراتب', returned: 'مُرجَعة لاستكمال المستندات' }
@@ -229,7 +232,12 @@ async function doSetSecret() {
 }
 async function doClaim() {
   if (!claimDetails.value.trim() || invoices.value.some((i) => !i.name || !(Number(i.amount) >= 0))) return ui.toast('أكمل الفواتير والتفاصيل', 'warn')
-  await run(() => api.post(`/custody/${props.id}/claims`, { details: claimDetails.value, invoices: invoices.value }), 'رُفعت التسوية للمالية')
+  if (!claimFile.value) return ui.toast('أرفق صور الفواتير والمستندات المؤيدة (§44)', 'warn')
+  const fd = new FormData()
+  fd.append('details', claimDetails.value)
+  invoices.value.forEach((inv, i) => { fd.append(`invoices[${i}][name]`, inv.name); fd.append(`invoices[${i}][amount]`, Number(inv.amount) || 0) })
+  fd.append('attachment', claimFile.value)
+  await run(() => api.post(`/custody/${props.id}/claims`, fd), 'رُفعت التسوية للمالية')
   claimOpen.value = false
 }
 // employee list only needed for hand/transfer; loaded lazily once

@@ -12,7 +12,7 @@ class DevRecord extends Model
 
     protected function casts(): array
     {
-        return ['from' => 'date:Y-m-d', 'to' => 'date:Y-m-d', 'hours' => 'float', 'cost' => 'float', 'verified_at' => 'datetime', 'summary_at' => 'datetime'];
+        return ['from' => 'date:Y-m-d', 'to' => 'date:Y-m-d', 'hours' => 'float', 'cost' => 'float', 'verified_at' => 'datetime', 'summary_at' => 'datetime', 'points_split' => 'array'];
     }
 
     public function employee() { return $this->belongsTo(Employee::class); }

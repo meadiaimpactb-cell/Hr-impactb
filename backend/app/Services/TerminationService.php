@@ -93,7 +93,7 @@ class TerminationService
      */
     public static function noticeDays(Employee $e, string $initiatedBy, ?string $reason = null): int
     {
-        if ($reason === 'misconduct') {
+        if (in_array($reason, ['misconduct', 'probation'], true)) { // §21: either party may end the contract during probation without notice
             return 0;
         }
         $monthly = $e->contract_type === 'full';

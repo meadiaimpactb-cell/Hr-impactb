@@ -127,9 +127,35 @@ class AssistantController extends Controller
         } elseif (! $howTo && $has('تنتظر اعتماد', 'بانتظار اعتماد', 'موافقاتي', 'اعتماداتي')) {
             $items = AssistantTools::run('pending_approvals', [])['items'];
             $answer = $items ? 'بانتظار اعتمادك '.count($items)." طلبًا:\n".collect($items)->take(10)->map(fn ($x) => "- {$x['type']} — {$x['employee']}: {$x['summary']} ({$x['waiting_working_days']} يوم عمل)")->implode("\n")."\n\n[صندوق الموافقات](/approvals)" : 'لا طلبات بانتظار اعتمادك. [صندوق الموافقات](/approvals)';
-        } elseif (! $howTo && $has('حضوري', 'تأخير', 'غياب')) {
+        } elseif (! $howTo && ! $has('تقرير', 'تقارير') && $has('حضوري', 'تأخير', 'غياب')) {
             $a = AssistantTools::run('my_overview', [])['attendance_this_month'] ?? [];
             $answer = 'حضورك هذا الشهر: أيام العمل '.($a['required'] ?? 0).'، حضور '.($a['present'] ?? 0).'، تأخير '.($a['late'] ?? 0).'، غياب '.($a['absent'] ?? 0).".\n\n[الحضور والانصراف](/attendance)";
+        } elseif (! $howTo && $has('تقرير', 'تقارير', 'كشف', 'إحصائي', 'احصائي')) {
+            // owner's note: the basic assistant also runs the reports the user may see (this month by default)
+            $cat = collect(AssistantTools::run('list_reports', [])['reports'] ?? []);
+            $norm = fn ($t) => preg_replace('/^(ال|و|ب|ل)/u', '', $t);
+            $words = collect(preg_split('/[\s،,.؟?]+/u', $q))->map($norm)->filter(fn ($w) => mb_strlen($w) >= 3 && ! in_array($w, ['تقرير', 'تقارير', 'أريد', 'اريد', 'اعرض', 'هذا', 'شهر'], true));
+            $hit = $cat->map(fn ($r) => $r + ['s' => $words->filter(fn ($w) => str_contains($r['name'], $w))->count()])->filter(fn ($r) => $r['s'] > 0)->sortByDesc('s')->first();
+            if ($hit) {
+                $in = ['key' => $hit['key']] + match ($hit['period']) {
+                    'month' => ['period' => now()->format('Y-m')],
+                    'range' => ['from' => now()->startOfMonth()->toDateString(), 'to' => now()->toDateString()],
+                    default => [],
+                };
+                $r = AssistantTools::run('run_report', $in);
+                if (! empty($r['error'])) {
+                    $answer = $r['error'];
+                } else {
+                    $cols = array_slice($r['columns'], 0, 6);
+                    $rows = collect($r['rows'])->take(10)->map(fn ($row) => '| '.implode(' | ', array_map(fn ($v) => str_replace('|', '/', (string) (is_array($v) ? implode('، ', $v) : $v)), array_slice(array_values((array) $row), 0, 6))).' |');
+                    $answer = "**{$r['name']}** ".(isset($in['period']) ? '— '.$in['period'] : (isset($in['from']) ? '— من '.$in['from'].' إلى '.$in['to'] : ''))." ({$r['total_rows']} سجل):\n\n"
+                        .($rows->isNotEmpty() ? '| '.implode(' | ', $cols)." |\n|".str_repeat(' --- |', count($cols))."\n".$rows->implode("\n") : 'لا سجلات في هذه الفترة.')
+                        ."\n\n[فتح التقرير كاملًا وطباعته أو تصديره]({$r['link']})";
+                }
+            } else {
+                $answer = $cat->isNotEmpty() ? "التقارير المتاحة لك:\n".$cat->take(25)->map(fn ($r) => "- [{$r['name']}](/reports-center?key={$r['key']})")->implode("\n")."\n\nاكتب اسم التقرير، مثل: «تقرير الحضور»."
+                    : 'لا توجد تقارير ضمن صلاحيتك. [مركز التقارير](/reports-center)';
+            }
         } elseif (! $howTo && $has('عهد')) {
             $c = AssistantTools::run('my_overview', [])['custody'] ?? [];
             $answer = $c ? "العهد المسجلة عليك:\n".collect($c)->map(fn ($x) => "- {$x['item']} ({$x['type']}) — {$x['status']}")->implode("\n")."\n\n[العهد](/custody)" : 'لا توجد عهد مسجلة عليك. [العهد](/custody)';

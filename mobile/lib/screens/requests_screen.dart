@@ -153,7 +153,8 @@ class _RequestCard extends StatelessWidget {
               ]),
             ),
             const SizedBox(width: 8),
-            StatusChip(r['status']),
+            // narrow phones (iPhone SE): the status may take two lines rather than push the row off screen
+            ConstrainedBox(constraints: const BoxConstraints(maxWidth: 104), child: StatusChip(r['status'])),
           ]),
           if (r['status'] == 'pending' || r['created_at'] != null) ...[
             const SizedBox(height: 10),

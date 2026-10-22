@@ -142,7 +142,7 @@
           <td>{{ r.employee?.name }}</td><td class="num">{{ fmtD(r.work_date) }}</td><td class="num">{{ fmtT(r.check_in) }}</td>
           <td class="small">{{ [r.offline && 'دون اتصال', r.geo_fail && `حضور خارج النطاق${r.distance_m != null ? ' (يبعد ' + dist(r.distance_m) + ')' : ''}`, r.out_geo_fail && `انصراف خارج النطاق${r.out_distance_m != null ? ' (يبعد ' + dist(r.out_distance_m) + ')' : ''}`, r.low_accuracy && 'دقة ضعيفة'].filter(Boolean).join(' · ') }}
             <div v-if="r.status === 'excuse_requested'" class="mt"><span class="pill warn">بانتظار عذر الموظف حتى {{ fmtD(r.excuse_due) }}</span><div v-if="r.excuse" class="tiny">العذر: {{ r.excuse }}</div></div><div class="tiny"><a v-if="r.lat" :href="`https://www.google.com/maps?q=${r.lat},${r.lng}`" target="_blank" rel="noopener">موقع الحضور على الخريطة</a><a v-if="r.out_lat" :href="`https://www.google.com/maps?q=${r.out_lat},${r.out_lng}`" target="_blank" rel="noopener" style="margin-inline-start:8px">موقع الانصراف</a></div></td>
-          <td><template v-if="auth.has('hr_mgr', 'hr_staff')"><button class="btn okb xs" @click="review(r, true)">قبول</button> <button class="btn dan xs" :title="r.status === 'excuse_requested' ? 'احتساب اليوم غيابًا' : 'يُطلب من الموظف إبداء عذره أولًا (§27)'" @click="review(r, false)">{{ r.status === 'excuse_requested' ? 'احتساب غياب' : 'رفض وطلب عذر' }}</button></template><span v-else class="tiny muted">يراجعه مدير الموارد البشرية</span></td>
+          <td><template v-if="auth.has('hr_mgr', 'hr_staff', 'super')"><button class="btn okb xs" @click="review(r, true)">قبول</button> <button class="btn dan xs" :title="r.status === 'excuse_requested' ? 'احتساب اليوم غيابًا' : 'يُطلب من الموظف إبداء عذره أولًا (§27)'" @click="review(r, false)">{{ r.status === 'excuse_requested' ? 'احتساب غياب' : 'رفض وطلب عذر' }}</button></template><span v-else class="tiny muted">يراجعه مدير الموارد البشرية</span></td>
         </tr></tbody>
       </table></div>
     </div>
@@ -176,8 +176,9 @@ async function recheckGeo() {
 const auth = useAuth()
 const ui = useUi()
 const isHr = computed(() => auth.has('super', 'hr_mgr', 'hr_staff'))
-const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.isApprover && ['today', 'اليوم'], auth.isApprover && ['month', 'ملخص الشهر'], auth.isApprover && ['pending', 'خارج النطاق للمراجعة'],
-  auth.isApprover && ['corrections', 'طلبات التصحيح'], isHr.value && ['paper', 'السجل البديل']].filter(Boolean))
+const team = computed(() => auth.isApprover && auth.canView('ATT'))
+const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], team.value && ['today', 'اليوم'], team.value && ['month', 'ملخص الشهر'], team.value && ['pending', 'خارج النطاق للمراجعة'],
+  team.value && ['corrections', 'طلبات التصحيح'], isHr.value && ['paper', 'السجل البديل']].filter(Boolean))
 const hm = (m) => `${Math.floor((m || 0) / 60)}:${String((m || 0) % 60).padStart(2, '0')}`
 const excuses = computed(() => (mine.value?.records || []).filter((r) => r.status === 'excuse_requested'))
 // a day left pending for a missing daily achievement is approved once it is written (owner's note)
@@ -205,7 +206,7 @@ async function savePaper() {
     if (!r.errors.length) paperRows.value = []
   } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad') } finally { busy.value = false }
 }
-const tab = ref(auth.isApprover ? 'today' : 'mine') // managers and HR open on today's log
+const tab = ref(auth.isApprover && auth.canView('ATT') ? 'today' : 'mine') // managers and HR open on today's log
 const todayStr = today_()
 const day = ref(todayStr)
 const period = ref(curYM())

@@ -4,7 +4,7 @@
     <thead><tr><th>اليوم</th><th>الحضور</th><th>الانصراف</th><th>التأخير</th><th>الموقع</th><th>الحالة</th><th>المنجز اليومي</th><th v-if="$slots.actions" /></tr></thead>
     <tbody><tr v-for="r in records" :key="r.id">
       <td>{{ DAYS_AR[new Date(r.work_date).getDay()] }} <span class="num">{{ r.work_date.slice(5) }}</span></td>
-      <td class="num">{{ fmtT(r.check_in) }}</td>
+      <td class="num">{{ fmtT(r.check_in) }}<div v-if="r.voided_check_in" class="tiny bad" title="أُلغي لعدم الاستجابة لطلب التحضير">أُلغي {{ fmtT(r.voided_check_in) }}</div></td>
       <td class="num">{{ r.check_out ? fmtT(r.check_out) : '—' }}</td>
       <td>{{ r.late_minutes ? r.late_minutes + ' د' : '—' }}</td>
       <td>

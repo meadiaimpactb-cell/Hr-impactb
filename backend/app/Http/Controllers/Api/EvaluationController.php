@@ -34,7 +34,23 @@ class EvaluationController extends Controller
         $reason = $d['reason'];
         unset($d['reason']);
         $before = $template?->toArray();
-        $template ? $template->update($d + ['version' => $template->version + 1, 'effective_from' => now()->toDateString()]) : $template = EvalTemplate::create($d + ['effective_from' => now()->toDateString()]);
+        // §34: new weights apply from the next evaluation cycle (the 1st of next month); the version in force until then is kept
+        $next = now()->addMonthNoOverflow()->startOfMonth()->toDateString();
+        if ($template) {
+            $prev = $template->effective_from && $template->effective_from->toDateString() > now()->toDateString() ? $template->previous // still not in force: keep what is in force
+                : $template->only('weights', 'sub', 'grades', 'pass_score', 'version');
+            $template->update($d + ['version' => $template->version + 1, 'effective_from' => $next, 'previous' => $prev]);
+            // §118: a change of the evaluation weights is announced to the employees it applies to before it takes effect
+            if (($prev['weights'] ?? null) != $template->weights) {
+                $emps = \App\Models\Employee::where('status', 'active')->when($template->scope === 'company', fn ($q) => $q->where('company_id', $template->scope_id))
+                    ->when($template->scope === 'job', fn ($q) => $q->where('job_title_id', $template->scope_id))->pluck('id');
+                $w = $template->weights;
+                \App\Services\Audit::notify(\App\Models\User::whereIn('employee_id', $emps)->where('active', true)->pluck('id')->all(), 'تحديث أوزان التقييم الشهري',
+                    'من '.\Illuminate\Support\Carbon::parse($next)->format('d/m/Y').': الإنجاز '.($w['achieve'] ?? 0).'% · الحضور '.($w['attend'] ?? 0).'% · التطوير '.($w['dev'] ?? 0).'% · الانضباط '.($w['disc'] ?? 0).'% — '.$reason, 'info', ['screen' => 'evaluation']);
+            }
+        } else {
+            $template = EvalTemplate::create($d + ['effective_from' => now()->toDateString()]);
+        }
         Audit::log('eval_templates', $template->id, $before ? 'update' : 'create', $before, $template->toArray(), $reason);
 
         return $template;

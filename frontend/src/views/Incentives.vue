@@ -70,7 +70,7 @@ import { fmtYM, money } from '../utils'
 
 const auth = useAuth(); const ui = useUi()
 const KC = { praise: 'ok', thanks_letter: 'info', certificate: 'purple', bonus: 'warn', honor: 'navy', achievement: 'ok', star: 'warn' }
-const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.isApprover && ['all', 'سجل الفريق'], ['board', 'لوحة المتميزين']].filter(Boolean))
+const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.isApprover && auth.canView('PRF') && ['all', 'سجل الفريق'], ['board', 'لوحة المتميزين']].filter(Boolean))
 const tab = ref(auth.emp ? 'mine' : 'board')
 const mine = ref(null); const all = ref([]); const board = ref([]); const kinds = ref({}); const period = ref(new Date().toISOString().slice(0, 7))
 const f = ref(null); const emps = ref([]); const busy = ref(false)

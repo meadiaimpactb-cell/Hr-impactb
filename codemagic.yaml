@@ -1,13 +1,16 @@
 # iOS build of the HC app on Codemagic (macOS runners) — the Windows workstation cannot build iOS.
-# 1) Push this repo (or the mobile/ folder) to GitHub and connect it in Codemagic.
-# 2) Add the App Store Connect integration (API key) and an iOS distribution certificate + provisioning profile
-#    for the bundle id below (Automatic code signing in Codemagic handles both).
-# 3) Run the workflow: it produces an .ipa for TestFlight / the App Store.
+# Codemagic reads this file from the repository root; the Flutter app itself lives in mobile/.
+# 1) Connect the GitHub repository in Codemagic.
+# 2) Team settings → Integrations: add the App Store Connect API key (named below), and under Code signing identities
+#    let Codemagic fetch or create the iOS distribution certificate and the App Store profile for sa.impactv.hc.
+# 3) Run «HC iOS release»: it signs with that profile, builds the .ipa and sends it to TestFlight.
 workflows:
   ios-release:
     name: HC iOS release
     max_build_duration: 60
     instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: HC App Store Connect
     environment:
       flutter: stable
       xcode: latest
@@ -23,24 +26,32 @@ workflows:
         script: |
           cd mobile
           flutter pub get
-      - name: Set bundle id and display name
+      - name: Set bundle id
         script: |
           cd mobile/ios
           sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = .*;/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/g" Runner.xcodeproj/project.pbxproj
+      - name: CocoaPods
+        script: |
+          cd mobile/ios
+          pod install --repo-update
+      - name: Apply the signing profiles
+        script: |
+          xcode-project use-profiles --project mobile/ios/Runner.xcodeproj
       - name: Build IPA
         script: |
           cd mobile
           flutter build ipa --release --dart-define=API_BASE=$API_BASE --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - mobile/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
   # Build check only: Codemagic has no company keystore, so this APK is debug-signed and must NOT be published.
   # Published APKs are built locally with android/key.properties (deploy/build.py verifies the signer).
-  android-release:
-    name: HC Android release
+  android-check:
+    name: HC Android build check
     instance_type: mac_mini_m2
     environment:
       flutter: stable

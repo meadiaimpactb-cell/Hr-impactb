@@ -221,7 +221,7 @@ class RecruitmentController extends Controller
         $stages = array_column(Lookup::grouped()['recruit_stages'] ?? [], 'code');
         $d = $request->validate(['opening_id' => 'nullable|exists:job_openings,id', 'company_id' => 'required|exists:companies,id', 'job_title_id' => 'nullable|exists:job_titles,id', 'name' => 'required|string|max:120',
             'email' => 'nullable|email|max:150', 'phone' => 'nullable|string|max:30', 'stage' => ['nullable', Rule::in($stages)], 'rating' => 'nullable|integer|min:1|max:5', 'notes' => 'nullable|string|max:5000',
-            'relation' => 'nullable|string|max:1000']);
+            'relation' => 'nullable|string|max:1000', 'referred_by' => 'nullable|exists:employees,id']); // §87: the employee who referred the candidate
         $this->hr($request, (int) $d['company_id']);
         if (! empty($d['opening_id'])) {
             $op = JobOpening::find($d['opening_id']);
@@ -345,7 +345,7 @@ class RecruitmentController extends Controller
     {
         $me = auth()->id();
 
-        return $a->only('id', 'opening_id', 'company_id', 'job_title_id', 'name', 'email', 'phone', 'stage', 'rating', 'notes', 'relation', 'interviewers', 'offer', 'history', 'employee_id', 'source', 'created_at') + [
+        return $a->only('id', 'opening_id', 'company_id', 'job_title_id', 'name', 'email', 'phone', 'stage', 'rating', 'notes', 'relation', 'interviewers', 'offer', 'history', 'employee_id', 'source', 'created_at', 'referred_by') + ['referrer' => $a->referred_by ? \App\Models\Employee::whereKey($a->referred_by)->value('name') : null,
             'stage_name' => Lookup::name('recruit_stages', $a->stage), 'company' => $a->company?->name, 'job' => $a->jobTitle?->name, 'opening' => $a->opening?->title, 'cv' => $a->cv_path,
             'conflicts' => collect($a->interviewers ?? [])->where('conflict', true)->count(), 'my_disclosure' => collect($a->interviewers ?? [])->firstWhere('user_id', $me)];
     }

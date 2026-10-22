@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../announce.dart';
 import '../api.dart';
@@ -6,7 +7,9 @@ import '../nav.dart';
 import '../presence.dart';
 import '../push.dart';
 import '../l10n.dart';
+import '../state.dart';
 import '../theme.dart';
+import 'account_screens.dart';
 import 'attendance_screen.dart';
 import 'home_screen.dart';
 import 'more_screen.dart';
@@ -31,6 +34,12 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     refreshUnread();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // a temporary password is changed first, then the policy in force is acknowledged (as on the web)
+      if (context.read<AppState>().user?['must_change_password'] == true) {
+        await Navigator.push(context, MaterialPageRoute(fullscreenDialog: true, builder: (_) => const ChangePasswordScreen(force: true)));
+      }
+      if (mounted) await PolicyAckScreen.check(context);
+      if (!mounted) return;
       await Presence.check(context);
       if (mounted) Announce.check(context);
     });

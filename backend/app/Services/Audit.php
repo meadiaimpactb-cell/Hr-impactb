@@ -30,7 +30,7 @@ class Audit
      *
      * @param  int|array<int|null>|null  $userIds
      */
-    public static function notify(int|array|null $userIds, string $title, ?string $body = null, string $kind = 'info', ?array $link = null, ?int $requestId = null): void
+    public static function notify(int|array|null $userIds, string $title, ?string $body = null, string $kind = 'info', ?array $link = null, ?int $requestId = null, bool $mail = true): void
     {
         $ids = array_unique(array_filter((array) $userIds));
         if (! $ids) {
@@ -46,9 +46,10 @@ class Audit
         if (PushService::enabled()) {
             \App\Jobs\SendPush::dispatch(array_values($ids), $title, $body, ['kind' => $kind, 'screen' => $link['screen'] ?? '', 'request_id' => (string) ($requestId ?? '')]);
         }
-        // §115: approvals waiting and decisions that touch the employee also reach the official mailbox
-        if (in_array($kind, ['approval', 'bad', 'warn'], true)) {
-            self::email(array_values($ids), $title, $title, (string) $body, $link['screen'] ?? '', 'تنبيه من منصة HC');
+        // §115 / owner's note: every notification also reaches the official mailbox, in the company's identity
+        if ($mail) {
+            $kicker = ['approval' => 'بانتظار إجرائك', 'bad' => 'تنبيه مهم', 'warn' => 'تنبيه', 'ok' => 'تم', 'info' => 'إشعار'][$kind] ?? 'إشعار';
+            self::email(array_values($ids), $title, $title, (string) $body, $link['screen'] ?? '', $kicker.' — منصة HC');
         }
     }
 
@@ -58,7 +59,8 @@ class Audit
         if (! $userIds || ! \App\Services\InviteService::mailConfigured()) {
             return;
         }
-        $users = \App\Models\User::with('employee.company:id,name,logo_path,color,updated_at')->whereIn('id', $userIds)->where('active', true)->whereNotNull('email')->get();
+        $users = \App\Models\User::with('employee.company:id,name,logo_path,color,updated_at')->whereIn('id', $userIds)->where('active', true)->whereNotNull('email')->get()
+            ->filter(fn ($u) => ! $u->employee || $u->employee->email_enabled !== false); // the employee's «email notifications» switch
         foreach ($users as $u) {
             $c = $u->employee?->company;
             try {

@@ -178,14 +178,13 @@ class _HomeScreenState extends State<HomeScreen> {
         if (s.company != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
+            // owner's note: the company's official logo alone identifies it — its name only when no logo is set
             child: Row(children: [
               if (s.brandLogo != null)
-                SizedBox(height: 40, child: Image.network(s.brandLogo!, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink())),
-              if (s.brandLogo != null) const SizedBox(width: 10),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(s.company?['name'] ?? '', style: context.t.titleLarge?.copyWith(color: s.brandColor ?? context.text, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text('HC · ${tr('مجموعة وادي الأثر المالية')}', style: context.t.labelSmall),
-              ])),
+                Flexible(child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 44, maxWidth: 220), child: Image.network(s.brandLogo!, fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Text(s.company?['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: context.t.titleLarge?.copyWith(color: s.brandColor ?? context.text, fontSize: 16)))))
+              else
+                Expanded(child: Text(s.company?['name'] ?? '', style: context.t.titleLarge?.copyWith(color: s.brandColor ?? context.text, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis)),
             ]),
           ),
         Row(children: [

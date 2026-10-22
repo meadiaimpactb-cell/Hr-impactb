@@ -68,12 +68,10 @@ class _LoginScreenState extends State<LoginScreen> {
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 30, offset: Offset(0, 12))]),
-              child: Image.asset('assets/logo-mark.png', width: 72, height: 72, errorBuilder: (_, __, ___) => const Icon(Icons.business, size: 60, color: HcColors.navy)),
+              child: Image.asset('assets/logo-hc.png', width: 250, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.business, size: 60, color: HcColors.navy)),
             ),
-            const SizedBox(height: 18),
-            Text('HC', style: context.t.displayLarge?.copyWith(color: Colors.white, letterSpacing: 2)),
-            Text(tr('إدارة رأس المال البشري'), style: context.t.bodyLarge?.copyWith(color: Colors.white70)),
-            Text(tr('مجموعة وادي الأثر المالية'), style: context.t.labelMedium?.copyWith(color: Colors.white54)),
+            const SizedBox(height: 14),
+            Text(tr('مجموعة وادي الأثر المالية'), style: context.t.labelMedium?.copyWith(color: Colors.white70)),
             const Spacer(),
             Container(
               width: double.infinity,

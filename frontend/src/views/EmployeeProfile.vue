@@ -18,7 +18,7 @@
       <Kpi label="مدة الخدمة" :value="d.service" color="n" />
       <Kpi label="حضور الشهر" :value="`${d.attendance.present}/${d.attendance.required}`" :hint="`تأخير ${d.attendance.late} · غياب ${d.attendance.absent}`" color="g" />
       <Kpi label="رصيد السنوية" :value="annual?.available ?? '—'" hint="يوم" color="b" />
-      <Kpi label="الباقة" :value="d.tier?.name || '—'" :hint="`${d.reports_count} مرؤوس`" color="p" />
+      <Kpi label="التصنيف" :value="d.tier?.name || '—'" :hint="`${d.reports_count} مرؤوس`" color="p" />
     </div>
     <div class="tabs">
       <button v-for="x in tabs" :key="x[0]" :class="{ on: tab === x[0] }" @click="tab = x[0]">{{ t(x[1]) }}</button>
@@ -58,7 +58,7 @@
                   <button class="btn ghost xs" title="إلغاء" @click="payEdit = null"><Icon name="x" :size="14" /></button>
                 </div>
               </td>
-              <td><span class="pill" :class="{ tier: 'purple', custom: 'warn' }[c.source] || 'info'">{{ { tier: 'موروث من الباقة', custom: 'مخصص', contract: 'تعاقدي' }[c.source] || c.source }}</span></td><td class="num">{{ fmtD(c.valid_from) }}</td></tr>
+              <td><span class="pill" :class="{ tier: 'purple', custom: 'warn' }[c.source] || 'info'">{{ { tier: 'موروث من التصنيف', custom: 'مخصص', contract: 'تعاقدي' }[c.source] || c.source }}</span></td><td class="num">{{ fmtD(c.valid_from) }}</td></tr>
             <tr v-if="payEdit?.id === 'new'"><td><input v-model.trim="payEdit.name" class="in" list="alw-names2" placeholder="اسم البدل" /><datalist id="alw-names2"><option>بدل طبيعة عمل</option><option>بدل غلاء معيشة</option><option>بدل اتصال</option><option>حوافز فردية</option></datalist></td>
               <td colspan="3"><div class="row" style="gap:6px;flex-wrap:wrap">
                 <input v-model.number="payEdit.amount" type="number" min="0" step="0.01" class="in num" style="width:130px" placeholder="المبلغ" />
@@ -114,7 +114,7 @@
           <div v-for="v in x.violations" :key="v.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2)"><span>{{ v.type }} · {{ v.occurred_on }}</span><span>{{ v.degree || '—' }}{{ v.amount ? ` (${money(v.amount)})` : '' }} · {{ v.status }}</span></div></div>
         <div v-if="x.custody" class="card"><h3>العهد <span class="sub">{{ x.custody.length }}</span></h3>
           <div v-if="!x.custody.length" class="empty">لا عهد</div>
-          <div v-for="c in x.custody" :key="c.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2)"><span>{{ c.ident }} <span class="muted">{{ c.type }}</span></span><span class="num">{{ money(c.value) }} · {{ c.status }}</span></div></div>
+          <div v-for="c in x.custody" :key="c.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2);cursor:pointer" title="فتح العهدة: إقرار الاستلام، طلب الإعادة، الاستلام للفحص" @click="custodyId = c.id"><span>{{ c.ident }} <span class="muted">{{ c.type }}</span></span><span class="num">{{ money(c.value) }} · {{ c.status }}</span></div></div>
         <div v-if="x.development" class="card"><h3>التطوير <span class="sub">{{ x.development.length }}</span></h3>
           <div v-if="!x.development.length" class="empty">لا سجلات</div>
           <div v-for="r in x.development" :key="r.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2)"><span>{{ r.program }} <span class="muted">{{ r.provider }}</span></span><span>{{ r.hours }} س · {{ r.status }}</span></div></div>
@@ -122,7 +122,7 @@
           <div v-if="!x.letters.length" class="empty">لا خطابات</div>
           <div v-for="l in x.letters" :key="l.id" class="row between small" style="padding:4px 0;border-bottom:1px solid var(--line2)"><span>{{ l.kind }} · {{ l.to || '' }}</span><RouterLink class="btn ghost xs" :to="`/print/letter/${l.id}`">{{ l.no }}</RouterLink></div></div>
         <div v-if="x.insurance" class="card"><h3>التأمين الطبي</h3>
-          <div v-if="!x.insurance.current" class="small muted">غير مضاف لوثيقة — فئة الباقة {{ x.insurance.tier_class }} · التابعون {{ x.insurance.tier_dependents }}</div>
+          <div v-if="!x.insurance.current" class="small muted">غير مضاف لوثيقة — فئة التصنيف {{ x.insurance.tier_class }} · التابعون {{ x.insurance.tier_dependents }}</div>
           <div v-else class="small">الفئة <b>{{ x.insurance.current.class }}</b> · التابعون <b>{{ x.insurance.current.dependents }}</b> · البطاقة {{ x.insurance.current.card || '—' }} · منذ {{ x.insurance.current.since }}</div></div>
         <div v-if="x.termination" class="card"><h3>إنهاء الخدمة</h3><div class="small">{{ x.termination.reason }} · آخر يوم عمل {{ x.termination.last_working_day }} · {{ x.termination.status }} · المرحلة {{ x.termination.stage }}/4 <RouterLink class="btn ghost xs" to="/terminations">فتح</RouterLink></div></div>
       </div>
@@ -137,7 +137,7 @@
 
     <div v-else-if="tab === 'perf'" class="card">
       <div class="grid g3 mb">
-        <Kpi label="الباقة / الشريحة" :value="d.tier?.name || '—'" :hint="e.job_title?.name || ''" color="p" />
+        <Kpi label="التصنيف" :value="d.tier?.name || '—'" :hint="e.job_title?.name || ''" color="p" />
         <Kpi v-if="d.salary" label="الراتب الشهري الإجمالي" color="n"><span class="num">{{ money(d.salary.gross) }}</span></Kpi>
         <Kpi label="آخر تقييم منشور" :value="x?.evaluations?.[0]?.score ?? '—'" :hint="x?.evaluations?.[0] ? fmtYM(x.evaluations[0].period) + ' · ' + x.evaluations[0].grade_label : 'لم يُنشر بعد'" color="g" />
       </div>
@@ -183,6 +183,7 @@
     <template #foot><button class="btn sec" @click="careerForm = null">إلغاء</button><button class="btn pri" :class="{ loading: saving }" :disabled="saving" @click="saveCareer">حفظ</button></template>
   </Modal>
   <CredentialsModal v-if="creds" v-bind="creds" @close="creds = null" />
+  <CustodyItemModal v-if="custodyId" :id="custodyId" @close="custodyId = null" @changed="load" />
   <OnBehalfRequest v-if="onBehalf" :employee="e" :components="d.salary?.components || []" :balances="d.balances" :tier="d.tier" @close="onBehalf = false" @done="load" />
 </template>
 
@@ -197,6 +198,7 @@ import AttendanceTable from '../components/AttendanceTable.vue'
 import CredentialsModal from '../components/CredentialsModal.vue'
 import EmployeeForm from '../components/EmployeeForm.vue'
 import OnBehalfRequest from '../components/OnBehalfRequest.vue'
+import CustodyItemModal from '../components/CustodyItemModal.vue'
 import Kpi from '../components/Kpi.vue'
 import Modal from '../components/Modal.vue'
 import { fileUrl } from '../api'
@@ -270,6 +272,7 @@ async function resetPassword() {
   catch (x) { await alertBox(x.message || 'تعذر الإرسال', { icon: 'error' }) } finally { resetting.value = false }
 }
 const onBehalf = ref(false)
+const custodyId = ref(null)
 const period = ref(curYM())
 const att = ref(null)
 const LT_ICON = { annual: 'leave', sick: 'sick', emergency: 'emergency', maternity: 'maternity', marriage: 'marriage', bereavement: 'bereavement', unpaid: 'money' }
@@ -298,7 +301,7 @@ const infoRows = computed(() => {
     { label: 'الجوال', key: 'phone', text: x.phone, value: x.phone, type: 'tel', ltr: true },
     { label: 'البريد', key: x.email_enabled ? 'email' : null, text: x.email_enabled ? x.email : 'معطّل، الدخول برقم الموظف', value: x.email, type: 'email', ltr: true },
     { label: 'تاريخ الالتحاق', key: 'hire_date', text: fmtD(x.hire_date), value: x.hire_date, type: 'date' },
-    { label: 'الباقة / الشريحة', text: d.value.tier?.name },
+    { label: 'التصنيف', text: d.value.tier?.name },
     ...(d.value.salary ? [{ label: 'الراتب الشهري الإجمالي', text: money(d.value.salary.gross) + ' ر.س' }] : []),
     { label: 'قواعد نهاية الخدمة السعودية', key: 'eosb_saudi', text: x.eosb_saudi ? 'تنطبق' : 'لا تنطبق', value: !!x.eosb_saudi, type: 'bool', yes: 'تنطبق', no: 'لا تنطبق' },
     { label: 'التأمين الطبي', text: x.insurance ? `فئة ${x.insurance.class} · ${x.insurance.dependents || 0} تابعين` : '—' },
@@ -331,7 +334,7 @@ const contractRows = computed(() => {
       label: 'التأمينات الاجتماعية', key: 'gosi_scheme', value: x.gosi_scheme || '', type: 'select', options: () => GOSI_OPTS,
       text: ((g) => `${g.scheme_label}${g.automatic ? ' (تلقائي)' : ''}` + (g.scheme === 'exempt' ? '' : ` · على الموظف ${g.employee_rate}% = ${money(g.employee)} · على المنشأة ${g.employer_rate}% = ${money(g.employer)} · من أجر خاضع ${money(g.base)}`))(d.value.salary.gosi),
     }] : []),
-    { label: 'الباقة', text: d.value.tier?.name },
+    { label: 'التصنيف', text: d.value.tier?.name },
   ]
 })
 const GOSI_OPTS = [{ value: '', label: 'تلقائي (حسب الجنسية وتاريخ المباشرة)' }, { value: 'old', label: 'سعودي — النظام القديم' }, { value: 'new', label: 'سعودي — النظام الجديد' }, { value: 'expat', label: 'غير سعودي' }, { value: 'exempt', label: 'غير مشمول' }]
@@ -353,7 +356,7 @@ async function savePay() {
 }
 async function load() { d.value = await api.get(`/employees/${props.id}`) }
 async function kudos() { const text = await promptBox('اكتب إشادتك (تصل للزميل وتُحتسب في نقاطه):'); if (!text) return; try { await api.post('/kudos', { employee_id: e.value.id, text }); await alertBox('أُرسلت الإشادة', { icon: 'success', title: 'تم' }) } catch (err) { await alertBox(err.message || 'تعذر الإرسال') } }
-async function loadAtt() { att.value = await api.get(`/attendance/employee/${props.id}`, { params: { period: period.value } }) }
+async function loadAtt() { if (!auth.canView('ATT') && +props.id !== auth.emp?.id) return; att.value = await api.get(`/attendance/employee/${props.id}`, { params: { period: period.value } }).catch(() => null) }
 onMounted(() => { load(); loadAtt() })
 </script>
 

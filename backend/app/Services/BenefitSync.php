@@ -79,7 +79,7 @@ class BenefitSync
             $changed[] = $name.': '.number_format((float) ($cur->amount ?? 0), 2).' → '.number_format($amount, 2);
         }
         if ($changed) {
-            $e->addCareer('تحديث بدلات الباقة', $why.' — '.implode('، ', $changed).' (من '.Carbon::parse($from)->format('d/m/Y').')');
+            $e->addCareer('تحديث بدلات التصنيف', $why.' — '.implode('، ', $changed).' (من '.Carbon::parse($from)->format('d/m/Y').')');
         }
 
         return count($changed);

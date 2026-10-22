@@ -110,6 +110,7 @@ Route::prefix('v1')->group(function () {
         // policy audit: requests/leave — official holidays (§58)
         Route::get('holidays', [\App\Http\Controllers\Api\HolidayController::class, 'index']);
         Route::post('holidays', [\App\Http\Controllers\Api\HolidayController::class, 'store']);
+        Route::post('holidays/generate', [\App\Http\Controllers\Api\HolidayController::class, 'generate']);
         Route::delete('holidays/{holiday}', [\App\Http\Controllers\Api\HolidayController::class, 'destroy']);
         Route::get('leaves/balances', [LeaveController::class, 'myBalances']);
         Route::get('leaves/balances/{employee}', [LeaveController::class, 'balances']);

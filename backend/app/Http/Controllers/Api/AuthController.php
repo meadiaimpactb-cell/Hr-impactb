@@ -93,7 +93,8 @@ class AuthController extends Controller
     {
         $data = $request->validate(['current' => 'nullable|string', 'password' => ['required', 'confirmed', \Illuminate\Validation\Rules\Password::min(8)->letters()->numbers()->symbols()]]);
         $u = $request->user();
-        if (! empty($data['current']) && ! Hash::check($data['current'], $u->password)) {
+        // the current password is always confirmed — except on the forced change after a temporary password
+        if ((! $u->must_change_password || ! empty($data['current'])) && ! Hash::check((string) ($data['current'] ?? ''), $u->password)) {
             throw ValidationException::withMessages(['current' => 'كلمة المرور الحالية غير صحيحة']);
         }
         $u->update(['password' => $data['password'], 'must_change_password' => false]);
@@ -120,6 +121,8 @@ class AuthController extends Controller
             'id' => $u->id, 'name' => $u->name, 'login' => $u->login, 'email' => $u->email, 'roles' => $u->roles, 'photo_url' => $u->photo_url,
             'role_label' => User::ROLES[$u->roles[0] ?? 'emp'] ?? '', 'locale' => $u->locale, 'must_change_password' => $u->must_change_password,
             'company_ids' => $acc->companyIds(),
+            // areas the user may view beyond his own records (the pages show their team tabs only for these)
+            'can_view' => array_values(array_filter(array_keys(Access::OPS), fn ($op) => $acc->canAny($op, 'view'))),
             'has_reports' => $e ? $e->reports()->exists() : false,
             'employee' => $e ? [
                 'id' => $e->id, 'emp_no' => $e->emp_no, 'name' => $e->name, 'name_en' => $e->name_en,

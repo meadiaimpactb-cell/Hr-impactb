@@ -25,5 +25,5 @@ void openScreen(BuildContext context, String? screen, {void Function(int)? tab, 
     Navigator.push(context, MaterialPageRoute(builder: (_) => page));
     return;
   }
-  tab?.call(switch (screen) { 'attendance' => 1, 'requests' => 2, 'dash' || 'dashboard' || '' || null => 0, _ => 3 });
+  tab?.call(switch (screen) { 'attendance' || 'presence' => 1, 'requests' => 2, 'dash' || 'dashboard' || '' || null => 0, _ => 3 });
 }

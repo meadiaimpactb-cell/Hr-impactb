@@ -74,6 +74,16 @@ class RequestController extends Controller
         $e = $u->employee;
         abort_unless($e, 422, 'الحساب غير مرتبط بموظف');
         abort_if($rt->roles && ! $u->hasRole(...$rt->roles), 403, 'هذا النوع من الطلبات ليس متاحًا لدورك');
+        $target = $e;
+        // §57: HR may also file a leave for an employee (e.g. to schedule an accumulated balance); it then follows the leave flow
+        $behalf = $rt->on_behalf || ($rt->handler === 'leave' && $request->filled('employee_id') && $request->integer('employee_id') !== $e->id);
+        if ($behalf) {
+            $target = Employee::findOrFail($request->integer('employee_id'));
+            abort_unless(Access::for()->can($rt->op, 'add', ['employee' => $target]) || ($rt->handler !== 'leave' && Access::for()->isManagerOf($target)), 403);
+        } elseif (! $rt->self_service) {
+            abort(403, 'هذا النوع لا يُقدَّم ذاتيًا');
+        }
+        $e = $target->loadMissing('company.tier', 'schedule');
 
         $data = match ($rt->handler) {
             'leave' => $this->leaveData($request, $e, $request->hasFile('attachment')),
@@ -90,13 +100,6 @@ class RequestController extends Controller
             'allowance', 'salary_change', 'benefit', 'balance_adj' => $this->privilegedData($request, $rt->handler),
             default => $this->customData($request, $rt),
         };
-        $target = $e;
-        if ($rt->on_behalf) {
-            $target = Employee::findOrFail($request->integer('employee_id'));
-            abort_unless(Access::for()->can($rt->op, 'add', ['employee' => $target]) || Access::for()->isManagerOf($target), 403);
-        } elseif (! $rt->self_service) {
-            abort(403, 'هذا النوع لا يُقدَّم ذاتيًا');
-        }
         $data = \App\Services\PolicyRules::check($rt->handler, $data, $target, $request); // policy rules per request type (§42–§59, appendix 5)
         $request->validate(['attachment' => 'nullable|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic,doc,docx,xls,xlsx']);
         if (in_array($rt->handler, ['iban_change', 'expense'], true) && ! $request->hasFile('attachment')) {
@@ -225,9 +228,25 @@ class RequestController extends Controller
         $v = $request->validate(['destination' => 'required|string|max:120', 'purpose' => 'required|string|max:1000', 'scope' => 'required|in:domestic,intl', 'outside_city' => 'accepted_if:scope,domestic',
             'outputs' => 'required|string|max:1000',
             'from' => 'required|date', 'to' => 'required|date|after_or_equal:from', 'estimate' => 'nullable|numeric|min:0', 'advance' => 'nullable|numeric|min:0',
-            'cost_flight' => 'nullable|numeric|min:0', 'cost_lodging' => 'nullable|numeric|min:0', 'cost_allowance' => 'nullable|numeric|min:0', 'cost_transport' => 'nullable|numeric|min:0', 'cost_fees' => 'nullable|numeric|min:0']);
-        $days = Carbon::parse($v['from'])->diffInDays(Carbon::parse($v['to'])) + 1;
-        $calc = self::tripRates($e, $days);
+            'cost_flight' => 'nullable|numeric|min:0', 'cost_lodging' => 'nullable|numeric|min:0', 'cost_allowance' => 'nullable|numeric|min:0', 'cost_transport' => 'nullable|numeric|min:0', 'cost_fees' => 'nullable|numeric|min:0',
+            'hours' => 'nullable|numeric|min:0|max:24', 'travel_class' => 'nullable|in:economy,business,first', 'exception_reason' => 'nullable|string|max:1000']);
+        $days = (int) Carbon::parse($v['from'])->diffInDays(Carbon::parse($v['to'])) + 1;
+        // §67: the daily allowance is due for a mission with an overnight stay, or a same-day mission of 10 hours or more
+        $diemDays = $days === 1 && (float) ($v['hours'] ?? 0) < 10 ? 0 : $days;
+        $calc = self::tripRates($e, $diemDays) + ['diem_days' => $diemDays];
+        if ($diemDays === 0) {
+            $calc['allowance_note'] = 'مهمة يوم واحد دون مبيت وأقل من 10 ساعات — لا يُستحق البدل اليومي (§67)';
+        }
+        $calc['hotel_total_cap'] = round($calc['hotel_cap'] * max(0, $days - 1), 2);
+        // §66: travel is economy class and the hotel within the classification's cap — anything above is an exception the company CEO approves
+        $over = array_filter(['class' => ($v['travel_class'] ?? 'economy') !== 'economy',
+            'hotel' => $calc['hotel_total_cap'] > 0 && (float) ($v['cost_lodging'] ?? 0) > $calc['hotel_total_cap']]);
+        if ($over) {
+            if (blank($v['exception_reason'] ?? null)) {
+                throw ValidationException::withMessages(['exception_reason' => (isset($over['class']) ? 'درجة سفر أعلى من السياحية' : 'تكلفة سكن فوق سقف الفئة ('.number_format($calc['hotel_total_cap']).' ر.س)').' — اذكر مبرر الاستثناء؛ يعتمده الرئيس التنفيذي للشركة (§66)']);
+            }
+            $calc['exception'] = array_keys($over);
+        }
         $calc['long_trip'] = $days > 10; // §68: a mission longer than 10 days needs its plan and allowances reviewed before extension
         $items = array_filter(array_intersect_key($v, array_flip(['cost_flight', 'cost_lodging', 'cost_allowance', 'cost_transport', 'cost_fees'])), fn ($x) => $x !== null && $x !== '');
         $estimate = $items ? array_sum(array_map('floatval', $items)) : (float) ($v['estimate'] ?? 0);
@@ -276,6 +295,10 @@ class RequestController extends Controller
         }
         $flow = ApprovalService::flowFor('trip', $data);
         $roles = array_column($flow, 'role');
+        if (! empty($data['exception']) && ! in_array('ceo', $roles, true)) { // §66: travel class / hotel above the entitlement
+            array_splice($flow, 1, 0, [['role' => 'ceo', 'label' => 'الرئيس التنفيذي للشركة (استثناء درجة السفر أو السكن)']]);
+            $roles = array_column($flow, 'role');
+        }
         if (($data['scope'] ?? 'domestic') === 'intl') {
             if (! in_array('ceo', $roles, true)) {
                 array_splice($flow, 1, 0, [['role' => 'ceo', 'label' => 'الرئيس التنفيذي للشركة (رحلة خارج المملكة)']]);
@@ -368,7 +391,7 @@ class RequestController extends Controller
 
     private function privilegedData(Request $request, string $type): array
     {
-        $v = $request->validate(['employee_id' => 'required|exists:employees,id', 'after' => 'required', 'reason' => 'required|string|max:1000',
+        $v = $request->validate(['employee_id' => 'required|exists:employees,id', 'after' => 'required'.($type === 'balance_adj' ? '|numeric|min:0' : ''), 'reason' => 'required|string|max:1000',
             'component' => ($type === 'allowance' ? 'required' : 'nullable').'|string|max:30', 'name' => ($type === 'allowance' ? 'required' : 'nullable').'|string|max:80', 'benefit' => ($type === 'benefit' ? 'required' : 'nullable').'|string|max:40',
             'leave_type' => 'nullable|string', 'effective' => 'nullable|date']);
         $e = Employee::with('company.tier', 'components')->findOrFail($v['employee_id']);

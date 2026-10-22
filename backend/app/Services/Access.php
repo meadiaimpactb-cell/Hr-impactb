@@ -17,7 +17,7 @@ class Access
         'EMP' => 'ملفات الموظفين', 'PAY' => 'الرواتب والقسائم', 'ALW' => 'البدلات', 'ATT' => 'الحضور', 'LVE' => 'الإجازات',
         'CUS' => 'العهد', 'SEC' => 'كشف الأسرار', 'ADV' => 'السلف', 'VIO' => 'المخالفات', 'TRM' => 'إنهاء الخدمة',
         'PRF' => 'التقارير والتقييم', 'DEV' => 'التطوير', 'DOC' => 'الوثائق', 'ORG' => 'الهيكل والوظائف',
-        'CMP' => 'الشركات والباقات', 'RPT' => 'التقارير', 'ADM' => 'الصلاحيات', 'AUD' => 'التدقيق', 'COM' => 'الإعلانات',
+        'CMP' => 'الشركات والتصنيفات', 'RPT' => 'التقارير', 'ADM' => 'الصلاحيات', 'AUD' => 'التدقيق', 'COM' => 'الإعلانات',
         'SGN' => 'التوقيع الإلكتروني', 'INT' => 'التكامل', 'IMP' => 'الاستيراد',
     ];
 
@@ -157,7 +157,8 @@ class Access
         if ($u->hasRole('hr_mgr') && $u->hr_scope) {
             return $q->whereIn('company_id', array_map('intval', (array) $u->hr_scope));
         }
-        if ($u->hasRole('super', 'hr_mgr', 'fin')) {
+        // finance sees every employee in its own areas only (pay, advances, end of service, reports); elsewhere its team
+        if ($u->hasRole('super', 'hr_mgr') || ($u->hasRole('fin') && (! $op || in_array($op, ['PAY', 'ADV', 'TRM', 'RPT'], true)))) {
             return $q;
         }
         $companies = [];
@@ -236,15 +237,16 @@ class Access
         if (! $u || ! $u->active) {
             return false;
         }
-        if ($u->hasRole('super', 'hr_mgr', 'hr_staff', 'fin', 'custodian')) {
-            return $this->can($op, $action);
+        if ($u->hasRole('super', 'hr_mgr', 'hr_staff', 'fin', 'custodian') && $this->can($op, $action)) {
+            return true;
         }
-        if ($u->hasRole('ceo')) {
+        if ($u->hasRole('ceo') && ! $u->hasRole('super', 'hr_mgr', 'hr_staff', 'fin', 'custodian')) {
             $cid = Employee::whereKey($u->employee_id)->value('company_id');
 
             return $this->can($op, $action, ['company_id' => \App\Models\Company::where('ceo_employee_id', $u->employee_id)->value('id') ?? $cid]);
         }
-        $report = Employee::where('manager_id', $u->employee_id)->first();
+        // a finance / HR-staff / custody user who also manages people still follows his own team, like any manager
+        $report = $u->employee_id ? Employee::where('manager_id', $u->employee_id)->first() : null;
 
         return $report ? $this->can($op, $action, ['employee' => $report]) : false;
     }
@@ -267,17 +269,29 @@ class Access
         self::$active = null;
     }
 
-    /** HR managers who serve a company: those without a scope, plus those whose scope includes it (§7). */
+    /**
+     * HR managers who serve a company (§7): a company that has its own HR manager (one whose scope names it) sends its
+     * requests to him only; otherwise to the group's HR managers (no scope). Any of them may approve.
+     */
     public static function hrManagersFor(?int $companyId): array
     {
-        return self::activeUsers()->filter(fn (User $u) => $u->hasRole('hr_mgr') && (! $u->hr_scope || ! $companyId || in_array($companyId, array_map('intval', (array) $u->hr_scope), true)))->pluck('id')->values()->all()
-            ?: self::usersWithRole('hr_mgr');
+        $mgrs = self::activeUsers()->filter(fn (User $u) => $u->hasRole('hr_mgr'));
+        if ($companyId) {
+            $own = $mgrs->filter(fn (User $u) => $u->hr_scope && in_array($companyId, array_map('intval', (array) $u->hr_scope), true));
+            if ($own->isNotEmpty()) {
+                return $own->pluck('id')->values()->all();
+            }
+        }
+
+        return $mgrs->filter(fn (User $u) => ! $u->hr_scope)->pluck('id')->values()->all() ?: $mgrs->pluck('id')->values()->all();
     }
 
     /** User ids of HR who serve a company (for notifications). */
     public static function hrUsersFor(?int $companyId, ?string $op = null): array
     {
-        return self::activeUsers()->filter(fn (User $u) => ($u->hasRole('hr_mgr') && (! $u->hr_scope || ! $companyId || in_array($companyId, array_map('intval', (array) $u->hr_scope), true)))
+        $mgrs = self::hrManagersFor($companyId);
+
+        return self::activeUsers()->filter(fn (User $u) => ($u->hasRole('hr_mgr') && in_array($u->id, $mgrs, true))
             || ($u->hasRole('hr_staff') && in_array($companyId, array_map('intval', $u->perms['companies'] ?? []), true)
                 && (! $op || array_intersect(['view', 'approve'], self::staffOps($u->perms ?? [], $companyId)[$op] ?? []))))
             ->pluck('id')->values()->all();

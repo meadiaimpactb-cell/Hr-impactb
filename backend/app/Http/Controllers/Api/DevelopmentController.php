@@ -110,12 +110,16 @@ class DevelopmentController extends Controller
                 throw \Illuminate\Validation\ValidationException::withMessages(['cost' => 'التكلفة تتجاوز ميزانية التطوير: الميزانية '.number_format($budget).' ر.س، المستخدم '.number_format($committed).'، المتبقي '.number_format(max(0, $budget - $committed)).' ر.س']);
             }
         }
+        if (! $assigned) { // §78: an activity the employee records himself counts only with its proof
+            $request->validate(['certificate' => 'required|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic,doc,docx'], ['certificate.required' => 'أرفق إثبات النشاط: شهادة أو إثبات حضور أو ملخص (§78)']);
+        }
         $path = $request->file('certificate')?->store('dev/'.now()->format('Y'), 'local');
         $rec = DevRecord::create(array_merge($d, ['employee_id' => $target->id, 'source' => $assigned ? 'assigned' : 'self', 'status' => $assigned ? 'planned' : 'pending', 'certificate_path' => $path]));
         if ($assigned) {
             Audit::notify(User::where('employee_id', $target->id)->value('id'), 'برنامج تطوير مُسند إليك', $rec->program, 'info', ['screen' => 'development']);
-        } else {
-            Audit::notify(Access::hrUsersFor($target->company_id, 'DEV'), 'سجل تطوير بانتظار التحقق', $target->name.' — '.$rec->program, 'approval', ['screen' => 'development']);
+        } else { // §78: the direct manager approves the evidence (HR when there is no manager)
+            $mgr = $target->manager_id ? User::where('employee_id', $target->manager_id)->where('active', true)->value('id') : null;
+            Audit::notify($mgr ? [$mgr] : Access::hrUsersFor($target->company_id, 'DEV'), 'إثبات تطوير بانتظار اعتمادك', $target->name.' — '.$rec->program, 'approval', ['screen' => 'development']);
         }
 
         return response()->json($this->row($rec->load('employee:id,name,emp_no')), 201);
@@ -128,6 +132,9 @@ class DevelopmentController extends Controller
         // §81: a program the employee was nominated for ends with a summary of what was learned and how it will be applied
         $d = $request->validate(['summary' => [$record->source === 'assigned' ? 'required' : 'nullable', 'string', 'min:30', 'max:4000']],
             ['summary.required' => 'اكتب ملخص ما تعلمته والتطبيق المتوقع في عملك (§81)', 'summary.min' => 'الملخص قصير — 30 حرفًا على الأقل']);
+        if (! $record->certificate_path) {
+            $request->validate(['certificate' => 'required|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic,doc,docx'], ['certificate.required' => 'أرفق إثبات إتمام البرنامج: شهادة أو إثبات حضور (§78)']);
+        }
         $path = $request->file('certificate')?->store('dev/'.now()->format('Y'), 'local');
         $record->update(['status' => 'pending', 'certificate_path' => $path ?? $record->certificate_path, 'to' => $record->to ?? now()->toDateString()]
             + (! empty($d['summary']) ? ['summary' => $d['summary'], 'summary_at' => now()] : []));
@@ -146,8 +153,19 @@ class DevelopmentController extends Controller
         $d = $request->validate(['decision' => 'required|in:verified,rejected', 'note' => 'nullable|string|max:500', 'activity' => ['nullable', 'string', \Illuminate\Validation\Rule::exists('lookups', 'code')->where('group', 'dev_activities')]]);
         $pf = \App\Services\EvaluationService::pointsFor($d['activity'] ?? $record->activity, $record->hours);
         $month = ($record->to ?? $record->from ?? now())->format('Y-m');
+        // §78: an intensive programme that ran over several months has its points spread evenly over those months
+        $split = null;
+        if ($d['decision'] === 'verified' && $pf['activity'] === 'intensive' && $record->from && $record->to && $record->from->format('Y-m') !== $record->to->format('Y-m')) {
+            $months = [];
+            for ($m = $record->from->copy()->startOfMonth(); $m->lte($record->to); $m->addMonthNoOverflow()) {
+                $months[] = $m->format('Y-m');
+            }
+            $each = intdiv((int) $pf['points'], count($months));
+            $split = array_fill_keys($months, $each);
+            $split[end($months)] += (int) $pf['points'] - $each * count($months);
+        }
         $record->update(['status' => $d['decision'], 'verified_by' => $u->id, 'verified_at' => now(), 'notes' => $d['note'] ?? $record->notes,
-            'activity' => $pf['activity'], 'points' => $d['decision'] === 'verified' ? $pf['points'] : 0, 'points_month' => $d['decision'] === 'verified' ? $month : null]);
+            'activity' => $pf['activity'], 'points' => $d['decision'] === 'verified' ? $pf['points'] : 0, 'points_month' => $d['decision'] === 'verified' ? $month : null, 'points_split' => $split]);
         Audit::log('dev_records', $record->id, $d['decision'], null, null, $d['note'] ?? null);
         Audit::notify(User::where('employee_id', $record->employee_id)->value('id'), $d['decision'] === 'verified' ? 'وُثّق سجل التطوير' : 'رُفض سجل التطوير', $record->program.(! empty($d['note']) ? ' — '.$d['note'] : ''), $d['decision'] === 'verified' ? 'ok' : 'bad', ['screen' => 'development']);
         if ($d['decision'] === 'verified') {

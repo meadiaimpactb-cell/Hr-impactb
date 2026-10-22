@@ -10,6 +10,7 @@ import '../widgets.dart';
 import 'approvals_screen.dart';
 import 'modules_screens.dart';
 import '../app_update.dart';
+import 'account_screens.dart';
 
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
@@ -76,6 +77,7 @@ class MoreScreen extends StatelessWidget {
       ListGroup(title: tr('الإعدادات'), children: [
         ListRow(icon: Icons.language_outlined, color: HcColors.periwinkle, title: tr('اللغة'), subtitle: s.locale == 'ar' ? 'العربية' : 'English', onTap: () => s.setLocale(s.locale == 'ar' ? 'en' : 'ar')),
         ListRow(icon: Icons.dark_mode_outlined, color: HcColors.navy, title: tr('الوضع الداكن'), trailing: Switch(value: s.dark, onChanged: s.setDark), onTap: () => s.setDark(!s.dark)),
+        ListRow(icon: Icons.lock_reset_outlined, color: HcColors.deepBlue, title: tr('تغيير كلمة المرور'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen()))),
         ListRow(icon: Icons.fingerprint, color: HcColors.ok, title: tr('قفل التطبيق بالبصمة'), subtitle: tr('يُطلب تأكيد هويتك عند فتح التطبيق'), trailing: Switch(value: s.appLock, onChanged: s.setAppLock), onTap: () => s.setAppLock(!s.appLock)),
         // APK self-update is Android-only; iPhone updates come from TestFlight / the App Store
         if (defaultTargetPlatform == TargetPlatform.android) ListRow(icon: Icons.system_update_outlined, color: HcColors.deepBlue, title: tr('تحديث التطبيق'), subtitle: tr('يتحقق من آخر إصدار منشور على المنصة ويثبّته'), onTap: () => AppUpdate.run(context)),

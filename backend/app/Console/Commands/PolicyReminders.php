@@ -65,6 +65,68 @@ class PolicyReminders extends Command
                 Audit::notify(array_filter([$u, $mgr]), 'تقرير رحلة عمل متأخر', ($t->employee?->name).' — '.($t->data['destination'] ?? '').': يُرفع التقرير خلال 3 أيام عمل من العودة (§68)', 'warn', ['screen' => 'requests']);
             }
         }
+        // §35: the day after the due day, a monthly report still not submitted is noted in the file and the manager told
+        $period = now()->format('Y-m');
+        foreach (\App\Models\Company::pluck('id') as $cid) {
+            $dueDay = min((int) \App\Services\Settings::get('monthlyReportDueDay', $cid, 26), now()->daysInMonth);
+            if (now()->day !== $dueDay + 1) {
+                continue;
+            }
+            foreach (\App\Models\MonthlyReport::with('employee')->where('company_id', $cid)->where('period', $period)->whereIn('status', ['draft', 'returned'])->whereNull('first_submitted_at')->get() as $rep) {
+                if (! $rep->employee || $rep->employee->status !== 'active') {
+                    continue;
+                }
+                $rep->employee->addCareer('تأخر التقرير الشهري', 'تقرير '.$period.' لم يُسلَّم حتى موعده ('.$dueDay.'/'.now()->format('m/Y').')');
+                $mgr = $rep->employee->manager_id ? User::where('employee_id', $rep->employee->manager_id)->value('id') : null;
+                Audit::notify(array_filter([User::where('employee_id', $rep->employee_id)->value('id'), $mgr]), 'تقرير شهري متأخر', $rep->employee->name.' — '.$period.': سُجّل التأخير في الملف (§35)', 'warn', ['screen' => 'reports']);
+            }
+        }
+
+        // §36: the manager rates the submitted report by the review due day (mgrReviewDueDay, 0 = end of the month) — reminded two days before, HR told after
+        foreach (\App\Models\MonthlyReport::with('employee')->where('status', 'submitted')->get() as $rep) {
+            if (! $rep->employee?->manager_id) {
+                continue;
+            }
+            $due = \App\Http\Controllers\Api\ReportController::reviewDue($rep); // submitted after the review day: three days to rate it
+            $left = (int) now()->startOfDay()->diffInDays($due, false);
+            $mgr = User::where('employee_id', $rep->employee->manager_id)->value('id');
+            if (in_array($left, [2, 0], true) && $mgr) {
+                Audit::notify($mgr, 'قيّم التقرير الشهري قبل '.$due->format('d/m/Y'), $rep->employee->name.' — '.$rep->period, 'approval', ['screen' => 'reports']);
+            } elseif ($left === -1) {
+                Audit::notify(array_filter([$mgr, ...Access::hrUsersFor($rep->company_id, 'PRF')]), 'تقييم تقرير شهري متأخر', $rep->employee->name.' — '.$rep->period.': لم يقيّمه المدير حتى '.$due->format('d/m/Y').' (§36)', 'bad', ['screen' => 'reports']);
+            }
+        }
+
+        // §116: on the 1st of each month HR is told which former employees' files passed the retention period (reviewed, never deleted automatically)
+        if (now()->day === 1) {
+            $years = (int) \App\Services\Settings::get('dataRetentionYears', null, 10);
+            $due = Employee::where('status', 'terminated')->whereNotNull('last_working_day')->where('last_working_day', '<', now()->subYears($years)->toDateString())->get(['id', 'name', 'company_id']);
+            foreach ($due->groupBy('company_id') as $cid => $list) {
+                Audit::notify(Access::hrManagersFor((int) $cid), 'ملفات تجاوزت مدة الاحتفاظ ('.$years.' سنوات)', $list->count().' ملف موظف سابق: '.$list->take(10)->pluck('name')->implode('، ').' — راجعها للأرشفة أو الإتلاف وفق السياسة (§116)', 'warn', ['screen' => 'employees']);
+            }
+        }
+
+        // §49: a classification approved for the next benefits year takes effect on its date
+        foreach (\App\Models\Company::whereNotNull('next_tier_id')->where('next_tier_from', '<=', now()->toDateString())->get() as $co) {
+            if ($tier = \App\Models\Tier::find($co->next_tier_id)) {
+                \App\Services\ApprovalService::applyTier($co, $tier, 'سريان التصنيف المعتمد من '.$co->next_tier_from);
+                $users = User::whereIn('employee_id', Employee::where('company_id', $co->id)->pluck('id'))->where('active', true)->pluck('id')->all();
+                Audit::notify($users, 'سرى تصنيف شركتك: '.$tier->name, 'تحدّثت مزاياك وفق التصنيف الجديد (§49–50)', 'info', ['screen' => 'dashboard']);
+            }
+        }
+
+        // §105: the grievance is decided within 15 days — the committee / approver is reminded, and the group CEO told when it is late
+        foreach (\App\Models\Violation::with('employee:id,name')->whereIn('objection', ['open', 'proposed'])->whereNotNull('objection_at')->get() as $v) {
+            $age = (int) $v->objection_at->copy()->startOfDay()->diffInDays(now()->startOfDay());
+            if (! in_array($age, [10, 14, 15, 16], true)) {
+                continue;
+            }
+            $to = $v->objection === 'open' ? ($v->committee ?: Access::hrUsersFor($v->company_id, 'VIO')) : Access::usersWithRole('super');
+            Audit::notify($to, $age > 15 ? 'تظلم متأخر عن 15 يومًا' : 'تظلم بانتظار البت', ($v->employee?->name).' — قُدّم قبل '.$age.' يومًا، ويُبت فيه خلال 15 يومًا من تقديمه (§105)', $age >= 15 ? 'bad' : 'warn', ['screen' => 'violations']);
+            if ($age > 15) {
+                Audit::notify(Access::usersWithRole('super'), 'تظلم تجاوز مهلة البت', ($v->employee?->name).' — مضى '.$age.' يومًا (§105)', 'bad', ['screen' => 'violations']);
+            }
+        }
         $this->info("daily-note alerts: $n");
 
         return self::SUCCESS;

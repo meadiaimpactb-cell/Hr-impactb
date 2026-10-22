@@ -32,6 +32,7 @@
       <div class="fg"><label>يُرسل إلى</label><select v-model="nf.audience.scope" class="in"><option v-for="(l, k) in scopes" :key="k" :value="k">{{ l }}</option></select></div>
       <div class="fg"><label>ينتهي في</label><DateInput v-model="nf.expires_at" /></div>
     </div>
+    <label class="chk small mb" title="يصل الإعلان أيضًا إلى المدير المباشر لكل مستلم، والموارد البشرية، والمالية، والرئيس التنفيذي للشركة والرئيس التنفيذي للمجموعة"><input v-model="nf.audience.leaders" type="checkbox" /> يشمل القادة: المدير المباشر، الموارد البشرية، المالية، الرئيس التنفيذي للشركة وللمجموعة</label>
     <div v-if="nf.audience.scope === 'team'" class="fg"><label>من الفريق <span class="tiny muted">(لا تحديد = كل الفريق، {{ pub.team }} موظف)</span></label>
       <div class="row mb" style="gap:6px"><button type="button" class="btn ghost xs" @click="nf.audience.employee_ids = pub.team_members.map((m) => m.id)">تحديد الكل</button><button type="button" class="btn ghost xs" @click="nf.audience.employee_ids = pub.team_members.filter((m) => m.direct).map((m) => m.id)">المباشرون فقط</button><button type="button" class="btn ghost xs" @click="nf.audience.employee_ids = []">مسح</button></div>
       <div class="row" style="max-height:180px;overflow:auto"><label v-for="m in pub.team_members" :key="m.id" class="chk small"><input v-model="nf.audience.employee_ids" type="checkbox" :value="m.id" /> {{ m.name }}<span v-if="!m.direct" class="tiny muted"> (غير مباشر)</span></label></div></div>
@@ -112,7 +113,7 @@ async function publish() {
   busy.value = true
   try {
     const x = new FormData(); x.append('title', nf.value.title); x.append('body', nf.value.body); x.append('require_ack', nf.value.require_ack ? 1 : 0); x.append('popup', nf.value.popup ? 1 : 0); if (nf.value.expires_at) x.append('expires_at', nf.value.expires_at)
-    const a = nf.value.audience; x.append('audience[scope]', a.scope); a.companies.forEach((c) => x.append('audience[companies][]', c)); a.jobs.forEach((j) => x.append('audience[jobs][]', j)); a.depts.forEach((d) => x.append('audience[depts][]', d)); x.append('audience[contract]', a.contract); a.employee_ids.forEach((e) => x.append('audience[employee_ids][]', e)); if (file.value) x.append('attachment', file.value)
+    const a = nf.value.audience; x.append('audience[scope]', a.scope); a.companies.forEach((c) => x.append('audience[companies][]', c)); a.jobs.forEach((j) => x.append('audience[jobs][]', j)); a.depts.forEach((d) => x.append('audience[depts][]', d)); x.append('audience[contract]', a.contract); a.employee_ids.forEach((e) => x.append('audience[employee_ids][]', e)); x.append('audience[leaders]', a.leaders ? 1 : 0); if (file.value) x.append('attachment', file.value)
     const r = await api.post('/announcements', x); ui.toast(`نُشر الإعلان إلى ${r.recipients} مستلمًا`, 'ok'); nf.value = null; load()
   } catch (e) { ui.toast(Object.values(e.errors || {}).flat().join(' · ') || e.message, 'bad', 6000) } finally { busy.value = false }
 }

@@ -32,6 +32,16 @@ class EvaluationService
             ?? $all->first();
     }
 
+    /** §34: a change of weights applies from the next cycle — a period before its effective date is evaluated with the previous version. */
+    public static function inForce(EvalTemplate $tpl, string $period): EvalTemplate
+    {
+        if ($tpl->previous && $tpl->effective_from && $period.'-01' < $tpl->effective_from->toDateString()) {
+            return (clone $tpl)->forceFill(array_intersect_key($tpl->previous, array_flip(['weights', 'sub', 'grades', 'pass_score', 'version'])));
+        }
+
+        return $tpl;
+    }
+
     public static function reportTemplateFor(Employee $e): ?ReportTemplate
     {
         $all = ReportTemplate::where('active', true)->get();
@@ -144,14 +154,27 @@ class EvaluationService
 
         return ['points' => $raw, 'carry' => $carry, 'total' => $total, 'target' => 100, 'max' => 150, 'level' => $level,
             'level_label' => ['gold' => 'ذهبي', 'silver' => 'فضي', 'bronze' => 'برونزي', 'below' => 'دون المستهدف', 'alert' => 'تنبيه'][$level],
-            'records' => DevRecord::where('employee_id', $e->id)->where('status', 'verified')->where('points_month', $period)->count()];
+            'records' => self::devRecordsOf($e->id, $period)->count()];
+    }
+
+    /** Verified records counted in a month: booked in it, or spread over it (intensive programme, §78) — with the points of that month. */
+    public static function devRecordsOf(int $employeeId, string $period): \Illuminate\Support\Collection
+    {
+        return DevRecord::where('employee_id', $employeeId)->where('status', 'verified')->where(fn ($q) => $q->where('points_month', $period)->orWhereNotNull('points_split'))->get()
+            ->map(function ($r) use ($period) {
+                if ($r->points_split) {
+                    $r->points = (int) ($r->points_split[$period] ?? 0);
+                }
+
+                return $r;
+            })->filter(fn ($r) => $r->points_split ? array_key_exists($period, $r->points_split) : true)->values();
     }
 
     /** Sum of verified points in a month with the per-activity monthly caps applied. */
     public static function rawDevPoints(int $employeeId, string $period): int
     {
         $caps = collect(\App\Models\Lookup::where('group', 'dev_activities')->get())->mapWithKeys(fn ($l) => [$l->code => (int) ($l->meta['cap'] ?? 0)]);
-        $byAct = DevRecord::where('employee_id', $employeeId)->where('status', 'verified')->where('points_month', $period)->get(['activity', 'points'])->groupBy('activity');
+        $byAct = self::devRecordsOf($employeeId, $period)->groupBy('activity');
         $sum = 0;
         foreach ($byAct as $act => $rows) {
             $pts = (int) $rows->sum('points');
@@ -224,7 +247,7 @@ class EvaluationService
      */
     public static function compute(Employee $e, string $period, array $overrides = []): array
     {
-        $tpl = $overrides['tpl'] ?? self::templateFor($e);
+        $tpl = self::inForce($overrides['tpl'] ?? self::templateFor($e), $period);
         $W = $overrides['weights'] ?? $tpl->weights;
         $sub = $tpl->sub;
         $rep = MonthlyReport::where('employee_id', $e->id)->where('period', $period)->first();

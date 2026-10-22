@@ -30,10 +30,15 @@ class MailController extends Controller
         if ($f = Access::for($u)->focus()) { // the company selector narrows the recipient list too
             $q->whereHas('employee', fn ($e) => $e->where('company_id', $f));
         }
-        if (! $u->hasRole('super', 'hr_mgr', 'hr_staff', 'fin')) {
+        if (! $u->hasRole('super')) {
+            // owner's note: everyone also reaches his direct manager, HR, finance, the group CEO and his company's CEO;
+            // HR / finance / company CEOs write inside the companies of their scope only
             $own = $u->employee?->company_id;
-            $cids = $u->hasRole('ceo') && $ids ? $ids : array_values(array_filter([$own]));
-            $q->whereHas('employee', fn ($e) => $e->whereIn('company_id', $cids ?: [0]));
+            $cids = $u->hasRole('hr_mgr', 'hr_staff', 'fin', 'ceo') && $ids ? $ids : array_values(array_filter([$own]));
+            $ceo = $own ? \App\Models\Company::whereKey($own)->value('ceo_employee_id') : null;
+            $leaders = array_values(array_filter([...Access::usersWithRole('super'), ...Access::usersWithRole('fin'), ...($own ? Access::hrUsersFor($own) : Access::usersWithRole('hr_mgr')),
+                $u->employee?->manager_id ? User::where('employee_id', $u->employee->manager_id)->value('id') : null, $ceo ? User::where('employee_id', $ceo)->value('id') : null]));
+            $q->where(fn ($w) => $w->whereHas('employee', fn ($e) => $e->whereIn('company_id', $cids ?: [0]))->orWhereIn('id', $leaders));
         }
 
         return $q->orderBy('name')->get(['id', 'name', 'login', 'roles', 'employee_id'])
@@ -147,17 +152,9 @@ class MailController extends Controller
         MailMessage::create(['thread_id' => $thread->id, 'from_user_id' => $u->id, 'body' => $body, 'attachment_path' => $path]);
         $thread->update(['last_at' => now(), 'read_by' => [$u->id]]);
         $others = array_values(array_diff($thread->participants, [$u->id]));
-        Audit::notify($others, 'رسالة داخلية من '.$u->name, $thread->subject.' — '.mb_substr($body, 0, 100), 'info', ['screen' => 'mail']);
-        // email copy to each recipient's official address when the mailbox is configured
-        if (\App\Services\InviteService::mailConfigured()) {
-            foreach (User::whereIn('id', $others)->where('active', true)->whereNotNull('email')->get() as $to) {
-                try {
-                    \Illuminate\Support\Facades\Mail::to($to->email)->send(new \App\Mail\InternalMessageMail($u->name, $thread->subject, $body, $thread->id));
-                } catch (\Throwable $e) {
-                    report($e);
-                }
-            }
-        }
+        Audit::notify($others, 'رسالة داخلية من '.$u->name, $thread->subject.' — '.mb_substr($body, 0, 100), 'info', ['screen' => 'mail'], null, false);
+        // the full message to each recipient's official address, in the recipient's company identity (owner's note)
+        Audit::email($others, 'رسالة داخلية: '.$thread->subject, $thread->subject, 'من: '.$u->name."\n\n".$body, 'mail', 'البريد الداخلي — منصة HC');
     }
 
     private function row(MailThread $t, User $u): array
@@ -167,6 +164,9 @@ class MailController extends Controller
 
         return ['id' => $t->id, 'subject' => $t->subject, 'participants' => collect($t->participants)->map(fn ($id) => ['id' => $id, 'name' => $names[$id] ?? '#'.$id])->values(),
             'others' => collect($t->participants)->reject(fn ($id) => $id === $u->id)->map(fn ($id) => $names[$id] ?? '#'.$id)->join('، '),
-            'unread' => ! in_array($u->id, $t->read_by ?? [], true), 'last_at' => $t->last_at, 'preview' => mb_substr($last?->body ?? '', 0, 90), 'count' => $t->messages()->count()];
+            'unread' => ! in_array($u->id, $t->read_by ?? [], true), 'last_at' => $t->last_at, 'preview' => mb_substr($last?->body ?? '', 0, 90), 'count' => $t->messages()->count(),
+            // who actually wrote in the thread (the sender filter uses these, not every participant)
+            'senders' => User::whereIn('id', $t->messages()->reorder()->where('from_user_id', '!=', $u->id)->pluck('from_user_id')->unique())->pluck('name')->values(),
+            'last_from' => $last ? ($last->from_user_id === $u->id ? 'أنت' : ($names[$last->from_user_id] ?? '')) : null];
     }
 }

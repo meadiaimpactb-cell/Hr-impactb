@@ -1,7 +1,7 @@
 <template>
   <div class="login">
     <form class="box" novalidate @submit="onSubmit">
-      <img src="/logo-full.png" alt="Impact Valley Capital" />
+      <img src="/logo-hc.png" alt="HC — إدارة رأس المال البشري" />
       <h2>HC — {{ t('إدارة رأس المال البشري') }}</h2>
       <p class="sub">منصة واحدة لكل موظفي المجموعة</p>
       <div class="fg">

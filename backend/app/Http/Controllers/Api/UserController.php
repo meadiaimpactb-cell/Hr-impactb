@@ -167,6 +167,8 @@ class UserController extends Controller
         abort_if($user->hasRole('super') && ! $request->user()->hasRole('super'), 403);
         $d = $this->validated($request, $user);
         $before = $user->only('login', 'roles', 'active', 'company_id');
+        $pendingBefore = $this->pendingWith($user); // §11: what waited for him, counted before his role changes
+        $scopeBefore = $user->hr_scope;
         unset($d['password']);
         if ($request->has('hr_scope') && $request->user()->hasRole('super')) { // §7: companies an HR manager is limited to (empty = all)
             $scope = array_values(array_filter(array_map('intval', (array) $request->input('hr_scope', []))));
@@ -181,8 +183,9 @@ class UserController extends Controller
         $lost = array_diff(array_intersect($before['roles'] ?? [], ['hr_mgr', 'ceo', 'fin', 'mgr', 'super']), $user->active ? $user->roles : []);
         $reports = $user->employee_id ? \App\Models\Employee::where('manager_id', $user->employee_id)->where('status', '!=', 'terminated')->count() : 0;
         $ceoOf = $user->employee_id ? \App\Models\Company::where('ceo_employee_id', $user->employee_id)->pluck('name')->all() : [];
-        $pending = $this->pendingWith($user);
-        $user->setAttribute('handover', ['needed' => (bool) ($lost || (! $user->active && ($reports || $ceoOf))) && ($reports || $ceoOf || $pending), 'lost_roles' => array_values($lost), 'reports' => $reports, 'ceo_of' => $ceoOf, 'pending' => $pending]);
+        $pending = $pendingBefore;
+        // an approver role removed (HR manager, finance, company CEO…) always asks who takes over, even with nothing pending today
+        $user->setAttribute('handover', ['needed' => (bool) ($lost || (! $user->active && ($reports || $ceoOf))), 'lost_roles' => array_values($lost), 'reports' => $reports, 'ceo_of' => $ceoOf, 'pending' => $pending, 'hr_scope' => $scopeBefore]);
 
         return $user;
     }
@@ -200,14 +203,24 @@ class UserController extends Controller
     public function handover(Request $request, User $user)
     {
         $this->authorizeAdmin($request);
-        $d = $request->validate(['to_employee_id' => ['required', 'exists:employees,id', Rule::notIn([$user->employee_id])], 'reason' => 'nullable|string|max:300']);
+        $d = $request->validate(['to_employee_id' => ['required', 'exists:employees,id', Rule::notIn([$user->employee_id])], 'reason' => 'nullable|string|max:300',
+            'roles' => 'nullable|array', 'roles.*' => Rule::in(['hr_mgr', 'fin', 'ceo', 'hr_staff', 'custodian']), 'hr_scope' => 'nullable|array']);
         $to = \App\Models\Employee::findOrFail($d['to_employee_id']);
-        $moved = ['reports' => 0, 'companies' => 0, 'requests' => 0];
+        $moved = ['reports' => 0, 'companies' => 0, 'requests' => 0, 'roles' => []];
+        // the replacement also takes the approver role that was removed (e.g. HR manager), so the HR stages reach him (§11)
+        $toUser = User::where('employee_id', $to->id)->where('active', true)->first();
+        if ($toUser && ($roles = array_values(array_intersect($d['roles'] ?? [], $this->assignable($request->user()))))) {
+            $toUser->update(['roles' => array_values(array_unique([...array_diff($toUser->roles ?? [], ['emp']), ...$roles])) ?: $roles]
+                + (in_array('hr_mgr', $roles, true) && $request->user()->hasRole('super') ? ['hr_scope' => array_values(array_filter(array_map('intval', $d['hr_scope'] ?? []))) ?: null] : [])
+                + (in_array('ceo', $roles, true) ? ['company_id' => $to->company_id] : []));
+            Access::flushCache();
+            $moved['roles'] = array_map(fn ($r) => User::ROLES[$r] ?? $r, $roles);
+            Audit::notify($toUser->id, 'أُسندت إليك صلاحيات جديدة', implode('، ', $moved['roles']).' — خلفًا لـ'.$user->name, 'info', ['screen' => 'approvals']);
+        }
         if ($user->employee_id) {
             $moved['reports'] = \App\Models\Employee::where('manager_id', $user->employee_id)->where('id', '!=', $to->id)->update(['manager_id' => $to->id]);
             $moved['companies'] = \App\Models\Company::where('ceo_employee_id', $user->employee_id)->update(['ceo_employee_id' => $to->id]);
         }
-        $toUser = User::where('employee_id', $to->id)->where('active', true)->first();
         foreach (\App\Models\ApprovalRequest::with('employee')->where('status', 'pending')->get() as $r) {
             $now = \App\Services\ApprovalService::approvers($r);
             if ($toUser && in_array($toUser->id, $now, true)) {

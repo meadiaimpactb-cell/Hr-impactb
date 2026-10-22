@@ -147,6 +147,8 @@ class ImportService
     /** Write valid rows in one transaction; returns the batch. */
     public static function commit(string $template, string $text, ?string $fileName, int $by): ImportBatch
     {
+        // owner's note: companies are created and changed by the group CEO only — also through import
+        abort_if($template === 'companies' && ! \App\Models\User::find($by)?->hasRole('super'), 403, 'إضافة الشركات صلاحية الرئيس التنفيذي للمجموعة');
         $v = self::validate($template, $text);
         abort_unless($v['ok'], 422, $v['error'] ?? 'ملف غير صالح');
         $created = [];

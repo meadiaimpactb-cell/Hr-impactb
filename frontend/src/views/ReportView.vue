@@ -1,6 +1,12 @@
 <template>
   <div v-if="!rv"><div v-for="i in 4" :key="i" class="skel" /></div>
   <template v-else>
+    <!-- printed copy carries the company identity (owner's note) -->
+    <div class="print-only rep-head" :style="{ borderBottomColor: repCo?.color || '#1A2363' }">
+      <img v-if="repCo?.logo_url" :src="repCo.logo_url" :alt="repCo.name" />
+      <div><b :style="{ color: repCo?.color || '#1A2363' }">{{ repCo?.name || 'مجموعة وادي الأثر المالية' }}</b><small>التقرير الشهري — {{ fmtYM(rv.period) }}</small><small>مجموعة وادي الأثر المالية</small></div>
+      <img src="/logo-mark.png" alt="" class="grp" />
+    </div>
     <div class="page-h">
       <div>
         <h1>تقرير {{ fmtYM(rv.period) }} — {{ rv.employee?.name }}</h1>
@@ -99,14 +105,16 @@ import api from '../api'
 import Kpi from '../components/Kpi.vue'
 import ReportItems from '../components/ReportItems.vue'
 import { exportReportForm } from '../excel'
+import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import { fmtDT, fmtYM } from '../utils'
 
 const props = defineProps({ id: [String, Number] })
 const ui = useUi()
+const auth = useAuth()
 const router = useRouter()
 const STATUS_COLOR = { draft: 'gray', submitted: 'warn', mgr_reviewed: 'info', hr_reviewed: 'info', approved: 'ok', returned: 'bad' }
-const ROLE = { mgr: 'المدير المباشر', hr: 'الموارد البشرية', ceo: 'رئيس الشركة' }
+const ROLE = { mgr: 'المدير المباشر', hr: 'الموارد البشرية', ceo: 'الرئيس التنفيذي للشركة' }
 const rv = ref(null); const rvf = ref({}); const adj = ref({ hr_bonus: 0, reason: '' }); const busy = ref(false); const dl = ref(false)
 
 async function load() {
@@ -115,6 +123,7 @@ async function load() {
   rv.value.items.forEach((i) => { if (i.source === 'emp') i.approved = i.mgr_approved ?? null })
   rvf.value = { coop: rv.value.coop ?? null, hr_score: rv.value.dev?.hr_score ?? 0, interaction: rv.value.dev?.interaction ?? 0, hr_bonus: rv.value.hr_bonus || 0, bonus_reason: rv.value.hr_bonus ? (rv.value.adjust_reason || '') : '', quality: rv.value.quality ?? Math.round(rv.value.limits.quality * 0.8), note: '' }
 }
+const repCo = computed(() => (auth.meta?.companies || []).find((c) => c.id === rv.value?.company_id))
 const empOwn = computed(() => (rv.value?.items || []).filter((i) => i.source === 'emp'))
 async function review(action) {
   if (action === 'return' && !rvf.value.note?.trim()) return ui.toast('سبب الإرجاع إلزامي', 'warn')
@@ -151,4 +160,8 @@ onMounted(load)
 <style scoped>
 .review-box { border: 2px solid #F2C14E; }
 @media print { .acts, .review-box { display: none !important; } }
+.rep-head{border-bottom:3px solid;padding-bottom:8px;margin-bottom:12px}
+.rep-head img{height:52px;width:auto}.rep-head img.grp{height:40px}
+.rep-head div{flex:1;text-align:center}.rep-head small{display:block;color:#67718F}
+@media print { .rep-head{display:flex!important;align-items:center;gap:12px} }
 </style>

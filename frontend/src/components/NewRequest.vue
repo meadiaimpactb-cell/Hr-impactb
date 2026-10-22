@@ -69,6 +69,11 @@
         <div class="fg"><label>تاريخ النهاية <span class="req">*</span></label><DateInput v-model="f.to" :min="f.from" /><span class="e">{{ errors.to?.[0] }}</span></div>
       </div>
       <div v-if="tripDays" class="tiny muted">مدة الرحلة: <b class="num">{{ tripDays }}</b> يوم</div>
+      <div v-if="tripDays === 1" class="fg" title="البدل اليومي يُستحق لمهمة فيها مبيت، أو مهمة يوم واحد مدتها 10 ساعات فأكثر (§67)"><label>مدة المهمة (ساعة)</label><input v-model.number="f.hours" type="number" min="0" max="24" class="in" /><span v-if="(f.hours || 0) < 10" class="tiny muted">أقل من 10 ساعات دون مبيت: لا يُستحق البدل اليومي</span></div>
+      <div class="fr">
+        <div class="fg" title="السفر على الدرجة السياحية؛ الأعلى منها استثناء يعتمده الرئيس التنفيذي للشركة (§66)"><label>درجة السفر</label><select v-model="f.travel_class" class="in"><option value="economy">السياحية</option><option value="business">رجال الأعمال (استثناء)</option><option value="first">الأولى (استثناء)</option></select></div>
+        <div v-if="(f.travel_class && f.travel_class !== 'economy') || errors.exception_reason" class="fg"><label>مبرر الاستثناء <span class="req">*</span></label><input v-model="f.exception_reason" class="in" :class="{ err: errors.exception_reason }" /><span class="e">{{ errors.exception_reason?.[0] }}</span></div>
+      </div>
       <h4 style="margin:10px 0 4px">التكلفة التقديرية <span class="tiny muted">(أدخل التفاصيل أو الإجمالي)</span></h4>
       <div class="fr3">
         <div class="fg"><label>الطيران</label><input v-model.number="f.cost_flight" type="number" min="0" class="in" /></div>

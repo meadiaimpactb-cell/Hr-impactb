@@ -27,7 +27,7 @@
         <div class="fg"><label>المدير المباشر</label><SearchSelect v-model="f.manager_id" :options="opts.emps" :add-label="canAdd ? 'إضافة مدير جديد' : ''" @add="openQuick('manager', $event)" /></div>
         <F label="تاريخ الالتحاق" req k="hire_date" type="date" />
         <div class="fg" title="يحدد فئة التأمين الطبي والبدل اليومي للرحلات (المواد 5 و63 و67)"><label>المستوى الوظيفي <span class="req">*</span></label><select v-model.number="f.job_level" class="in"><option v-for="(l, k) in JOB_LEVELS" :key="k" :value="Number(k)">{{ l }}</option></select></div>
-        <div class="fg" title="مدة التجربة المنصوص عليها في العقد (المادة 20)"><label>مدة التجربة (يوم)</label><input v-model.number="f.probation_days" type="number" min="0" max="180" class="in" /></div>
+        <div class="fg" title="مدة التجربة المنصوص عليها في العقد (المادة 20)"><label>مدة التجربة (يوم)</label><input v-model.number="f.probation_days" type="number" min="0" max="180" class="in" :disabled="!auth.has('super')" /><span v-if="!auth.has('super')" class="tiny muted">180 يومًا؛ تقصيرها بطلب «تقصير مدة التجربة» يعتمده الرئيس التنفيذي للمجموعة</span></div>
         <div class="fg" style="grid-column:1/-1">
           <label class="chk"><input v-model="multiCo" type="checkbox" /> يخدم أكثر من شركة في المجموعة <span class="tiny muted">(المادة 13: نسب التخصيص مجموعها 100%، والأجر لا يتكرر)</span></label>
           <div v-if="multiCo" class="mt">
@@ -58,7 +58,7 @@
         </div>
         <F v-if="!id" label="الأجر الأساسي (ر.س) — اختياري" k="basic" type="number" />
         <div v-if="!id" class="fg" style="grid-column:1/-1">
-          <label>البدلات <span class="tiny muted">(اختياري — أي عدد. بدل السكن والنقل والاتصال تُحسب من باقة الشركة ما لم تكتبها هنا)</span></label>
+          <label>البدلات <span class="tiny muted">(اختياري — أي عدد. بدل السكن والنقل والاتصال تُحسب من تصنيف الشركة ما لم تكتبها هنا)</span></label>
           <div v-for="(al, i) in f.allowances" :key="i" class="row" style="gap:6px;flex-wrap:nowrap;margin-bottom:6px">
             <input v-model="al.name" class="in" list="alw-names" placeholder="اسم البدل، مثال: بدل سكن" style="flex:2" />
             <input v-model.number="al.amount" type="number" min="0" class="in" placeholder="المبلغ" style="flex:1" />
@@ -66,7 +66,7 @@
           </div>
           <datalist id="alw-names"><option>بدل السكن</option><option>بدل النقل</option><option>بدل الاتصال</option><option>بدل طبيعة عمل</option><option>بدل غلاء معيشة</option><option>حوافز فردية</option></datalist>
           <button type="button" class="btn sec xs" @click="f.allowances.push({ name: '', amount: null })"><Icon name="plus" :size="14" /> إضافة بدل</button>
-          <div class="notice info small mt" style="margin-bottom:0">الراتب الإجمالي = الأساسي + البدلات: <b class="num">{{ grossPreview.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</b> ر.س <span class="tiny muted">(بدلات الباقة غير المكتوبة هنا تُضاف تلقائيًا عند الحفظ)</span></div>
+          <div class="notice info small mt" style="margin-bottom:0">الراتب الإجمالي = الأساسي + البدلات: <b class="num">{{ grossPreview.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</b> ر.س <span class="tiny muted">(بدلات التصنيف غير المكتوبة هنا تُضاف تلقائيًا عند الحفظ)</span></div>
         </div>
         <div class="fg"><label>الآيبان (IBAN) <span v-if="!id" class="req">*</span></label>
           <IbanInput v-if="!id || auth.has('super')" v-model="f.bank_iban" :error="!!errors.bank_iban" /><input v-else :value="f.bank_iban || '—'" class="in" dir="ltr" readonly />
@@ -107,7 +107,8 @@
         <label class="chk"><input v-model="f.punch_required" type="checkbox" /> إلزامية التحضير</label>
         <label class="chk"><input v-model="f.punch_anywhere" type="checkbox" /> يُسمح له بالتحضير من أي مكان</label>
         <div class="fg" style="max-width:220px"><label>هامش إضافي على النطاق (متر)</label><input v-model.number="f.geo_tolerance" type="number" min="0" class="in" placeholder="مثال: 250" /></div>
-        <label class="chk"><input v-model="f.flex_enabled" type="checkbox" /> الساعة المرنة</label>
+        <label class="chk" title="المرونة تأتي تلقائيًا مع تصنيف الشركة (تمكين وأثر)؛ هذا الخيار يمنحها لمن لا يمنحها تصنيف شركته بترتيب عمل مرن معتمد"><input v-model="f.flex_enabled" type="checkbox" /> الساعة المرنة (خارج التصنيف)</label>
+        <div v-if="f.gender === 'f'" class="fg" title="ساعة رضاعة يومية لمدة 24 شهرًا من الولادة (§60) — تُحتسب تلقائيًا عند اعتماد إجازة الوضع"><label>ساعة الرضاعة حتى</label><DateInput v-model="f.nursing_until" /></div>
         <label class="chk"><input v-model="f.daily_note_required" type="checkbox" /> إلزام المنجز اليومي</label>
         <label class="chk" title="تحسب مكافأة نهاية الخدمة حسب نظام العمل السعودي (المادتان 84 و85)"><input v-model="f.eosb_saudi" type="checkbox" /> قواعد نهاية الخدمة السعودية <Icon name="info" :size="13" /></label>
         <label class="chk" title="يحدد هل يُسمح للموظف بتقديم طلب سلفة من النظام. عند إلغائه لا يظهر له نوع طلب «سلفة»."><input v-model="f.advances_enabled" type="checkbox" /> تفعيل السلف <Icon name="info" :size="13" /></label>
@@ -282,7 +283,7 @@ async function save() {
   if (Object.keys(v).length) { errors.value = v; ui.toast('راجع الحقول المظللة بالأحمر', 'bad'); return }
   busy.value = true
   errors.value = {}
-  const keys = ['emp_no', 'name', 'name_en', 'company_id', 'job_title_id', 'manager_id', 'dept', 'hire_date', 'contract_type', 'part_ratio', 'punch_required', 'punch_anywhere', 'geo_tolerance', 'schedule_id', 'work_hours', 'week_pattern', 'country', 'nationality', 'national_id', 'id_type', 'birth_date', 'gender', 'phone', 'email', 'email_enabled', 'eosb_saudi', 'flex_enabled', 'daily_note_required', 'advances_enabled', 'bank_iban', 'location_ids', 'basic', 'allowances', 'create_user', 'job_level', 'religion', 'probation_days']
+  const keys = ['emp_no', 'name', 'name_en', 'company_id', 'job_title_id', 'manager_id', 'dept', 'hire_date', 'contract_type', 'part_ratio', 'punch_required', 'punch_anywhere', 'geo_tolerance', 'schedule_id', 'work_hours', 'week_pattern', 'country', 'nationality', 'national_id', 'id_type', 'birth_date', 'gender', 'phone', 'email', 'email_enabled', 'eosb_saudi', 'flex_enabled', 'daily_note_required', 'advances_enabled', 'bank_iban', 'location_ids', 'basic', 'allowances', 'create_user', 'job_level', 'religion', 'probation_days', 'nursing_until']
   const body = Object.fromEntries(keys.map((k) => [k, f[k] === '' ? null : f[k]]))
   body.allowances = (f.allowances || []).filter((a) => a.name?.trim() && Number(a.amount) > 0)
   body.work_hours = customHours.value && f.work_hours && Object.keys(f.work_hours).length ? f.work_hours : null

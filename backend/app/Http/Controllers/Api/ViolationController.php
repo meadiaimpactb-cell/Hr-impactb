@@ -27,10 +27,19 @@ use Illuminate\Validation\Rule;
  */
 class ViolationController extends Controller
 {
+    /** Employees whose violations this user follows: his VIO scope, plus his own team as their direct manager (§95). */
+    private function scopeIds(Request $request): \Illuminate\Support\Collection
+    {
+        $acc = Access::for();
+        $team = $request->user()->employee_id ? Employee::where('manager_id', $request->user()->employee_id)->pluck('id') : collect();
+        abort_unless($acc->canAny('VIO', 'view') || $team->isNotEmpty(), 403);
+
+        return ($acc->canAny('VIO', 'view') ? $acc->employees('VIO')->pluck('id') : collect())->merge($team)->unique()->values();
+    }
+
     public function index(Request $request)
     {
-        abort_unless(Access::for()->canAny('VIO', 'view'), 403);
-        $ids = Access::for()->employees('VIO')->pluck('id');
+        $ids = $this->scopeIds($request);
 
         return Violation::with('employee:id,name,emp_no', 'company:id,name')->whereIn('employee_id', $ids)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
@@ -61,10 +70,10 @@ class ViolationController extends Controller
      */
     public function suggestions(Request $request)
     {
-        abort_unless(Access::for()->canAny('VIO', 'view'), 403);
+        $scope = $this->scopeIds($request);
         $period = $request->input('period', now()->subMonthNoOverflow()->format('Y-m'));
         $out = [];
-        $emps = Access::for()->employees('VIO')->where('status', '!=', 'terminated')->get();
+        $emps = Employee::whereIn('id', $scope)->where('status', '!=', 'terminated')->get();
         $last = now()->parse($period.'-01')->endOfMonth()->toDateString();
         foreach ($emps->where('punch_required', true) as $e) {
             $s = AttendanceService::summary($e, $period);
@@ -151,6 +160,9 @@ class ViolationController extends Controller
         $e = Employee::findOrFail($d['employee_id']);
         abort_unless(Access::for()->isManagerOf($e) || Access::for()->can('VIO', 'add', ['employee' => $e]), 403);
         abort_if($e->id === $u->employee_id, 422, 'لا يمكن تسجيل مخالفة على نفسك');
+        // §97: one act is not punished twice — the same type on the same day for the same employee is one violation
+        abort_if(Violation::where('employee_id', $e->id)->where('type', $d['type'])->whereDate('occurred_on', $d['occurred_on'])->where('status', '!=', 'cancelled')->exists(), 422,
+            'سُجّلت مخالفة من النوع نفسه في التاريخ نفسه لهذا الموظف — لا يُعاقب الموظف على الفعل الواحد أكثر من مرة (§97)');
         $d['discovered_on'] ??= $d['occurred_on'];
         // §97: no charge for a violation discovered more than 30 days ago (counted from discovery, not occurrence)
         $charge = (int) Settings::get('violationChargeDays', $e->company_id, 30);
@@ -283,6 +295,13 @@ class ViolationController extends Controller
         $deg = collect($degrees)->firstWhere('code', (string) $d['signed_degree']);
         if (! empty($deg['meta']['terminates'])) {
             abort_unless($u->hasRole('super'), 403, 'الفصل التأديبي يعتمده الرئيس التنفيذي للمجموعة بعد التحقيق (§96)');
+            // §101 (art. 80): dismissal for absence is preceded by a written warning to the employee about his absence
+            $absTypes = collect(Lookup::grouped()['violation_types'] ?? [])->filter(fn ($t) => ($t['meta']['category'] ?? '') === 'absence' || str_starts_with($t['code'], 'absence'))->pluck('code')->all();
+            if (in_array($violation->type, $absTypes, true)) {
+                $warned = Violation::where('employee_id', $violation->employee_id)->whereIn('type', $absTypes)->where('status', 'active')->where('id', '!=', $violation->id)
+                    ->whereIn('signed_degree', [2, 3])->where('notified_at', '>=', now()->subYear())->exists();
+                abort_unless($warned, 422, 'الفصل بسبب الغياب يسبقه إنذار كتابي للموظف بسبب الغياب (§101 — المادة 80): وقّع الإنذار أولًا ثم يُنظر في الفصل');
+            }
         }
         $degree = (int) $d['signed_degree'];
         $financial = (bool) ($deg['meta']['financial'] ?? false);
@@ -299,7 +318,7 @@ class ViolationController extends Controller
         $maxOne = round($dailyBasic * 5, 2);
         if ($financial) {
             abort_if($amount > $maxOne, 422, 'الغرامة لا تزيد على أجر 5 أيام من الأجر الأساسي ('.number_format($maxOne, 2).' ر.س) — §97');
-            $monthSoFar = (float) Violation::where('employee_id', $e->id)->where('status', 'active')->where('period', $period)->where('id', '!=', $violation->id)->sum('amount');
+            $monthSoFar = (float) Violation::where('employee_id', $e->id)->whereIn('status', ['active', 'awaiting_approval'])->whereNotNull('signed_degree')->where('period', $period)->where('id', '!=', $violation->id)->sum('amount');
             if ($amount > 0 && $monthSoFar + $amount > $maxOne) {
                 $amount = round(max(0, $maxOne - $monthSoFar), 2); // what exceeds the monthly cap is not deducted (§97)
                 $d['reason'] .= ' — خُفّضت الغرامة ليبقى مجموع غرامات الشهر ≤ أجر 5 أيام (§97)';
@@ -330,6 +349,13 @@ class ViolationController extends Controller
         $u = $request->user();
         abort_unless($u->isHr() && Access::for()->can('VIO', 'approve', ['employee' => $violation->employee]) && $violation->status === 'awaiting_approval' && $violation->signed_degree !== null, 403);
         $deg = collect(Lookup::grouped()['penalty_degrees'])->firstWhere('code', (string) $violation->signed_degree);
+        if ($violation->amount > 0 && $violation->period) { // §97: re-checked at approval — another fine may have become active for the same month meanwhile
+            $cap = round((float) $violation->basis * 5, 2);
+            $active = (float) Violation::where('employee_id', $violation->employee_id)->where('status', 'active')->where('period', $violation->period)->where('id', '!=', $violation->id)->sum('amount');
+            if ($active + $violation->amount > $cap) {
+                $violation->update(['amount' => round(max(0, $cap - $active), 2), 'objection_decision' => trim($violation->objection_decision.' — خُفّضت الغرامة عند الاعتماد ليبقى مجموع غرامات الشهر ≤ أجر 5 أيام (§97)')]);
+            }
+        }
         $violation->update(['status' => 'active', 'hr_approved_by' => $u->id, 'notified_at' => now()]);
         $e = $violation->employee;
         $detail = ($violation->amount ? " ({$violation->amount} ر.س)" : '').($violation->suspension_days ? " ({$violation->suspension_days} أيام إيقاف دون أجر)" : '').($violation->deprivation_until ? ' (حتى '.$violation->deprivation_until->format('d/m/Y').')' : '');
@@ -369,7 +395,7 @@ class ViolationController extends Controller
         $d = $request->validate(['text' => 'required|string|max:2000']);
         $violation->update(['objection' => 'open', 'objection_text' => $d['text'], 'objection_at' => now()]);
         Audit::notify(Access::hrUsersFor($violation->company_id, 'VIO'), 'تظلم من جزاء — شكّل لجنة مستقلة (البت خلال 15 يومًا)', $violation->employee->name, 'approval', ['screen' => 'violations']);
-        Audit::notify(Access::usersWithRole('super'), 'تظلم من جزاء', $violation->employee->name.' — يعتمد الرئيس التنفيذي للمجموعة قرار اللجنة (§105)', 'info', ['screen' => 'violations']);
+        Audit::notify($this->objectionApprovers($violation), 'تظلم من جزاء', $violation->employee->name.' — يعتمد الرئيس التنفيذي للمجموعة قرار اللجنة (§105)', 'info', ['screen' => 'violations']);
 
         return $this->row($violation);
     }
@@ -402,11 +428,11 @@ class ViolationController extends Controller
             abort_unless(in_array($u->id, (array) ($violation->committee ?? []), true), 403, 'يبت في التظلم أعضاء اللجنة المستقلة (§105)');
             $violation->update(['objection' => 'proposed', 'objection_proposal' => $d['decision'], 'objection_proposal_note' => $d['note'], 'objection_proposed_by' => $u->id]);
             Audit::log('violations', $violation->id, 'objection_proposed_'.$d['decision'], null, null, $d['note']);
-            Audit::notify(Access::usersWithRole('super'), 'قرار لجنة التظلم بانتظار اعتمادك', $violation->employee->name.' — '.($d['decision'] === 'accepted' ? 'قبول التظلم' : 'رفض التظلم'), 'approval', ['screen' => 'violations']);
+            Audit::notify($this->objectionApprovers($violation), 'قرار لجنة التظلم بانتظار اعتمادك', $violation->employee->name.' — '.($d['decision'] === 'accepted' ? 'قبول التظلم' : 'رفض التظلم'), 'approval', ['screen' => 'violations']);
 
             return $this->row($violation);
         }
-        abort_unless($violation->objection === 'proposed' && $u->hasRole('super') && ! in_array($u->id, $this->committeeExcluded($violation), true), 403, 'يعتمد قرار لجنة التظلم الرئيس التنفيذي للمجموعة (§105)');
+        abort_unless($violation->objection === 'proposed' && in_array($u->id, $this->objectionApprovers($violation), true), 403, 'يعتمد قرار لجنة التظلم الرئيس التنفيذي للمجموعة (§105) — ولا يعتمده من شارك في الجزاء');
         $note = 'قرار اللجنة: '.$violation->objection_proposal_note.' — اعتماد الرئيس التنفيذي للمجموعة: '.$d['note'];
         $violation->update(['objection' => $d['decision'], 'objection_decision' => $note] + ($d['decision'] === 'accepted' ? ['status' => 'cancelled', 'amount' => 0, 'suspension_days' => null, 'deprivation_until' => null] : []));
         Audit::log('violations', $violation->id, 'objection_'.$d['decision'], null, null, $d['note']);
@@ -434,6 +460,18 @@ class ViolationController extends Controller
             'by_company' => $rows->groupBy('company_id')->map(fn ($g) => ['company' => $g->first()->company?->name, 'count' => $g->count(), 'total' => round($g->sum('amount'), 2)])->values(),
             'by_period' => $rows->groupBy('period')->map(fn ($g, $p) => ['period' => $p, 'count' => $g->count(), 'total' => round($g->sum('amount'), 2)])->values(),
             'note' => 'تُقيَّد الغرامات في سجل مستقل وتُصرف فيما يعود بالنفع على عمال المنشأة وفق المادة (73) من نظام العمل، ولا تُعامل إيرادًا تشغيليًا (§106)'];
+    }
+
+    /**
+     * §105: the group CEO approves the committee's decision — unless he took part in the sanction (signed it, for
+     * instance); then it goes to the board, or, without board accounts, to an HR manager who took no part in it.
+     */
+    private function objectionApprovers(Violation $v): array
+    {
+        $ex = [...$this->committeeExcluded($v), (int) User::where('employee_id', $v->employee_id)->value('id')];
+
+        return array_values(array_diff(Access::usersWithRole('super'), $ex)) ?: array_values(array_diff(Access::usersWithRole('board'), $ex))
+            ?: array_values(array_diff(Access::hrManagersFor($v->company_id), $ex));
     }
 
     /** Users who may not sit on the grievance committee nor approve it (§105). */

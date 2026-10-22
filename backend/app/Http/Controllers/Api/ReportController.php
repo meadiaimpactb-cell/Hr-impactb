@@ -21,14 +21,25 @@ use Illuminate\Validation\ValidationException;
 class ReportController extends Controller
 {
     // ---------- templates ----------
-    public function templates()
+    public function templates(Request $request)
     {
-        return ReportTemplate::orderBy('id')->get();
+        $u = $request->user();
+        if ($u->hasRole('super', 'hr_mgr', 'hr_staff')) {
+            return ReportTemplate::orderBy('id')->get();
+        }
+        // a manager sees (and defines) the personal templates of his own team (owner's note)
+        $team = $u->employee_id ? Employee::where('manager_id', $u->employee_id)->pluck('id') : collect();
+
+        return ReportTemplate::where('scope', 'employee')->whereIn('scope_id', $team)->orderBy('id')->get();
     }
 
     public function saveTemplate(Request $request, ?ReportTemplate $template = null)
     {
-        abort_unless($request->user()->hasRole('super', 'hr_mgr'), 403);
+        $u = $request->user();
+        $hr = $u->hasRole('super', 'hr_mgr');
+        // owner's note: the direct manager defines the report items of his own employees; HR is told and may adjust them
+        $mine = fn ($scope, $id) => $scope === 'employee' && $id && ($emp = Employee::find($id)) && Access::for()->isManagerOf($emp);
+        abort_unless($hr || ($mine($request->input('scope'), $request->integer('scope_id')) && (! $template || $mine($template->scope, $template->scope_id))), 403, 'يحدد المدير بنود تقارير موظفيه المباشرين فقط');
         $d = $request->validate(['name' => 'required|string|max:120', 'scope' => 'required|in:group,company,job,employee', 'scope_id' => 'nullable|integer|required_if:scope,employee',
             'items' => 'required|array|min:1|max:80', 'items.*.axis' => 'nullable|string|max:160', 'items.*.title' => 'required|string|max:300', 'items.*.target' => 'nullable|string|max:300',
             'items.*.indicator' => 'nullable|string|max:300', 'items.*.weight' => 'required|numeric|min:0|max:100',
@@ -40,6 +51,12 @@ class ReportController extends Controller
         $before = $template?->toArray();
         $template ? $template->update($d + ['version' => $template->version + 1]) : $template = ReportTemplate::create($d);
         Audit::log('report_templates', $template->id, $before ? 'update' : 'create', $before, $template->toArray());
+        if (! $hr && ($emp = Employee::find($d['scope_id']))) {
+            Audit::notify(Access::hrUsersFor($emp->company_id, 'PRF'), 'بنود تقرير شهري حدّدها المدير', $u->name.' — '.$emp->name.' ('.count($d['items']).' بند)', 'info', ['screen' => 'reports']);
+            if ($eu = User::where('employee_id', $emp->id)->value('id')) {
+                Audit::notify($eu, 'حدّد مديرك بنود تقريرك الشهري', count($d['items']).' بند — تظهر في تقريرك الشهري القادم', 'info', ['screen' => 'reports']);
+            }
+        }
 
         return $template;
     }
@@ -159,6 +176,9 @@ class ReportController extends Controller
         $first = $report->first_submitted_at ?? $report->submitted_at;
         $report->update(['status' => 'submitted', 'submitted_at' => now(), 'first_submitted_at' => $first ?? now(), 'late' => $first ? (bool) $report->late : now()->gt($due->endOfDay()),
             'version' => $report->version + 1, 'return_note' => null]);
+        if (! $first && $report->late) { // §35: a late report is noted in the employee's file
+            $report->employee->addCareer('تأخر التقرير الشهري', 'تقرير '.$report->period.' سُلّم '.now()->format('d/m/Y').' بعد موعده '.$due->format('d/m/Y'));
+        }
         $mgr = $report->employee->manager_id ? User::where('employee_id', $report->employee->manager_id)->value('id') : null;
         Audit::notify($mgr ?: Access::usersWithRole('hr_mgr'), 'تقرير شهري بانتظار مراجعتك', $report->employee->name.' — '.$report->period, 'approval', ['screen' => 'reports']);
         Audit::log('monthly_reports', $report->id, 'submit');
@@ -198,7 +218,7 @@ class ReportController extends Controller
         $names = \App\Models\Lookup::where('group', 'dev_activities')->pluck('name', 'code');
 
         return \App\Models\DevRecord::where('employee_id', $e->id)
-            ->where(fn ($q) => $q->where(fn ($w) => $w->where('status', 'verified')->where('points_month', $period))
+            ->where(fn ($q) => $q->where(fn ($w) => $w->where('status', 'verified')->where(fn ($m) => $m->where('points_month', $period)->orWhereNotNull('points_split->'.$period)))
                 ->orWhere(fn ($w) => $w->whereIn('status', ['planned', 'pending'])->where(fn ($x) => $x->whereBetween('from', [$start, $end])->orWhereBetween('to', [$start, $end]))))
             ->orderBy('from')->get(['id', 'program', 'provider', 'activity', 'hours', 'points', 'status', 'from', 'to'])
             ->map(fn ($x) => $x->toArray() + ['activity_name' => $names[$x->activity] ?? null, 'status_label' => \App\Models\DevRecord::STATUSES[$x->status] ?? $x->status, 'counted' => $x->status === 'verified'])
@@ -246,6 +266,7 @@ class ReportController extends Controller
         $isCeo = $u->hasRole('super') || $acc->isCeoOf($e->company_id);
         $ok = match ($stage) { 'submitted' => $isMgr, 'mgr_reviewed' => $isHr, 'hr_reviewed' => $isCeo, default => false };
         abort_unless($ok, 403, 'ليست مرحلتك في مراجعة هذا التقرير');
+        abort_if($e->id === $u->employee_id, 403, 'لا يراجع أحد تقريره الشهري — يراجعه مديره ثم الموارد البشرية (§10)');
 
         if ($d['action'] === 'return') {
             abort_unless(! empty($d['note']), 422, 'سبب الإرجاع إلزامي');
@@ -556,11 +577,22 @@ class ReportController extends Controller
         return ['company_id' => $e->company_id, 'template_id' => $tpl?->id, 'items' => $items, 'dev' => ['program' => '', 'provider' => '', 'completed' => false, 'interaction' => 0, 'applied' => false, 'hr_score' => null, 'notes' => ''], 'status' => 'draft'];
     }
 
+    /** §36: the day by which the manager rates a submitted report (mgrReviewDueDay; 0 = the last day of the report month). */
+    public static function reviewDue(MonthlyReport $r): Carbon
+    {
+        $start = Carbon::parse($r->period.'-01');
+        $day = (int) Settings::get('mgrReviewDueDay', $r->company_id, 0);
+        $due = $day > 0 ? $start->copy()->addMonthNoOverflow()->day(min($day, 28)) : $start->copy()->endOfMonth()->startOfDay();
+
+        return $r->submitted_at && $due->lt($r->submitted_at->copy()->startOfDay()) ? $r->submitted_at->copy()->addDays(3)->startOfDay() : $due;
+    }
+
     private function row(MonthlyReport $r): array
     {
         $done = collect($r->items)->filter(fn ($i) => ! empty($i['achieved']) && ($i['pct'] ?? 0) > 0)->count();
 
-        return ['id' => $r->id, 'period' => $r->period, 'status' => $r->status, 'status_label' => MonthlyReport::STATUSES[$r->status] ?? $r->status, 'late' => $r->late,
+        return ['id' => $r->id, 'period' => $r->period, 'company_id' => $r->company_id, 'status' => $r->status, 'status_label' => MonthlyReport::STATUSES[$r->status] ?? $r->status, 'late' => $r->late,
+            'review_due' => $r->status === 'submitted' ? self::reviewDue($r)->toDateString() : null, 'review_overdue' => $r->status === 'submitted' && self::reviewDue($r)->endOfDay()->isPast(),
             'items_total' => count($r->items), 'items_done' => $done, 'submitted_at' => $r->submitted_at, 'employee' => $r->relationLoaded('employee') ? $r->employee?->only('id', 'name', 'emp_no') : null,
             'company' => $r->relationLoaded('company') ? $r->company?->name : null, 'return_note' => $r->return_note];
     }

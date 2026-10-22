@@ -30,8 +30,10 @@ class TerminationController extends Controller
 {
     public function index(Request $request)
     {
-        abort_unless(Access::for()->canAny('TRM', 'view'), 403);
-        $ids = Access::for()->employees('TRM')->pluck('id');
+        // the direct manager follows his team's cases (handover and clearance), read-only
+        $team = $request->user()->employee_id ? Employee::where('manager_id', $request->user()->employee_id)->pluck('id') : collect();
+        abort_unless(Access::for()->canAny('TRM', 'view') || $team->isNotEmpty(), 403);
+        $ids = (Access::for()->canAny('TRM', 'view') ? Access::for()->employees('TRM')->pluck('id') : collect())->merge($team)->unique()->values();
 
         return Termination::with('employee:id,name,emp_no', 'company:id,name')->whereIn('employee_id', $ids)
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))->orderByDesc('id')->get()->map(fn ($t) => $this->row($t));
@@ -51,7 +53,10 @@ class TerminationController extends Controller
     {
         $u = $request->user();
         abort_unless($termination->employee_id === $u->employee_id || Access::for()->canSeeEmployee($termination->employee), 403);
-        $t = $termination->load('employee:id,name,emp_no,hire_date,manager_id,company_id,contract_type', 'company:id,name');
+        $t = $termination->load('employee:id,name,emp_no,hire_date,manager_id,company_id,contract_type,bank_iban', 'company:id,name'); // §111: the settlement is paid to the employee's IBAN
+        if ($t->employee_id !== $u->employee_id && ! Access::for()->canSeeSalary($t->employee)) {
+            $t->employee->makeHidden('bank_iban');
+        }
         if ($this->flowActive($t, 'clearance') && ! $t->flow('clearance')) { // cases opened before the §111 chain existed
             $t->update(['flows' => array_merge($t->flows ?? [], ['clearance' => TerminationService::newFlow('clearance')])]);
         }

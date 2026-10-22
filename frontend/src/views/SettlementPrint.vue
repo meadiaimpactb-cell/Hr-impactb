@@ -11,7 +11,7 @@
         <div class="title"><b>تصفية نهاية الخدمة</b><div class="small muted">STL-{{ d.id }} · {{ d.status_label }}</div></div>
         <div class="co">{{ d.company }}</div>
       </div>
-      <p><b>{{ d.employee?.name }}</b> · {{ d.employee?.emp_no }}<br /><span class="small muted">{{ d.reason_name }} · آخر يوم عمل {{ d.last_working_day }} · مدة الإشعار {{ d.notice_days }} يوم</span></p>
+      <p><b>{{ d.employee?.name }}</b> · {{ d.employee?.emp_no }}<br /><span class="small muted">{{ d.reason_name }} · آخر يوم عمل {{ d.last_working_day }} · مدة الإشعار {{ d.notice_days }} يوم</span><br /><span class="small">تُحوَّل المستحقات إلى الآيبان: <b class="num" style="direction:ltr;display:inline-block">{{ d.employee?.bank_iban || 'غير مسجل — يُستكمل قبل الصرف' }}</b></span></p>
       <table>
         <thead><tr><th>مكافأة نهاية الخدمة</th><th>القيمة</th></tr></thead>
         <tbody>

@@ -124,6 +124,7 @@
       اختر البديل لتنتقل إليه الطلبات المعلّقة فورًا (اللائحة §11). بدون بديل تُحال الطلبات إلى الرئيس التنفيذي للمجموعة.</div>
     </div>
     <div class="fg"><label>البديل *</label><SearchSelect v-model="hand.to" :options="empOptions.filter((o) => o.value !== hand.user.employee_id)" placeholder="ابحث عن الموظف البديل" /></div>
+    <label v-for="r in (hand.info.lost_roles || []).filter((r) => ['hr_mgr', 'fin', 'ceo', 'hr_staff', 'custodian'].includes(r))" :key="r" class="chk"><input v-model="hand.roles" type="checkbox" :value="r" /> يتسلّم البديل دور «{{ meta.roles?.[r] }}» لتصله طلبات هذه المرحلة</label>
     <div class="fg"><label>ملاحظة</label><input v-model="hand.reason" class="in" placeholder="اختياري" /></div>
     <template #foot><button class="btn sec" @click="hand = null">لاحقًا — تُحال إلى الرئيس التنفيذي للمجموعة</button><button class="btn pri" :disabled="!hand.to" @click="doHandover">تسليم المهام</button></template>
   </Modal>
@@ -278,7 +279,7 @@ async function saveUser() {
   try {
     if (f.id) {
       const r = await api.put(`/users/${f.id}`, body); ui.toast('تم الحفظ', 'ok')
-      if (r.handover?.needed) hand.value = { user: r, info: r.handover, to: null, reason: '' }
+      if (r.handover?.needed) hand.value = { user: r, info: r.handover, to: null, reason: '', roles: (r.handover.lost_roles || []).filter((x) => ['hr_mgr', 'fin', 'ceo', 'hr_staff', 'custodian'].includes(x)) }
     } else {
       const r = await api.post('/users', body)
       creds.value = { login: r.user.login, password: r.temp_password, inviteUrl: r.invite_url || '', email: r.user.email || '', emailed: !!r.emailed, title: 'بيانات الحساب الجديد' }
@@ -290,8 +291,8 @@ async function saveUser() {
 const hand = ref(null)
 async function doHandover() {
   try {
-    const r = await api.post(`/users/${hand.value.user.id}/handover`, { to_employee_id: hand.value.to, reason: hand.value.reason || null })
-    ui.toast(`نُقل ${r.reports} موظف و${r.companies} شركة، و${r.requests} طلب معلّق أصبح عند البديل`, 'ok', 7000); hand.value = null; load()
+    const r = await api.post(`/users/${hand.value.user.id}/handover`, { to_employee_id: hand.value.to, reason: hand.value.reason || null, roles: hand.value.roles || [], hr_scope: hand.value.info.hr_scope || [] })
+    ui.toast(`نُقل ${r.reports} موظف و${r.companies} شركة${r.roles?.length ? '، وأُسند للبديل: ' + r.roles.join('، ') : ''}، و${r.requests} طلب معلّق أصبح عند البديل`, 'ok', 8000); hand.value = null; load()
   } catch (e) { ui.toast(e.message || 'تعذر التسليم', 'bad') }
 }
 let inviting = false

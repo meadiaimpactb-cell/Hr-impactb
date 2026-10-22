@@ -138,6 +138,9 @@ class OdooSync
                     $local->fill(array_filter(array_diff_key($data, ['company_name' => 1]), fn ($v) => $v !== null))->save();
                     $updated++;
                 } else {
+                    if ($entity === 'company') { // owner's note: a company is added by the group CEO in HC, then linked — Odoo does not create one
+                        return;
+                    }
                     $local = self::createLocal($entity, $data);
                     $created++;
                 }

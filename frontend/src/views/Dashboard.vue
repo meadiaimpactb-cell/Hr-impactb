@@ -134,7 +134,7 @@ const quick = computed(() => {
     { icon: 'megaphone', label: 'الإعلانات', color: 'var(--warn)', run: () => go('/announcements') },
     { icon: 'user', label: 'ملفي', color: 'var(--navy)', run: () => go('/me') },
     // the group CEO sets each package's benefits (leave balances, allowances, extra items) — HR proposes per-employee changes
-    auth.has('super', 'hr_mgr') && { icon: 'building', label: 'باقات المزايا', color: 'var(--purple)', run: () => go('/companies?tab=packages') },
+    auth.has('super', 'hr_mgr') && { icon: 'building', label: 'التصنيفات ومزاياها', color: 'var(--purple)', run: () => go('/companies?tab=packages') },
     auth.isApprover && { icon: 'megaphone', label: 'تنبيه لفريقي', color: 'var(--bad)', run: () => go('/announcements') },
   ].filter(Boolean)
 })

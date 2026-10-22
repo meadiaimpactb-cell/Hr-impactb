@@ -30,7 +30,7 @@
       <div v-if="!shown.length" class="empty">لا رسائل</div>
       <div v-for="th in shown" :key="th.id" class="thread" :class="{ on: cur?.id === th.id, unread: th.unread }" @click="open(th.id)">
         <div class="row" style="justify-content:space-between"><b>{{ th.subject }}</b><span class="tiny muted">{{ fmtDT(th.last_at) }}</span></div>
-        <div class="small muted">{{ th.others }} · {{ th.count }}</div><div class="tiny muted">{{ th.preview }}</div>
+        <div class="small muted">{{ th.others }} · {{ th.count }}<span v-if="th.unread" class="pill info" style="margin-inline-start:6px;font-size:10.5px">غير مقروءة</span></div><div class="tiny muted"><b v-if="th.last_from">{{ th.last_from }}:</b> {{ th.preview }}</div>
       </div>
       </template>
     </div>
@@ -76,9 +76,9 @@ const tab = ref('mine'); const q = ref(''); const onlyUnread = ref(false); const
 const gov = ref([]); const gq = ref(''); const gFrom = ref(''); const gTo = ref('')
 const companies = computed(() => [...new Set(users.value.map((u) => u.company).filter(Boolean))])
 const fSender = ref(''); const fFrom = ref(''); const fTo = ref('')
-const senders = computed(() => [...new Set(threads.value.map((t) => t.others).filter(Boolean))].sort())
+const senders = computed(() => [...new Set(threads.value.flatMap((t) => t.senders || []).filter(Boolean))].sort())
 const shown = computed(() => threads.value.filter((t) => (!onlyUnread.value || t.unread) && (!q.value || `${t.subject} ${t.others || ''} ${t.preview || ''}`.toLowerCase().includes(q.value.toLowerCase()))
-  && (!fSender.value || t.others === fSender.value) && (!fFrom.value || String(t.last_at).slice(0, 10) >= fFrom.value) && (!fTo.value || String(t.last_at).slice(0, 10) <= fTo.value)))
+  && (!fSender.value || (t.senders || []).includes(fSender.value)) && (!fFrom.value || String(t.last_at).slice(0, 10) >= fFrom.value) && (!fTo.value || String(t.last_at).slice(0, 10) <= fTo.value)))
 async function load() { threads.value = await api.get('/mail') }
 async function loadAll() { gov.value = await api.get('/mail/all', { params: { q: gq.value || undefined, from: gFrom.value || undefined, to: gTo.value || undefined } }) }
 async function open(id) {
@@ -114,7 +114,7 @@ onMounted(() => { load(); loadDrafts() })
 </script>
 
 <style scoped>
-.thread{padding:10px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}.thread:hover{background:var(--soft)}.thread.on{background:var(--infobg)}.thread.unread b{color:var(--navy)}.thread.unread::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--navy);margin-inline-end:6px}
+.thread{padding:10px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}.thread:hover{background:var(--soft)}.thread.on{background:var(--infobg)}.thread.unread{background:var(--infobg);border-inline-start:4px solid var(--blue, #1C84C6)}.thread.unread b{color:var(--navy);font-weight:800}.thread.unread::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--blue, #1C84C6);margin-inline-end:6px}
 .msg{padding:10px 12px;border-radius:12px;background:var(--soft);margin-bottom:8px;max-width:80%}.msg.mine{background:var(--infobg);margin-inline-start:auto}
 .mail-grid{grid-template-columns:minmax(0,1fr);gap:14px}
 .gov{border-bottom:1px solid var(--line);padding:8px 0}.gov summary{cursor:pointer}

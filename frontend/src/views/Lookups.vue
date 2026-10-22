@@ -33,7 +33,7 @@
     <div v-else-if="!rows.length" class="empty">لا بيانات</div>
     <div v-dt v-else class="tw"><table>
       <template v-if="kind === 'leave-types'">
-        <thead><tr><th>الرمز</th><th>الاسم</th><th>الاحتساب</th><th>بند الرصيد في الباقة</th><th>يخصم</th><th>مرفق إلزامي</th><th>الأجر</th><th>الحالة</th><th /></tr></thead>
+        <thead><tr><th>الرمز</th><th>الاسم</th><th>الاحتساب</th><th>بند الرصيد في التصنيف</th><th>يخصم</th><th>مرفق إلزامي</th><th>الأجر</th><th>الحالة</th><th /></tr></thead>
         <tbody><tr v-for="r in rows" :key="r.id">
           <td><b>{{ r.code }}</b></td><td>{{ r.name }}<span class="tiny muted">{{ r.name_en }}</span></td><td>{{ ACCRUAL[r.accrual] }}</td><td class="small">{{ benefitLabel(r.quota_key) }}</td>
           <td><Yes :v="r.deducts" /></td><td><Yes :v="r.attachment_required" /></td><td>{{ PAY[r.pay] }}<span v-if="r.extra_approval?.length" class="tiny muted">+ {{ r.extra_approval.map((k) => flowRoles[k]).join('، ') }}</span></td>
@@ -73,14 +73,14 @@
         <div class="fg"><label>الاسم *</label><input v-model="f.name" class="in" /></div>
         <div class="fg"><label>الاسم بالإنجليزية</label><input v-model="f.name_en" class="in" /></div>
         <div class="fg"><label>طريقة الاحتساب</label><select v-model="f.accrual" class="in"><option v-for="(l, k) in ACCRUAL" :key="k" :value="k">{{ l }}</option></select></div>
-        <div class="fg"><label>بند الرصيد في الباقة</label><select v-model="f.quota_key" class="in"><option :value="null">—</option><option v-for="(l, k) in auth.meta.benefit_labels" :key="k" :value="k">{{ l }}</option></select></div>
+        <div class="fg"><label>بند الرصيد في التصنيف</label><select v-model="f.quota_key" class="in"><option :value="null">—</option><option v-for="(l, k) in auth.meta.benefit_labels" :key="k" :value="k">{{ l }}</option></select></div>
         <div class="fg"><label>الأجر أثناء الإجازة</label><select v-model="f.pay" class="in"><option v-for="(l, k) in PAY" :key="k" :value="k">{{ l }}</option></select></div>
         <div class="fg"><label>الحد لكل واقعة (أيام)</label><input v-model.number="f.max_per_case" type="number" class="in" /></div>
         <div class="fg"><label>الترتيب</label><input v-model.number="f.sort" type="number" class="in" /></div>
       </div>
       <div class="row"><label class="chk"><input v-model="f.deducts" type="checkbox" /> يخصم من الرصيد</label><label class="chk"><input v-model="f.attachment_required" type="checkbox" /> مرفق إلزامي</label>
         <label class="chk"><input v-model="f.carry_over" type="checkbox" /> يُرحَّل</label><label class="chk"><input v-model="f.active" type="checkbox" /> مفعّل</label></div>
-      <div v-if="f.deducts && !f.quota_key && f.accrual !== 'none' && f.accrual !== 'case'" class="notice warn small mt">نوع يخصم من الرصيد بلا «بند رصيد في الباقة» يبدأ رصيده صفرًا. اختر بند الباقة (أو أضف بندًا جديدًا من صفحة الشركات والباقات)، أو اضبط الرصيد يدويًا من ملف الموظف.</div>
+      <div v-if="f.deducts && !f.quota_key && f.accrual !== 'none' && f.accrual !== 'case'" class="notice warn small mt">نوع يخصم من الرصيد بلا «بند رصيد في التصنيف» يبدأ رصيده صفرًا. اختر بند التصنيف (أو أضف بندًا جديدًا من صفحة الشركات والتصنيفات)، أو اضبط الرصيد يدويًا من ملف الموظف.</div>
       <div class="notice info small mt"><b>يخصم من الرصيد:</b> عند تفعيله تُطرح أيام الإجازة من رصيد الموظف لهذا النوع، وعند إلغائه تُسجَّل الإجازة دون المساس بأي رصيد (مثل إجازة الزواج أو الوفاة).</div>
       <div class="fg mt"><label>اعتمادات إضافية لهذا النوع (تُضاف بعد مسار الإجازة)</label>
         <div class="row"><label v-for="(l, k) in flowRoles" :key="k" class="chk small"><input v-model="f.extra_approval" type="checkbox" :value="k" /> {{ l }}</label></div>

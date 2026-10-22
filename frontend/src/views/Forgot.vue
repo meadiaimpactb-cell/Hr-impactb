@@ -1,7 +1,7 @@
 <template>
   <div class="login">
     <form class="box" novalidate @submit="onSubmit">
-      <img src="/logo-full.png" alt="Impact Valley Capital" />
+      <img src="/logo-hc.png" alt="HC — إدارة رأس المال البشري" />
       <h2>نسيت كلمة المرور؟</h2>
       <p class="sub">أدخل بريدك الرسمي أو اسم المستخدم أو رقمك الوظيفي وسنرسل رابط إعادة التعيين إلى بريدك المسجل.</p>
       <template v-if="!sent">

@@ -1,12 +1,12 @@
 <template>
   <div class="page-h">
-    <div><h1>{{ t('التأمين الطبي') }}</h1><p>وثائق التأمين لكل شركة وأعضاؤها؛ الفئة وعدد التابعين من باقة الشركة مع إمكانية الاستثناء لكل موظف · حالات الانتهاء وسجل الإضافة والإلغاء</p></div>
+    <div><h1>{{ t('التأمين الطبي') }}</h1><p>وثائق التأمين لكل شركة وأعضاؤها؛ الفئة وعدد التابعين من تصنيف الشركة مع إمكانية الاستثناء لكل موظف · حالات الانتهاء وسجل الإضافة والإلغاء</p></div>
     <div class="acts"><button v-if="auth.isHr" class="btn pri sm" @click="pf = { company_id: auth.meta.companies[0]?.id, provider: '', policy_no: '', classes: ['A', 'B', 'C'], from: '', to: '', cost: 0, active: true }"><Icon name="plus" :size="16" /> وثيقة تأمين</button></div>
   </div>
   <template v-if="!auth.isApprover">
     <div v-if="mine" class="card">
       <h3>تأميني الطبي</h3>
-      <div v-if="!mine.insurance" class="notice info">لم تُضف بعد إلى وثيقة تأمين. فئتك حسب الباقة: <b>{{ mine.tier_class }}</b> · التابعون المسموح بهم: <b>{{ mine.tier_dependents }}</b></div>
+      <div v-if="!mine.insurance" class="notice info">لم تُضف بعد إلى وثيقة تأمين. فئتك حسب التصنيف: <b>{{ mine.tier_class }}</b> · التابعون المسموح بهم: <b>{{ mine.tier_dependents }}</b></div>
       <div v-else class="grid g4"><Kpi label="شركة التأمين" :value="mine.policy?.provider" color="b" /><Kpi label="الفئة" :value="mine.insurance.class" color="g" /><Kpi label="التابعون" :value="mine.insurance.dependents" :hint="`المسموح ${mine.tier_dependents}`" color="y" /><Kpi label="رقم البطاقة" :value="mine.insurance.card || '—'" :hint="mine.policy ? `تنتهي ${mine.policy.to}` : ''" color="p" /></div>
     </div>
   </template>
@@ -24,7 +24,7 @@
     </div>
     <div class="card">
       <h3>الموظفون</h3>
-      <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th>الشركة</th><th>فئة الباقة</th><th>تابعو الباقة</th><th>الوثيقة</th><th>الفئة الفعلية</th><th>التابعون</th><th>البطاقة</th><th /></tr></thead>
+      <div v-dt class="tw"><table><thead><tr><th>الموظف</th><th>الشركة</th><th>فئة التصنيف</th><th>تابعو التصنيف</th><th>الوثيقة</th><th>الفئة الفعلية</th><th>التابعون</th><th>البطاقة</th><th /></tr></thead>
         <tbody><tr v-for="m in members" :key="m.employee.id"><td><b>{{ m.employee.name }}</b></td><td class="small">{{ m.company }}</td><td>{{ m.tier_class || '—' }}</td><td>{{ m.tier_dependents ?? '—' }}</td>
           <td>{{ policyName(m.insurance?.policy_id) }}</td><td>{{ m.insurance?.class || '—' }}</td><td>{{ m.insurance?.dependents ?? '—' }}</td><td class="num">{{ m.insurance?.card || '—' }}</td>
           <td class="row" style="gap:4px;flex-wrap:nowrap"><button v-if="auth.isHr" class="btn sec xs" @click="mf = { employee: m.employee, policy_id: m.insurance?.policy_id || policies.find((p) => p.company_id === m.company_id)?.id, class: m.insurance?.class || m.tier_class, dependents: m.insurance?.dependents ?? m.tier_dependents, card: m.insurance?.card || '' }">{{ m.insurance ? 'تعديل' : 'إضافة' }}</button><button v-if="auth.isHr && m.insurance" class="btn ghost xs bad" @click="removeMember(m)">إلغاء</button></td></tr></tbody></table></div>

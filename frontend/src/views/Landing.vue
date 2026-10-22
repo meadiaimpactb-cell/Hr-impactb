@@ -3,7 +3,7 @@
     <!-- ============================================================ nav -->
     <header class="nav">
       <div class="wrap nav-in">
-        <a href="/" class="brand"><img src="/logo-full.png" alt="وادي الأثر المالية — Impact Valley Capital" /></a>
+        <a href="/" class="brand"><img src="/logo-hc.png" alt="HC — إدارة رأس المال البشري" /></a>
         <nav class="links">
           <a href="#features">المزايا</a>
           <a href="#app">التطبيق</a>
@@ -176,7 +176,7 @@
         <div>
           <span class="kicker">الأمان والتكامل</span>
           <h2>بُني ليخدم مجموعة مالية</h2>
-          <p class="lead2">كل شيء في HC بيانات قابلة للضبط: السياسات، مسارات الاعتماد، أنواع الطلبات، الباقات. لا شيء مثبّت في الكود.</p>
+          <p class="lead2">كل شيء في HC بيانات قابلة للضبط: السياسات، مسارات الاعتماد، أنواع الطلبات، التصنيفات. لا شيء مثبّت في الكود.</p>
           <div class="sec-list">
             <div v-for="s in security" :key="s.t"><div class="ico sm" :style="{ '--c': s.c }" v-html="s.i"></div><div><h3>{{ s.t }}</h3><p>{{ s.d }}</p></div></div>
           </div>

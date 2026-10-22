@@ -1,7 +1,7 @@
 <template>
   <div class="page-h">
     <div><h1>مركز التنزيل</h1><p>كل ملف تصدّره من النظام يُحفظ هنا تلقائيًا، فتعيد تنزيله في أي وقت خلال {{ keepDays }} يومًا.</p></div>
-    <div class="acts"><MonthPicker v-model="month" label="تصفية بالشهر" allow-empty /><select v-model="co" class="in" style="width:auto" title="تصفية بالشركة"><option value="">كل الشركات</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.name">{{ c.name }}</option></select><input v-model.trim="q" class="in" placeholder="بحث باسم الملف أو الموظف أو الشركة" style="width:240px" /></div>
+    <div class="acts"><MonthPicker v-model="month" label="تصفية بالشهر" allow-empty /><select v-model="co" class="in" style="width:auto" title="تصفية بالشركة"><option value="">كل الشركات</option><option v-for="c in auth.meta?.companies || []" :key="c.id" :value="c.id">{{ c.name }}</option></select><label v-if="auth.has('super', 'hr_mgr')" class="chk small" title="سجل تصدير كل المستخدمين (§116)"><input v-model="all" type="checkbox" @change="load" /> كل المستخدمين</label><input v-model.trim="q" class="in" placeholder="بحث باسم الملف أو الموظف أو الشركة" style="width:240px" /></div>
   </div>
 
   <div class="tabs">
@@ -18,7 +18,7 @@
     <div v-else class="tw"><table class="dl">
       <thead><tr><th>الملف</th><th>المصدر</th><th>الحالة</th><th style="width:120px">إجراء</th></tr></thead>
       <tbody><tr v-for="f in shown" :key="f.id">
-        <td><div class="row" style="gap:10px;flex-wrap:nowrap"><span class="fic"><Icon name="sheet" :size="18" /></span><div><b>{{ f.name }}</b><div class="tiny muted num">{{ fmtDT(f.created_at) }} · {{ size(f.size) }}</div></div></div></td>
+        <td><div class="row" style="gap:10px;flex-wrap:nowrap"><span class="fic"><Icon name="sheet" :size="18" /></span><div><b>{{ f.name }}</b><div class="tiny muted num">{{ fmtDT(f.created_at) }} · {{ size(f.size) }}<template v-if="f.period"> · الفترة {{ f.period }}</template><template v-if="f.company_id"> · {{ coName(f.company_id) }}</template><template v-if="f.user_name"> · صدّره {{ f.user_name }}</template></div></div></div></td>
         <td>{{ f.kind }}<div class="tiny muted">{{ f.format.toUpperCase() }} · {{ categories[f.category] || '' }}</div></td>
         <td><span class="ok small">جاهز للتنزيل</span></td>
         <td><div class="row" style="gap:6px;flex-wrap:nowrap">
@@ -42,12 +42,16 @@ const ui = useUi()
 const auth = useAuth()
 const files = ref([]); const categories = ref({}); const keepDays = ref(90)
 const tab = ref(''); const q = ref(''); const month = ref(''); const co = ref(''); const loading = ref(true); const busy = ref(null)
-const shown = computed(() => files.value.filter((f) => (!tab.value || f.category === tab.value) && (!month.value || String(f.created_at).startsWith(month.value)) && (!q.value || `${f.name} ${f.kind}`.includes(q.value)) && (!co.value || `${f.name} ${f.kind}`.includes(co.value))))
+const all = ref(false)
+const coName = (id) => (auth.meta?.companies || []).find((c) => c.id === id)?.name || ''
+// month = the period the file covers (else the export month); company = the file's company (else its name mentions it)
+const shown = computed(() => files.value.filter((f) => (!tab.value || f.category === tab.value) && (!month.value || (f.period || String(f.created_at).slice(0, 7)) === month.value)
+  && (!q.value || `${f.name} ${f.kind} ${f.user_name || ''}`.includes(q.value)) && (!co.value || f.company_id === co.value || (!f.company_id && `${f.name} ${f.kind}`.includes(coName(co.value))))))
 const size = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`)
 
 async function load() {
   loading.value = true
-  try { const r = await api.get('/exports'); files.value = r.files; categories.value = r.categories; keepDays.value = r.keep_days } finally { loading.value = false }
+  try { const r = await api.get('/exports', { params: { all: all.value ? 1 : undefined } }); files.value = r.files; categories.value = r.categories; keepDays.value = r.keep_days } finally { loading.value = false }
 }
 async function download(f) {
   busy.value = f.id

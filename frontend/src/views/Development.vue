@@ -145,7 +145,7 @@ import { money } from '../utils'
 const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
 const COLOR = { planned: 'info', pending: 'warn', verified: 'ok', rejected: 'bad' }
-const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.emp && ['plan', 'خطتي السنوية'], auth.isApprover && ['plans', 'خطط الفريق'], auth.isApprover && ['all', 'سجلات الفريق'], auth.isApprover && ['board', 'لوحة التطوير ونجم الربع']].filter(Boolean))
+const tabs = computed(() => [auth.emp && ['mine', 'سجلي'], auth.emp && ['plan', 'خطتي السنوية'], auth.isApprover && auth.canView('DEV') && ['plans', 'خطط الفريق'], auth.isApprover && auth.canView('DEV') && ['all', 'سجلات الفريق'], auth.isApprover && auth.canView('DEV') && ['board', 'لوحة التطوير ونجم الربع']].filter(Boolean))
 // §77: individual development plan for the year, agreed with the direct manager
 const plan = ref(null); const plans = ref([]); const planYear = ref(new Date().getFullYear())
 const PLAN_COLOR = { none: 'gray', draft: 'info', submitted: 'warn', approved: 'ok', returned: 'bad' }

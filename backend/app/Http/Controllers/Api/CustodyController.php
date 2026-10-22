@@ -28,9 +28,28 @@ class CustodyController extends Controller
 {
     private function acc(Request $r): Access { return Access::for($r->user()); }
 
-    private function canManage(Request $r, ?int $companyId = null): bool
+    private function canManage(Request $r, ?int $companyId = null, ?CustodyItem $item = null, ?int $employeeId = null): bool
     {
-        return $this->acc($r)->can('CUS', 'edit', $companyId ? ['company_id' => $companyId] : []);
+        $acc = $this->acc($r);
+        if ($acc->can('CUS', 'edit', $companyId ? ['company_id' => $companyId] : [])) {
+            return true;
+        }
+        // owner's note: finance also hands and takes back cash custody, and the direct manager his own team's custody
+        if ($item && $item->type?->is_cash && $r->user()->hasRole('fin') && in_array((int) $item->company_id, array_map('intval', $acc->companyIds()), true)) {
+            return true;
+        }
+        $emp = $employeeId ? \App\Models\Employee::find($employeeId) : $item?->employee;
+
+        return $emp && $acc->isManagerOf($emp) && (! $companyId || (int) $emp->company_id === (int) $companyId);
+    }
+
+    /** Companies whose available stock this user may hand out: his team's companies (manager), cash custody (finance). */
+    private function handCompanies(Request $r): array
+    {
+        $u = $r->user();
+        $ids = $u->employee_id ? \App\Models\Employee::where('manager_id', $u->employee_id)->distinct()->pluck('company_id')->all() : [];
+
+        return array_values(array_unique(array_map('intval', [...$ids, ...($u->hasRole('fin') ? $this->acc($r)->companyIds() : [])])));
     }
 
     // ---------------- types ----------------
@@ -60,8 +79,12 @@ class CustodyController extends Controller
         }
         $empIds = $acc->canAny('CUS', 'view') ? $acc->employees('CUS')->pluck('id') : collect([$request->user()->employee_id]);
 
+        $team = $request->user()->employee_id ? \App\Models\Employee::where('manager_id', $request->user()->employee_id)->pluck('id') : collect();
+        $hand = $this->handCompanies($request);
+
         return CustodyItem::with('type:id,name,requires_ack,has_secret,is_cash', 'company:id,name', 'employee:id,name,emp_no')
-            ->where(fn ($q) => $q->whereIn('company_id', $companies)->orWhereIn('employee_id', $empIds))
+            ->where(fn ($q) => $q->whereIn('company_id', $companies)->orWhereIn('employee_id', $empIds)->orWhereIn('employee_id', $team)
+                ->orWhere(fn ($q) => $q->where('status', 'available')->whereIn('company_id', $hand)))
             ->when($acc->focus(), fn ($q, $f) => $q->where('company_id', $f))
             ->when($request->input('status'), fn ($q, $s) => $q->where('status', $s))
             ->when($request->integer('company_id'), fn ($q, $c) => $q->where('company_id', $c))
@@ -81,14 +104,16 @@ class CustodyController extends Controller
     {
         $item->load('type', 'company:id,name', 'employee:id,name,emp_no');
         $u = $request->user();
-        abort_unless($u->employee_id === $item->employee_id || $this->acc($request)->can('CUS', 'view', ['company_id' => $item->company_id]), 403);
+        abort_unless($u->employee_id === $item->employee_id || $this->acc($request)->can('CUS', 'view', ['company_id' => $item->company_id]) || $this->canManage($request, $item->company_id, $item)
+            || ($item->status === 'available' && in_array((int) $item->company_id, $this->handCompanies($request), true)), 403);
 
         return $this->row($item) + [
             'history' => $item->history, 'fields' => $item->fields, 'condition' => $item->condition,
             'has_secret' => (bool) $item->secret, 'secret_rotated_at' => $item->secret_rotated_at,
             'secret_logs' => $this->acc($request)->can('SEC', 'view') ? $item->secretLogs()->with('user:id,name')->limit(20)->get() : [],
             'claims' => $item->claims()->latest()->get(),
-            'can_manage' => $this->canManage($request, $item->company_id),
+            'can_manage' => $this->canManage($request, $item->company_id, $item),
+            'can_hand' => $item->status === 'available' && ($this->canManage($request, $item->company_id, $item) || in_array((int) $item->company_id, $this->handCompanies($request), true)),
             'can_reveal' => (bool) $item->secret && $this->acc($request)->can('SEC', 'view'),
             'can_set_secret' => $item->type->has_secret && $this->acc($request)->can('SEC', 'edit'),
             // §43 acknowledgement: the undertaking to accept (pending) or the one accepted, with time and device
@@ -131,7 +156,7 @@ class CustodyController extends Controller
     /** Hand an available item to an employee. Requires ack unless the type says otherwise. */
     public function hand(Request $request, CustodyItem $item)
     {
-        abort_unless($this->canManage($request, $item->company_id), 403);
+        abort_unless($this->canManage($request, $item->company_id, $item, $request->integer('employee_id') ?: null), 403, 'تسلّم العهدة لموظفي فريقك فقط');
         abort_unless($item->status === 'available', 422, 'العهدة ليست متاحة للتسليم');
         $d = $request->validate(['employee_id' => ['required', \Illuminate\Validation\Rule::exists('employees', 'id')->where('company_id', $item->company_id)], 'purpose_end' => 'nullable|date'], ['employee_id.exists' => 'الموظف ليس من موظفي الشركة المالكة للعهدة']);
         $item->employee_id = $d['employee_id'];
@@ -140,7 +165,7 @@ class CustodyController extends Controller
             $item->purpose_end = $d['purpose_end'] ?? null;
             $item->ack_text = $item->ack_at = $item->ack_device = $item->ack_ip = null;
         }
-        $item->status = $item->type->requires_ack ? 'pending_ack' : 'in_use';
+        $item->status = $item->type->requires_ack || $item->type->is_cash ? 'pending_ack' : 'in_use'; // §43–44: cash custody is always acknowledged
         $item->log($item->status === 'pending_ack' ? 'طلب تسليم' : 'تسليم', null, $d['employee_id']);
         $item->save();
         Audit::log('custody_items', $item->id, 'hand', null, ['employee' => $d['employee_id']]);
@@ -180,7 +205,8 @@ class CustodyController extends Controller
         $item->status = 'return_requested';
         $item->log('طلب استرداد', $request->input('note'));
         $item->save();
-        Audit::notify(Access::hrUsersFor($item->company_id), 'طلب استرداد عهدة', $request->user()->name.' — '.$item->ident, 'info', ['screen' => 'custody']);
+        $mgr = $item->employee?->manager_id ? \App\Models\User::where('employee_id', $item->employee->manager_id)->value('id') : null;
+        Audit::notify(array_values(array_filter([...Access::hrUsersFor($item->company_id, 'CUS'), ...Access::usersWithRole('custodian'), $mgr])), 'طلب إعادة عهدة', $request->user()->name.' — '.$item->ident.': استلمها للفحص', 'approval', ['screen' => 'custody']);
 
         return $this->refresh($item);
     }
@@ -188,7 +214,7 @@ class CustodyController extends Controller
     /** HR/custodian takes the item back for inspection (from in_use or return_requested). */
     public function receive(Request $request, CustodyItem $item)
     {
-        abort_unless($this->canManage($request, $item->company_id), 403);
+        abort_unless($this->canManage($request, $item->company_id, $item), 403);
         abort_unless(in_array($item->status, ['in_use', 'return_requested'], true), 422);
         $item->status = 'inspecting';
         $item->log('استلام للفحص');
@@ -200,7 +226,7 @@ class CustodyController extends Controller
     /** Close the inspection: back to stock, or lost, or damaged (§43; no automatic deduction — §41 needs proven liability). */
     public function close(Request $request, CustodyItem $item)
     {
-        abort_unless($this->canManage($request, $item->company_id), 403);
+        abort_unless($this->canManage($request, $item->company_id, $item), 403);
         abort_unless($item->status === 'inspecting', 422, 'يجب استلام العهدة للفحص أولًا');
         $d = $request->validate(['result' => 'required|in:ok,lost,damaged', 'note' => 'required|string|max:500']);
         $prev = $item->employee_id;
@@ -215,7 +241,7 @@ class CustodyController extends Controller
 
     public function transfer(Request $request, CustodyItem $item)
     {
-        abort_unless($this->canManage($request, $item->company_id), 403);
+        abort_unless($this->canManage($request, $item->company_id, $item) && $this->canManage($request, $item->company_id, $item, $request->integer('employee_id') ?: null), 403);
         abort_unless($item->status === 'in_use', 422);
         $d = $request->validate(['employee_id' => ['required', 'not_in:'.$item->employee_id, \Illuminate\Validation\Rule::exists('employees', 'id')->where('company_id', $item->company_id)]], ['employee_id.exists' => 'الموظف ليس من موظفي الشركة المالكة للعهدة']);
         $item->log('نقل من '.($item->employee?->name ?? '—'), null, $d['employee_id']);
@@ -223,7 +249,7 @@ class CustodyController extends Controller
         if (CustodyItem::hasDeadlineColumns()) {
             $item->ack_text = $item->ack_at = $item->ack_device = $item->ack_ip = null;
         }
-        $item->status = $item->type->requires_ack ? 'pending_ack' : 'in_use';
+        $item->status = $item->type->requires_ack || $item->type->is_cash ? 'pending_ack' : 'in_use';
         $item->save();
         Audit::log('custody_items', $item->id, 'transfer', null, ['to' => $d['employee_id']]);
         $this->notifyEmployee($d['employee_id'], 'عهدة منقولة إليك بانتظار إقرارك', $item->ident);
@@ -296,7 +322,9 @@ class CustodyController extends Controller
                 throw ValidationException::withMessages(['invoices' => 'مجموع الفواتير يتجاوز الحد المعتمد مسبقًا ('.number_format($item->value + $item->overspend_limit, 2).')']);
             }
         }
-        $path = $request->file('attachment')?->store('claims/'.now()->format('Y/m'), 'local');
+        // §44: the settlement is documented by the original invoices — the scanned invoices are attached to it
+        $request->validate(['attachment' => 'required|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic'], ['attachment.required' => 'أرفق صور الفواتير والمستندات المؤيدة للتسوية (§44)']);
+        $path = $request->file('attachment')->store('claims/'.now()->format('Y/m'), 'local');
         // status set explicitly: Eloquent does not read the column default back into the in-memory model
         $c = ExpenseClaim::create(['custody_item_id' => $item->id, 'employee_id' => $e->id, 'details' => $d['details'], 'invoices' => $d['invoices'],
             'claimed' => $claimed, 'status' => 'pending_finance', 'attachment_path' => $path]);

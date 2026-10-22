@@ -9,6 +9,8 @@ export const useAuth = defineStore('auth', {
     isHr: (s) => (s.user?.roles || []).some((r) => ['super', 'hr_mgr', 'hr_staff'].includes(r)),
     isAdmin: (s) => (s.user?.roles || []).some((r) => ['super', 'hr_mgr'].includes(r)),
     isApprover: (s) => (s.user?.roles || []).some((r) => r !== 'emp') || s.user?.has_reports,
+    // may the user see others' records in this area (team / scope)? (older sessions without the list: yes)
+    canView: (s) => (op) => !s.user?.can_view || s.user.can_view.includes(op) || !!s.user?.has_reports,
   },
   actions: {
     has(...r) { return this.roles.some((x) => r.includes(x)) },

@@ -106,9 +106,38 @@ class ApprovalService
             }
             $req->save();
             Audit::notify(self::approvers($req), 'طلب '.self::label($type).' بانتظار اعتمادك', $e->name.' — '.self::summary($req), 'approval', ['screen' => 'approvals'], $req->id);
+            $owner = User::where('employee_id', $e->id)->where('active', true)->value('id');
+            if ($owner && $owner !== auth()->id()) { // filed on his behalf (HR / manager) — he is told what was filed and by whom
+                Audit::notify($owner, 'قُدّم طلب '.self::label($type).' باسمك', self::summary($req).' — قدّمه '.(auth()->user()?->name ?? 'النظام'), 'info', ['screen' => 'requests'], $req->id);
+            }
 
             return $req;
         });
+    }
+
+    /** §87: the employee who referred a hire is rewarded once the hire passes probation (referralBonus, paid with the next payroll). */
+    public static function referralBonus(\App\Models\Employee $e, ApprovalRequest $r): void
+    {
+        $app = \App\Models\Application::where('employee_id', $e->id)->whereNotNull('referred_by')->first();
+        $ref = $app ? \App\Models\Employee::where('status', 'active')->find($app->referred_by) : null;
+        $amount = $ref ? (float) Settings::get('referralBonus', $ref->company_id, 1000) : 0;
+        if (! $ref || $amount <= 0 || $ref->id === $e->id || \App\Models\Incentive::where('kind', 'bonus')->where('employee_id', $ref->id)->where('detail', 'like', '%#'.$app->id.')')->exists()) {
+            return;
+        }
+        $inc = \App\Models\Incentive::create(['employee_id' => $ref->id, 'company_id' => $ref->company_id, 'kind' => 'bonus', 'title' => 'مكافأة إحالة توظيف',
+            'detail' => $e->name.' اجتاز فترة التجربة (طلب التوظيف #'.$app->id.')', 'amount' => $amount, 'points' => 0, 'period' => now()->format('Y-m'), 'given_by' => auth()->id(), 'request_id' => $r->id]);
+        $ref->addCareer('مكافأة إحالة توظيف', number_format($amount).' ر.س — '.$e->name);
+        Audit::notify(User::where('employee_id', $ref->id)->value('id'), 'مكافأة إحالة توظيف', 'اجتاز '.$e->name.' فترة التجربة — '.number_format($amount).' ر.س مع راتب '.$inc->period.' (§87)', 'ok', ['screen' => 'payroll']);
+        Audit::notify(Access::usersWithRole('fin'), 'مكافأة إحالة تُصرف مع الراتب', $ref->name.' — '.number_format($amount).' ر.س', 'info', ['screen' => 'payroll']);
+    }
+
+    /** §49–50: a company moves to its new classification and its employees' benefits follow. */
+    public static function applyTier(Company $co, \App\Models\Tier $tier, string $why): void
+    {
+        $before = $co->tier_id;
+        $co->update(['tier_id' => $tier->id, 'next_tier_id' => null, 'next_tier_from' => null]);
+        Audit::log('companies', $co->id, 'tier', ['tier_id' => $before], ['tier_id' => $tier->id], $why);
+        BenefitSync::syncCompanies([$co->id], 'تصنيف الشركة: '.$tier->name.' — '.$why);
     }
 
     /**
@@ -117,10 +146,21 @@ class ApprovalService
      */
     public static function skipStages(ApprovalRequest $r): void
     {
-        while ($r->stage < count($r->flow) && ($r->flow[$r->stage]['role'] ?? null) === 'ceo') {
-            $ceoEmp = Company::find($r->company_id)?->ceo_employee_id;
-            $ceoUser = $ceoEmp ? User::where('employee_id', $ceoEmp)->where('active', true)->first() : null;
-            $why = ! $ceoUser ? 'لا يوجد رئيس تنفيذي للشركة' : ($ceoEmp === $r->employee_id ? 'مقدم الطلب هو الرئيس التنفيذي للشركة' : ($ceoUser->hasRole('super') ? 'الرئيس التنفيذي للشركة هو الرئيس التنفيذي للمجموعة (يعتمد في المرحلة الأخيرة)' : null));
+        while ($r->stage < count($r->flow)) {
+            $why = null;
+            if (($r->flow[$r->stage]['role'] ?? null) === 'ceo') {
+                $ceoEmp = Company::find($r->company_id)?->ceo_employee_id;
+                $ceoUser = $ceoEmp ? User::where('employee_id', $ceoEmp)->where('active', true)->first() : null;
+                // the group CEO acting as company CEO is skipped only when he approves again at a later stage of the same flow
+                $laterSuper = collect(array_slice($r->flow, $r->stage + 1))->contains(fn ($s) => ($s['role'] ?? null) === 'super');
+                $why = ! $ceoUser ? 'لا يوجد رئيس تنفيذي للشركة' : ($ceoEmp === $r->employee_id ? 'مقدم الطلب هو الرئيس التنفيذي للشركة' : ($ceoUser->hasRole('super') && $laterSuper ? 'الرئيس التنفيذي للشركة هو الرئيس التنفيذي للمجموعة (يعتمد في المرحلة الأخيرة)' : null));
+            }
+            // appendix 5: whoever prepared a request on someone's behalf has done his own stage by filing it — when he is the
+            // only person of that stage it is passed, instead of letting him approve his own submission (§10)
+            $requester = User::where('employee_id', $r->employee_id)->value('id');
+            if (! $why && $r->created_by && $r->created_by !== $requester && self::candidates($r) === [(int) $r->created_by]) {
+                $why = 'مُعِدّ الطلب هو صاحب هذه المرحلة — تُحتسب بتقديمه';
+            }
             if (! $why) {
                 return;
             }
@@ -151,26 +191,13 @@ class ApprovalService
         if (! $st) {
             return [];
         }
-        $e = $r->relationLoaded('employee') ? $r->employee : $r->employee()->first();
-        $cid = $r->company_id;
-        $ids = match ($st['role']) {
-            // §12: the direct manager decides the first stage; with no (active) manager the request goes to the group CEO (§11)
-            'mgr' => ($e?->manager_id && ($u = User::where('employee_id', $e->manager_id)->where('active', true)->value('id'))) ? [$u] : Access::usersWithRole('super'),
-            'custodian' => Access::usersWithRole('custodian') ?: self::hrApprovers($r),
-            'board' => Access::usersWithRole('board'),
-            'hr' => self::hrApprovers($r),
-            'hr_staff' => self::hrApprovers($r, staffOnly: true) ?: Access::usersWithRole('hr_mgr'),
-            'hr_mgr' => Access::hrManagersFor($cid),
-            'ceo' => ($ceo = Company::find($cid)?->ceo_employee_id) && ($u = User::where('employee_id', $ceo)->value('id')) ? [$u] : Access::usersWithRole('super'),
-            'fin' => Access::usersWithRole('fin'),
-            'super' => Access::usersWithRole('super'),
-            'user' => [$st['user_id'] ?? 0],
-            default => [],
-        };
+        $ids = self::candidates($r, $stage);
+        // §10: nobody approves a request about himself, nor one he filed on someone else's behalf
         $requester = User::where('employee_id', $r->employee_id)->value('id');
-        $ids = array_values(array_diff($ids, [$requester]));
+        $excluded = array_values(array_filter([$requester, $r->created_by ? (int) $r->created_by : null]));
+        $ids = array_values(array_diff($ids, $excluded));
         if (! $ids) { // conflict of interest → escalate (§10); the group CEO's own matters go to the board chair, recorded by HR when no board account exists
-            $ids = array_values(array_diff(Access::usersWithRole('super'), [$requester])) ?: array_values(array_diff([...Access::usersWithRole('board'), ...Access::usersWithRole('hr_mgr')], [$requester]));
+            $ids = array_values(array_diff(Access::usersWithRole('super'), $excluded)) ?: array_values(array_diff([...Access::usersWithRole('board'), ...Access::usersWithRole('hr_mgr')], $excluded));
         }
         // §11: a delegation is limited to its company, operations and amount cap
         $amount = (float) ($r->data['amount'] ?? $r->data['estimate'] ?? 0);
@@ -179,7 +206,35 @@ class ApprovalService
                 && (empty($d->company_id) || (int) $d->company_id === (int) $r->company_id)
                 && ($d->amount_cap === null || $amount <= (float) $d->amount_cap))->pluck('to_user_id')->all();
 
-        return array_values(array_diff(array_unique([...$ids, ...$delegates]), [$requester]));
+        return array_values(array_diff(array_unique([...$ids, ...$delegates]), $excluded));
+    }
+
+    /** The people of a stage by role, before conflict-of-interest exclusions and delegations. */
+    public static function candidates(ApprovalRequest $r, ?int $stage = null): array
+    {
+        $stage ??= $r->stage;
+        $st = $r->flow[$stage] ?? null;
+        if (! $st) {
+            return [];
+        }
+        $e = $r->relationLoaded('employee') ? $r->employee : $r->employee()->first();
+        $cid = $r->company_id;
+
+        return array_map('intval', match ($st['role']) {
+            // §12: the direct manager decides the first stage; with no (active) manager the request goes to the group CEO (§11)
+            'mgr' => ($e?->manager_id && ($u = User::where('employee_id', $e->manager_id)->where('active', true)->value('id'))) ? [$u] : Access::usersWithRole('super'),
+            'custodian' => Access::usersWithRole('custodian') ?: self::hrApprovers($r),
+            'board' => Access::usersWithRole('board'),
+            'hr' => self::hrApprovers($r),
+            'hr_staff' => self::hrApprovers($r, staffOnly: true) ?: Access::usersWithRole('hr_mgr'),
+            'hr_mgr' => Access::hrManagersFor($cid),
+            // a deactivated company CEO does not hold requests: they go to the group CEO (§11)
+            'ceo' => ($ceo = Company::find($cid)?->ceo_employee_id) && ($u = User::where('employee_id', $ceo)->where('active', true)->value('id')) ? [$u] : Access::usersWithRole('super'),
+            'fin' => Access::usersWithRole('fin'),
+            'super' => Access::usersWithRole('super'),
+            'user' => [$st['user_id'] ?? 0],
+            default => [],
+        });
     }
 
     /**
@@ -255,8 +310,25 @@ class ApprovalService
         if ($handler === 'leave') {
             $d['days'] = LeaveService::days($d['from'], $d['to'], $e->loadMissing('schedule'));
         } elseif ($handler === 'trip') {
-            $d['days'] = Carbon::parse($d['from'])->diffInDays(Carbon::parse($d['to'])) + 1;
-            $d = array_merge($d, \App\Http\Controllers\Api\RequestController::tripRates($e, (int) $d['days']));
+            $old = $r->data;
+            $d['days'] = (int) Carbon::parse($d['from'])->diffInDays(Carbon::parse($d['to'])) + 1;
+            $diemDays = $d['days'] === 1 && (float) ($d['hours'] ?? 0) < 10 ? 0 : $d['days']; // §67
+            $d = array_merge($d, \App\Http\Controllers\Api\RequestController::tripRates($e, $diemDays), ['diem_days' => $diemDays]);
+            $d['hotel_total_cap'] = round((float) $d['hotel_cap'] * max(0, $d['days'] - 1), 2);
+            if (! isset($before['estimate']) && (int) ($old['days'] ?? 0) !== $d['days']) {
+                // new dates → the estimate follows: the daily allowance is recomputed and the lodging scaled to the new number of nights
+                $est = (float) ($old['estimate'] ?? 0);
+                $allowOld = (float) ($old['cost_allowance'] ?? $old['allowance_total'] ?? 0);
+                $d['cost_allowance'] = (float) $d['allowance_total'];
+                $est += $d['cost_allowance'] - $allowOld;
+                $nightsOld = max(0, (int) ($old['days'] ?? 1) - 1);
+                if (! empty($old['cost_lodging']) && $nightsOld > 0 && ! isset($before['cost_lodging'])) {
+                    $d['cost_lodging'] = round((float) $old['cost_lodging'] / $nightsOld * max(0, $d['days'] - 1), 2);
+                    $est += $d['cost_lodging'] - (float) $old['cost_lodging'];
+                }
+                $before['estimate'] = $old['estimate'] ?? null;
+                $d['estimate'] = round(max(0, $est), 2);
+            }
         } elseif ($handler === 'advance') {
             $d['installments'] = max(1, (int) $d['installments']);
             $d['monthly'] = round($d['amount'] / $d['installments'], 2);
@@ -362,6 +434,9 @@ class ApprovalService
                     }
                 }
                 $e->addCareer('إجازة معتمدة', ($d['type_name'] ?? $d['type'])." {$d['days']} يوم ({$d['from']} → {$d['to']})");
+                if ($d['type'] === 'maternity' && ! $e->nursing_until) { // §60: the daily nursing hour runs for 24 months from the birth
+                    $e->forceFill(['nursing_until' => Carbon::parse($d['event_date'] ?? $d['from'])->addMonths(24)->toDateString()])->save();
+                }
                 if (! empty($d['substitute_id']) && ($sub = User::where('employee_id', $d['substitute_id'])->value('id'))) {
                     Audit::notify($sub, 'أنت البديل خلال إجازة '.$e->name, "من {$d['from']} إلى {$d['to']}: تستلم المهام الطارئة".(! empty($d['handover']) ? ' — '.$d['handover'] : ''), 'info', ['screen' => 'requests']);
                 }
@@ -442,12 +517,15 @@ class ApprovalService
                 $co = \App\Models\Company::find((int) $d['company']);
                 $tier = \App\Models\Tier::where('name', $d['tier'])->first() ?? \App\Models\Tier::where('code', ['تأسيس' => 'tasis', 'تمكين' => 'tamkeen', 'أثر' => 'athar'][$d['tier']] ?? '')->first();
                 if ($co && $tier) {
-                    $before = $co->tier_id;
-                    $co->update(['tier_id' => $tier->id]);
-                    Audit::log('companies', $co->id, 'tier', ['tier_id' => $before], ['tier_id' => $tier->id], 'طلب تصنيف #'.$r->id.' — بطاقة الأداء '.$d['achievement'].'%');
-                    $users = User::whereIn('employee_id', \App\Models\Employee::where('company_id', $co->id)->pluck('id'))->pluck('id')->all();
-                    BenefitSync::syncCompanies([$co->id], 'تصنيف الشركة: '.$tier->name.' (طلب #'.$r->id.')');
-                    Audit::notify($users, 'تصنيف شركتك للسنة الجديدة: '.$tier->name, 'يسري من '.$d['effective'].' وتتحدث مزاياك تلقائيًا (§49–50)', 'info', ['screen' => 'dashboard']);
+                    $users = User::whereIn('employee_id', \App\Models\Employee::where('company_id', $co->id)->pluck('id'))->where('active', true)->pluck('id')->all();
+                    $eff = $d['effective'] ?? now()->toDateString();
+                    if ($eff > now()->toDateString()) { // §49: the new classification takes effect on its date (the next benefits year), not on approval
+                        $co->update(['next_tier_id' => $tier->id, 'next_tier_from' => $eff]);
+                        Audit::log('companies', $co->id, 'tier_scheduled', null, ['next_tier_id' => $tier->id, 'from' => $eff], 'طلب تصنيف #'.$r->id.' — بطاقة الأداء '.$d['achievement'].'%');
+                    } else {
+                        self::applyTier($co, $tier, 'طلب تصنيف #'.$r->id.' — بطاقة الأداء '.$d['achievement'].'%');
+                    }
+                    Audit::notify($users, 'تصنيف شركتك للسنة الجديدة: '.$tier->name, 'يسري من '.\Illuminate\Support\Carbon::parse($eff)->format('d/m/Y').' وتتحدث مزاياك تلقائيًا في ذلك التاريخ (§49–50)', 'info', ['screen' => 'dashboard']);
                 }
                 break;
             case 'ticket':
@@ -499,10 +577,15 @@ class ApprovalService
                 if (str_contains($d['decision'], 'تثبيت')) {
                     $e->forceFill(['probation_status' => 'confirmed', 'confirmed_at' => $d['effective']])->save();
                     $e->addCareer('تثبيت بعد التجربة', $d['decision'].' من '.$d['effective']);
+                    self::referralBonus($e, $r);
                 } else {
                     $e->forceFill(['probation_status' => 'ended'])->save();
                     $e->addCareer('إنهاء خلال التجربة', 'من '.$d['effective'].' — '.($d['notes'] ?? ''));
-                    Audit::notify(Access::hrManagersFor($e->company_id), 'إنهاء عقد خلال التجربة معتمد', $e->name.' — افتح ملف إنهاء الخدمة واستكمل الإخلاء والتسوية', 'approval', ['screen' => 'terminations']);
+                    // §21/§110: the end-of-service case opens by itself — no notice period and no end-of-service award during probation
+                    if (! \App\Models\Termination::where('employee_id', $e->id)->whereIn('status', \App\Models\Termination::LIVE)->exists()) {
+                        app(\App\Http\Controllers\Api\TerminationController::class)->createCase($e, 'probation', $d['effective'] ?? now()->toDateString(), 'إنهاء خلال فترة التجربة — طلب #'.$r->id, $r->created_by, $r->id);
+                    }
+                    Audit::notify(Access::hrManagersFor($e->company_id), 'إنهاء عقد خلال التجربة معتمد', $e->name.' — فُتح ملف إنهاء الخدمة: استكمل الإخلاء والتسوية', 'approval', ['screen' => 'terminations']);
                 }
                 break;
             case 'probation_shorten':

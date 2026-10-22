@@ -35,6 +35,14 @@ async function keepCopy(blob, name, opts) {
     fd.append('name', shown.slice(0, 200))
     fd.append('kind', kind)
     fd.append('category', opts.category || CATEGORY_BY_PATH.find(([re]) => re.test(location.pathname))?.[1] || 'reports')
+    // the period the file covers and its company, so the download centre filters by them (owner's note)
+    const period = opts.period || (String(name).match(/(20\d{2})[-/](0[1-9]|1[0-2])/) || []).slice(1, 3).join('-')
+    if (/^\d{4}-\d{2}$/.test(period)) fd.append('period', period)
+    try {
+      const { useUi } = await import('./stores/ui')
+      const cid = opts.company_id || useUi().company
+      if (cid) fd.append('company_id', cid)
+    } catch { /* no store */ }
     await fetch('/api/v1/exports', { method: 'POST', body: fd, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
   } catch { /* ignore */ }
 }
@@ -153,10 +161,13 @@ export async function readXlsx(file) {
 // employee's obligations (axis, task, KPI) pre-filled on grey and locked, white columns for the employee.
 // As in the approved file: a long achievement continues over extra rows under the same task, and one
 // achievement shared by several tasks of an axis is a single merged cell. A hidden column holds the item number.
-export const REPORT_COLS = ['الوظيفة', 'المحور', 'المهام الوظيفية', 'المنجز', 'المؤشرات الوظيفية', 'إنجاز المؤشر', 'مستهدفات الشهر القادم', 'العقبات', 'الحلول', 'ملاحظات', 'رقم البند']
-const WIDTHS = [18, 20, 40, 70, 34, 34, 30, 26, 26, 24, 9]
-const FIELDS = [null, null, null, 'achieved', null, 'kpi_result', 'next_target', 'obstacles', 'solutions', 'notes'] // columns 4,6..10 are the employee's
-const FILL_COLS = [4, 6, 7, 8, 9, 10]
+// owner's note: the month's target (set with the manager) and the manager's notes travel with the form too (read-only columns)
+export const REPORT_COLS = ['الوظيفة', 'المحور', 'المهام الوظيفية', 'المنجز', 'المؤشرات الوظيفية', 'المستهدف الشهري', 'إنجاز المؤشر', 'مستهدفات الشهر القادم', 'العقبات', 'الحلول', 'ملاحظات', 'ملاحظات المدير', 'رقم البند']
+const WIDTHS = [18, 20, 40, 70, 34, 30, 34, 30, 26, 26, 24, 28, 9]
+const FIELDS = [null, null, null, 'achieved', null, 'target', 'kpi_result', 'next_target', 'obstacles', 'solutions', 'notes', 'mgr_note'] // columns 4 and 7..11 are the employee's
+const FILL_COLS = [4, 7, 8, 9, 10, 11]
+const ID_COL = 13
+const LAST_COL = 12
 const LINE_PT = 15
 const MAX_ROW_PT = 400 // Excel caps a row at 409 points
 const MAX_LINES = Math.floor((MAX_ROW_PT - 8) / LINE_PT)
@@ -198,7 +209,7 @@ export async function exportReportForm(info, items, opts = {}) {
   wb.creator = 'HC'
   wb.views = [{ rightToLeft: true }]
   await addReportSheet(wb, 'التقرير الشهري', info, items)
-  await deliver(wb, `نموذج التقرير الشهري ${info.period || ''} - ${info.name || ''}`.trim(), { kind: 'نموذج التقرير الشهري', category: 'forms', ...opts })
+  await deliver(wb, `نموذج التقرير الشهري ${info.period || ''} - ${info.name || ''}`.trim(), { kind: 'نموذج التقرير الشهري', category: 'forms', period: info.period, ...opts })
 }
 
 /** Several employees' reports in one workbook: one sheet per employee, each in the approved layout. list: [{ info, items }] */
@@ -214,7 +225,7 @@ export async function exportReportForms(list, name, opts = {}) {
     used.add(t)
     await addReportSheet(wb, t, info, items)
   }
-  await deliver(wb, name, { kind: 'التقارير الشهرية', category: 'reports', ...opts })
+  await deliver(wb, name, { kind: 'التقارير الشهرية', category: 'reports', period: list[0]?.info?.period, ...opts })
 }
 
 async function addReportSheet(wb, title, info, items) {
@@ -224,8 +235,8 @@ async function addReportSheet(wb, title, info, items) {
     headerFooter: { oddFooter: '&C&8صفحة &P من &N' },
   })
   WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w })
-  ws.getColumn(11).hidden = true
-  const last = 10
+  ws.getColumn(ID_COL).hidden = true
+  const last = LAST_COL
   const font = (o = {}) => ({ name: FONT, size: 11, ...o })
   const band = (r, value, style, height) => {
     ws.mergeCells(r, 1, r, last)
@@ -257,7 +268,7 @@ async function addReportSheet(wb, title, info, items) {
     })
   }
   const merge = (r1, c1, r2, c2) => { if (r2 > r1 || c2 > c1) ws.mergeCells(r1, c1, r2, c2) }
-  const fieldText = (it, c) => (c === 6 ? it.kpi_result || (it.pct ? `${it.pct}%` : '') : FIELDS[c - 1] ? it[FIELDS[c - 1]] || '' : '')
+  const fieldText = (it, c) => (c === 7 ? it.kpi_result || (it.pct ? `${it.pct}%` : '') : FIELDS[c - 1] ? it[FIELDS[c - 1]] || '' : '')
 
   // blocks: consecutive tasks of one axis sharing the same achievement form one merged block; otherwise one task per block
   const blocks = []
@@ -277,16 +288,16 @@ async function addReportSheet(wb, title, info, items) {
       const r1 = r
       parts.forEach((p, k) => {
         styleCell(r, 1, info.job || ''); styleCell(r, 2, it.axis || '')
-        for (let c = 3; c <= 10; c++) styleCell(r, c, c === 4 ? p : k === 0 ? (c === 3 ? it.title : c === 5 ? it.indicator : fieldText(it, c)) : '')
-        styleCell(r, 11, it.id || '')
+        for (let c = 3; c <= LAST_COL; c++) styleCell(r, c, c === 4 ? p : k === 0 ? (c === 3 ? it.title : c === 5 ? it.indicator : fieldText(it, c)) : '')
+        styleCell(r, ID_COL, it.id || '')
         ws.getRow(r).height = Math.min(MAX_ROW_PT + 9, Math.max(30, linesOf(p, WIDTHS[3]) * LINE_PT + 8))
         axisAt[r] = it.axis || ''
         r++
       })
       const r2 = r - 1
-      for (const c of [3, 5, 6, 7, 8, 9, 10]) merge(r1, c, r2, c)
+      for (const c of [3, 5, 6, 7, 8, 9, 10, 11, 12]) merge(r1, c, r2, c)
       // other columns taller than the achievement rows: grow the last row
-      const need = Math.max(...[[it.title, 2], [it.indicator, 4], [fieldText(it, 6), 5], [it.next_target, 6], [it.obstacles, 7], [it.solutions, 8], [it.notes, 9]].map(([t, c]) => linesOf(t, WIDTHS[c]) * LINE_PT + 8))
+      const need = Math.max(...[[it.title, 2], [it.indicator, 4], ...[6, 7, 8, 9, 10, 11, 12].map((c) => [fieldText(it, c), c - 1])].map(([t, c]) => linesOf(t, WIDTHS[c]) * LINE_PT + 8))
       let have = 0
       for (let x = r1; x <= r2; x++) have += ws.getRow(x).height
       if (need > have) ws.getRow(r2).height = Math.min(MAX_ROW_PT + 9, ws.getRow(r2).height + need - have)
@@ -295,16 +306,16 @@ async function addReportSheet(wb, title, info, items) {
       const r1 = r
       block.forEach((it) => {
         styleCell(r, 1, info.job || ''); styleCell(r, 2, it.axis || '')
-        for (let c = 3; c <= 10; c++) styleCell(r, c, c === 3 ? it.title : c === 5 ? it.indicator : fieldText(it, c))
-        styleCell(r, 11, it.id || '')
+        for (let c = 3; c <= LAST_COL; c++) styleCell(r, c, c === 3 ? it.title : c === 5 ? it.indicator : fieldText(it, c))
+        styleCell(r, ID_COL, it.id || '')
         ws.getRow(r).height = Math.max(30, linesOf(it.title, WIDTHS[2]) * LINE_PT + 8, linesOf(it.indicator, WIDTHS[4]) * LINE_PT + 8)
         axisAt[r] = it.axis || ''
         r++
       })
       const r2 = r - 1
       merge(r1, 4, r2, 4)
-      for (const c of [6, 7, 8, 9, 10]) if (block.every((it) => same(fieldText(it, c), fieldText(block[0], c)))) merge(r1, c, r2, c)
-      const need = Math.max(...[4, 6, 7, 8, 9, 10].map((c) => linesOf(fieldText(block[0], c), WIDTHS[c - 1]) * LINE_PT + 8))
+      for (const c of [6, 7, 8, 9, 10, 11, 12]) if (block.every((it) => same(fieldText(it, c), fieldText(block[0], c)))) merge(r1, c, r2, c)
+      const need = Math.max(...[4, 6, 7, 8, 9, 10, 11, 12].map((c) => linesOf(fieldText(block[0], c), WIDTHS[c - 1]) * LINE_PT + 8))
       let have = 0
       for (let x = r1; x <= r2; x++) have += ws.getRow(x).height
       if (need > have) {

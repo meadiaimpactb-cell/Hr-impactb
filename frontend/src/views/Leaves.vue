@@ -86,6 +86,7 @@
   <template v-if="tab === 'hol'">
     <div class="card">
       <div class="row mb" style="gap:8px;align-items:center"><h3 style="margin:0">العطلات الرسمية</h3><input v-model.number="hYear" type="number" class="in" style="width:100px" @change="load" /><span class="spacer" />
+        <button v-if="auth.has('super', 'hr_mgr')" class="btn sec sm" title="يحسب عيد الفطر وعيد الأضحى من تقويم أم القرى، ويوم التأسيس واليوم الوطني مع تعويض ما يقع منها في العطلة الأسبوعية" @click="genHolidays"><Icon name="calendar" :size="14" /> توليد عطلات {{ hYear }} (أم القرى)</button>
         <button v-if="auth.has('super', 'hr_mgr')" class="btn pri sm" @click="hf = { name: '', kind: 'eid', from: '', to: '', company_id: null }"><Icon name="plus" :size="14" /> عطلة</button></div>
       <p class="small muted">عيد الفطر 4 أيام، عيد الأضحى 4 أيام، اليوم الوطني، يوم التأسيس (§58). العطلة داخل الإجازة لا تُحتسب منها، ويُضاف لكل عيد يوم الشركة الإضافي بحسب فئتها.</p>
       <div v-if="!hols.length" class="empty">لا عطلات مسجلة لهذه السنة</div>
@@ -153,6 +154,13 @@ async function load() {
   }
   else if (tab.value === 'hol') hols.value = await api.get('/holidays', { params: { year: hYear.value } })
   else cal.value = await api.get('/leaves/calendar', { params: { month: month.value } })
+}
+async function genHolidays() {
+  try {
+    const r = await api.post('/holidays/generate', { year: hYear.value })
+    ui.toast(r.added.length ? `أُضيفت ${r.added.length} عطلة — راجع التواريخ مع إعلان رؤية الهلال` : 'عطلات هذه السنة مسجلة مسبقًا', 'ok', 7000)
+    hols.value = await api.get('/holidays', { params: { year: hYear.value } })
+  } catch (e) { ui.toast(e.message, 'bad') }
 }
 // balances: edit a cell in place, or download / upload a sheet of actual balances
 const balType = ref('annual'); const cell = ref(null)

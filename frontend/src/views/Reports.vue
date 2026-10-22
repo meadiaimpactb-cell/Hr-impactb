@@ -79,7 +79,7 @@
           <td><input v-model="picked" type="checkbox" :value="x.employee.id" /></td>
           <td><b>{{ x.employee.name }}</b><span class="tiny muted">{{ x.employee.emp_no }}</span></td><td>{{ x.company }}</td>
           <td><span v-if="x.report" class="pill" :class="STATUS_COLOR[x.report.status]">{{ x.report.status_label }}</span><span v-else class="pill gray">لم يبدأ</span></td>
-          <td class="small">{{ x.report ? STAGE_ACTOR[x.report.status] : 'الموظف' }}</td>
+          <td class="small">{{ x.report ? STAGE_ACTOR[x.report.status] : 'الموظف' }}<div v-if="x.report?.review_due" class="tiny" :class="x.report.review_overdue ? 'bad' : 'muted'">{{ x.report.review_overdue ? 'تقييم المدير متأخر — كان حتى' : 'تقييم المدير حتى' }} {{ fmtD(x.report.review_due) }}</div><div v-if="x.report?.late" class="tiny bad">رُفع متأخرًا</div></td>
           <td>{{ x.report ? `${x.report.items_done}/${x.report.items_total}` : '—' }}</td>
           <td><div class="row" style="gap:4px;flex-wrap:nowrap;justify-content:flex-end"><button v-if="x.report" class="btn ghost xs" @click="openReview(x.report.id)">فتح</button><button class="btn ghost xs" :title="x.report ? 'تحميل التقرير Excel' : 'تحميل النموذج الفارغ'" :class="{ loading: dl === x.employee.id }" @click="downloadReports([x.employee.id], x.employee.id)"><Icon name="download" :size="14" /></button></div></td>
         </tr></tbody></table></div>
@@ -136,7 +136,7 @@
   <!-- Templates -->
   <template v-else>
     <div class="card">
-      <h3>قوالب التقارير <span class="sub">يُطبَّق نموذج الموظف أولًا، ثم الوظيفة، ثم الشركة، ثم المجموعة</span><span class="acts"><button class="btn sec xs" @click="tplForm = { name: '', scope: 'group', scope_id: null, items: [{ title: '', target: '', indicator: '', weight: 100 }], allow_employee_items: true, max_employee_items: 3, employee_item_weight_max: 15, due_day: 5, active: true }"><Icon name="plus" :size="14" /> قالب</button></span></h3>
+      <h3>قوالب التقارير <span class="sub">يُطبَّق نموذج الموظف أولًا، ثم الوظيفة، ثم الشركة، ثم المجموعة</span><span class="acts"><button class="btn sec xs" @click="tplForm = { name: '', scope: auth.isAdmin ? 'group' : 'employee', scope_id: null, items: [{ title: '', target: '', indicator: '', weight: 100 }], allow_employee_items: true, max_employee_items: 3, employee_item_weight_max: 15, due_day: 5, active: true }"><Icon name="plus" :size="14" /> قالب</button></span></h3>
       <div v-dt class="tw"><table><thead><tr><th>القالب</th><th>النطاق</th><th>البنود</th><th>بنود شخصية</th><th>موعد الرفع</th><th>النسخة</th><th /></tr></thead>
         <tbody><tr v-for="tp in templates" :key="tp.id">
           <td><b>{{ tp.name }}</b></td><td>{{ SCOPE[tp.scope] }} {{ scopeName(tp) }}</td><td class="small"><b>{{ tp.items.length }} بند</b>: {{ tp.items.slice(0, 3).map((i) => i.title).join(' · ') }}{{ tp.items.length > 3 ? ' …' : '' }}</td>
@@ -195,7 +195,7 @@
   <Modal v-if="tplForm" :title="tplForm.id ? 'تعديل قالب' : 'قالب جديد'" size="wide" @close="tplForm = null">
     <div class="fr3">
       <div class="fg"><label>الاسم *</label><input v-model="tplForm.name" class="in" /></div>
-      <div class="fg"><label>النطاق</label><select v-model="tplForm.scope" class="in"><option v-for="(l, k) in SCOPE" :key="k" :value="k">{{ l }}</option></select></div>
+      <div class="fg"><label>النطاق</label><select v-model="tplForm.scope" class="in" :disabled="!auth.isAdmin"><option v-for="(l, k) in SCOPE" :key="k" :value="k">{{ l }}</option></select></div>
       <div v-if="tplForm.scope === 'company'" class="fg"><label>الشركة</label><select v-model="tplForm.scope_id" class="in"><option v-for="c in auth.meta.companies" :key="c.id" :value="c.id">{{ c.name }}</option></select></div>
       <div v-else-if="tplForm.scope === 'employee'" class="fg"><label>الموظف</label><select v-model="tplForm.scope_id" class="in"><option v-for="e in staff" :key="e.id" :value="e.id">{{ e.name }}</option></select></div>
       <div v-else-if="tplForm.scope === 'job'" class="fg"><label>الوظيفة</label><select v-model="tplForm.scope_id" class="in"><option v-for="j in auth.meta.job_titles" :key="j.id" :value="j.id">{{ j.name }}</option></select></div>
@@ -228,8 +228,8 @@ const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
 const router = useRouter()
 const STATUS_COLOR = { draft: 'gray', submitted: 'warn', mgr_reviewed: 'info', hr_reviewed: 'info', approved: 'ok', returned: 'bad' }
-const STAGE_ACTOR = { draft: 'الموظف', returned: 'الموظف', submitted: 'المدير المباشر', mgr_reviewed: 'الموارد البشرية', hr_reviewed: 'رئيس الشركة', approved: 'منشور' }
-const ROLE = { mgr: 'المدير المباشر', hr: 'الموارد البشرية', ceo: 'رئيس الشركة' }
+const STAGE_ACTOR = { draft: 'الموظف', returned: 'الموظف', submitted: 'المدير المباشر', mgr_reviewed: 'الموارد البشرية', hr_reviewed: 'الرئيس التنفيذي للشركة', approved: 'منشور' }
+const ROLE = { mgr: 'المدير المباشر', hr: 'الموارد البشرية', ceo: 'الرئيس التنفيذي للشركة' }
 const WEEK = { submitted: 'في الموعد', late: 'متأخر', missing: 'لم يُرفع', open: 'لم يُرفع بعد' }
 const WEEK_C = { submitted: 'ok', late: 'warn', missing: 'bad', open: 'gray' }
 const PLAN = { none: 'لم تُرفع', submitted: 'بانتظار المدير', approved: 'معتمدة', returned: 'أُرجعت للتعديل' }
@@ -274,7 +274,7 @@ async function setTeam(m, patch) {
 const SCOPE = { group: 'المجموعة', company: 'شركة', job: 'وظيفة', employee: 'موظف بعينه' }
 const prevMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 const period = ref(auth.emp ? curYM() : prevMonth())
-const tabs = computed(() => [auth.emp && ['mine', 'تقريري الشهري'], auth.isApprover && ['team', 'تقارير الفريق'], (auth.emp || auth.isApprover) && ['weekly', 'الأسبوعي'], auth.isAdmin && ['templates', 'قوالب التقارير']].filter(Boolean))
+const tabs = computed(() => [auth.emp && ['mine', 'تقريري الشهري'], auth.isApprover && ['team', 'تقارير الفريق'], (auth.emp || auth.isApprover) && ['weekly', 'الأسبوعي'], (auth.isAdmin || auth.user?.has_reports) && ['templates', auth.isAdmin ? 'قوالب التقارير' : 'بنود تقارير فريقي']].filter(Boolean))
 const route = useRoute()
 const tab = ref(['mine', 'team', 'weekly', 'templates'].includes(route.query.tab) ? route.query.tab : auth.emp ? 'mine' : 'team')
 const rep = ref(null); const history = ref([]); const team = ref([]); const weeks = ref([]); const teamWeeks = ref([]); const templates = ref([])

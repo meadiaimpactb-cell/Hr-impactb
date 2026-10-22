@@ -54,6 +54,7 @@
     <div class="fr"><div class="fg"><label>الاسم *</label><input v-model="af.name" class="in" /></div><div class="fg"><label>البريد</label><input v-model="af.email" class="in" style="direction:ltr" /></div><div class="fg"><label>الجوال</label><input v-model="af.phone" class="in" style="direction:ltr" /></div>
       <div class="fg"><label>الشركة</label><select v-model="af.company_id" class="in"><option v-for="c in auth.meta.companies" :key="c.id" :value="c.id">{{ c.name }}</option></select></div><div class="fg"><label>الشاغر</label><select v-model="af.opening_id" class="in"><option :value="null">—</option><option v-for="o in openings.filter((x) => x.stage === 'approved')" :key="o.id" :value="o.id">{{ o.title }}</option></select></div><div class="fg"><label>الوظيفة</label><select v-model="af.job_title_id" class="in"><option :value="null">—</option><option v-for="j in auth.meta.job_titles" :key="j.id" :value="j.id">{{ j.name }}</option></select></div></div>
     <div class="fg"><label>إفصاح المرشح عن قرابة أو مصلحة <span class="tiny muted">(مع أي موظف أو مشارك في الاختيار — المادة 16)</span></label><input v-model="af.relation" class="in" placeholder="لا يوجد" /></div>
+    <div class="fg" title="الموظف الذي رشّح المتقدم؛ يستحق مكافأة الإحالة بعد اجتياز المرشح فترة التجربة (§87)"><label>أحاله موظف <span class="tiny muted">(اختياري — مكافأة الإحالة بعد اجتياز التجربة)</span></label><SearchSelect v-model="af.referred_by" :options="staffOptions" /></div>
     <div class="fg"><label>ملاحظات</label><textarea v-model="af.notes" class="in" rows="3" /></div>
     <div class="fg"><label>السيرة الذاتية</label><input type="file" class="in" @change="cv = $event.target.files[0]" /></div>
     <template #foot><button class="btn sec" @click="af = null">إلغاء</button><button class="btn pri" :class="{ loading: busy }" @click="saveApp">حفظ</button></template>
@@ -81,6 +82,7 @@ import api, { fileUrl } from '../api'
 import EmployeeForm from '../components/EmployeeForm.vue'
 import Kpi from '../components/Kpi.vue'
 import Modal from '../components/Modal.vue'
+import SearchSelect from '../components/SearchSelect.vue'
 import { confirmBox, promptBox } from '../dialog'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
@@ -89,6 +91,9 @@ import { fmtD } from '../utils'
 const { t } = useI18n()
 const auth = useAuth(); const ui = useUi()
 const isHr = computed(() => auth.has('super', 'hr_mgr', 'hr_staff'))
+const staff = ref([])
+const staffOptions = computed(() => staff.value.map((e) => ({ value: e.id, label: e.name })))
+onMounted(async () => { if (isHr.value) try { staff.value = (await api.get('/employees', { params: { per_page: 1000 } })).data || [] } catch { /* optional list */ } })
 const tab = ref(isHr.value ? 'apps' : 'openings'); const apps = ref([]); const openings = ref([]); const stages = ref([]); const stage = ref(''); const openingF = ref(null)
 const of = ref(null); const af = ref(null); const cv = ref(null); const busy = ref(false); const prefill = ref(null); const converting = ref(null); const offer = ref(null)
 const errMsg = (e) => Object.values(e.errors || {}).flat().join(' · ') || e.message
@@ -116,7 +121,7 @@ async function decide(o, decision) {
 }
 async function saveApp() {
   busy.value = true
-  try { const x = new FormData(); Object.entries(af.value).forEach(([k, v]) => { if (['company_id', 'opening_id', 'job_title_id', 'name', 'email', 'phone', 'notes', 'relation', 'stage', 'rating'].includes(k) && v !== null && v !== '' && v !== undefined) x.append(k, v) }); if (cv.value) x.append('cv', cv.value); await api.post(af.value.id ? `/recruitment/applications/${af.value.id}` : '/recruitment/applications', x); ui.toast('تم الحفظ', 'ok'); af.value = null; cv.value = null; load() } catch (e) { ui.toast(errMsg(e), 'bad') } finally { busy.value = false }
+  try { const x = new FormData(); Object.entries(af.value).forEach(([k, v]) => { if (['company_id', 'opening_id', 'job_title_id', 'name', 'email', 'phone', 'notes', 'relation', 'stage', 'rating', 'referred_by'].includes(k) && v !== null && v !== '' && v !== undefined) x.append(k, v) }); if (cv.value) x.append('cv', cv.value); await api.post(af.value.id ? `/recruitment/applications/${af.value.id}` : '/recruitment/applications', x); ui.toast('تم الحفظ', 'ok'); af.value = null; cv.value = null; load() } catch (e) { ui.toast(errMsg(e), 'bad') } finally { busy.value = false }
 }
 async function setStage(a, s) { try { await api.post(`/recruitment/applications/${a.id}`, { company_id: a.company_id, name: a.name, stage: s }) } catch (e) { ui.toast(errMsg(e), 'bad') } load() }
 async function rate(a, r) { await api.post(`/recruitment/applications/${a.id}`, { company_id: a.company_id, name: a.name, rating: r }); load() }

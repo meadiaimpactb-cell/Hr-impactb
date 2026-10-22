@@ -36,7 +36,8 @@ a{color:var(--deep);text-decoration:none}
 .brand{display:flex;align-items:center;gap:10px;font-weight:800;line-height:1.15;white-space:nowrap;min-width:0}
 .brand>div{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .brand img{height:30px}.brand small{display:block;font-weight:400;font-size:10.5px;opacity:.8}
-.brand .co-logo{height:38px;max-width:160px;object-fit:contain;filter:brightness(0) invert(1)}
+.brand .co-logo,.brand .hc-logo{height:38px;max-width:210px;object-fit:contain;background:#fff;border-radius:9px;padding:3px 9px;box-sizing:border-box}
+.brand .co-name{font-weight:800;font-size:15px;overflow:hidden;text-overflow:ellipsis}
 .brand .co-mark{width:34px;height:34px;border-radius:9px;background:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:900;color:var(--brand);font-size:15px}
 .tbtn{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);border-radius:var(--r10);padding:5px 10px;font-size:12.5px;font-weight:600;color:#fff;position:relative;white-space:nowrap}
 
@@ -173,7 +174,7 @@ textarea.in{min-height:78px;resize:vertical}
 /* login */
 .login{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px;background:radial-gradient(1200px 600px at 80% -10%,rgba(79,202,242,.25),transparent 60%),radial-gradient(900px 500px at 0% 110%,rgba(134,119,182,.28),transparent 60%),var(--bg)}
 .login .box{background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:0 20px 60px rgba(26,35,99,.16);width:min(440px,100%);padding:30px 28px}
-.login .box img{width:min(220px,70%);display:block;margin:0 auto 12px}
+.login .box > img{width:min(300px,86%);display:block;margin:0 auto 14px}
 .login h2{margin:0;text-align:center;font-size:20px;font-weight:800;color:var(--navy)}
 :root[data-theme="dark"] .login h2{color:#fff}
 .login p.sub{text-align:center;color:var(--muted);font-size:12.5px;margin:4px 0 18px}
@@ -196,7 +197,7 @@ textarea.in{min-height:78px;resize:vertical}
   .tbtn .ico{display:block;margin:0}
   .tbtn .dot{top:-4px;inset-inline-end:-4px;line-height:1.4;padding:2px 6px}
   .tbtn{min-width:44px}.topbar .hide-sm,.topbar .lg-only{display:none}
-  .brand img{height:28px;margin:0}
+  .brand img{height:28px;margin:0}.brand .co-logo,.brand .hc-logo{height:32px;max-width:150px;padding:2px 6px}
   .topbar{gap:6px}.brand>div{display:none}
 }
 @media print{.topbar,.side,.side-bd,.toasts,.page-h .acts,.backbar{display:none!important}.main{padding:0}}

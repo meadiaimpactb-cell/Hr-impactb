@@ -73,7 +73,7 @@ class PresenceController extends Controller
         abort_unless($c, 404);
         self::expire($e->id);
         $c = DB::table('presence_checks')->where('id', $check)->first();
-        abort_unless($c->status === 'pending', 422, 'انتهت مهلة طلب التحضير — سجّل حضورك من جديد');
+        abort_unless($c->status === 'pending', 422, 'انتهت مهلة طلب التحضير وأُلغي تحضيرك — سجّل حضورك من جديد');
         $d = $request->validate(['lat' => 'nullable|numeric|between:-90,90', 'lng' => 'nullable|numeric|between:-180,180', 'accuracy' => 'nullable|integer|min:0']);
         $geo = AttendanceService::geoCheck($e->load('locations'), isset($d['lat']) ? (float) $d['lat'] : null, isset($d['lng']) ? (float) $d['lng'] : null, isset($d['accuracy']) ? (int) $d['accuracy'] : null);
         DB::table('presence_checks')->where('id', $check)->update(['responded_at' => now(), 'lat' => $d['lat'] ?? null, 'lng' => $d['lng'] ?? null, 'accuracy' => $d['accuracy'] ?? null,
@@ -115,10 +115,12 @@ class PresenceController extends Controller
                 continue;
             }
             $rec = AttendanceRecord::where('employee_id', $e->id)->whereDate('work_date', $c->requested_at)->first();
-            if ($rec && ! $rec->check_out) {
-                $rec->update(['pending' => true, 'note' => trim(($rec->note ?? '')."\n[طلب تحضير بلا استجابة ".\Illuminate\Support\Carbon::parse($c->requested_at)->format('H:i').' — حضور اليوم للمراجعة، مطلوب إعادة التحضير]')]);
+            if ($rec && $rec->check_in && ! $rec->check_out) {
+                // owner's note: an unanswered check cancels the check-in — the next punch is a new check-in, not a check-out
+                $rec->update(['voided_check_in' => $rec->check_in, 'check_in' => null, 'pending' => true,
+                    'note' => trim(($rec->note ?? '')."\n[طلب تحضير بلا استجابة ".\Illuminate\Support\Carbon::parse($c->requested_at)->format('H:i').' — أُلغي حضور '.$rec->check_in->format('H:i').' ومطلوب تحضير جديد؛ اليوم للمراجعة]')]);
             }
-            Audit::notify(User::where('employee_id', $e->id)->value('id'), 'لم تستجب لطلب التحضير — أعد تسجيل حضورك', 'عُدّ حضورك اليوم معلّقًا للمراجعة (مغادرة دون إذن §28). سجّل حضورك الآن من التطبيق', 'bad', ['screen' => 'attendance']);
+            Audit::notify(User::where('employee_id', $e->id)->value('id'), 'لم تستجب لطلب التحضير — أُلغي تحضيرك، سجّل حضورك من جديد', 'أُلغي تسجيل حضورك اليوم وعُدّ اليوم معلّقًا للمراجعة (مغادرة دون إذن §28). سجّل حضورك الآن من التطبيق', 'bad', ['screen' => 'attendance']);
             Audit::notify(array_values(array_unique([$c->requested_by, ...Access::hrUsersFor($e->company_id, 'ATT')])), 'لم يستجب لطلب التحضير', $e->name.' — حضور اليوم للمراجعة', 'warn', ['screen' => 'attendance']);
             Audit::log('presence_checks', $c->id, 'missed', null, ['employee' => $e->id]);
             $n++;

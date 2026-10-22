@@ -104,7 +104,7 @@ class AdminController extends Controller
         Audit::log('companies', $company->id, $before ? 'update' : 'create', $before, $data);
         if ($before && isset($data['tier_id']) && (int) $data['tier_id'] !== (int) ($before['tier_id'] ?? 0)) {
             // the company moved to another package: its employees' package allowances follow
-            [$emps] = \App\Services\BenefitSync::syncCompanies([$company->id], 'انتقال الشركة إلى باقة '.$company->tier()->value('name'));
+            [$emps] = \App\Services\BenefitSync::syncCompanies([$company->id], 'انتقال الشركة إلى تصنيف '.$company->tier()->value('name'));
             $company->setAttribute('benefits_synced', $emps);
         }
 
@@ -174,7 +174,15 @@ class AdminController extends Controller
         Audit::log('tiers', $tier->id, isset($data['benefits']) ? 'benefits' : 'update', $before, $patch, $data['reason']);
         $synced = 0;
         if (isset($data['benefits'])) { // every employee of the companies in this package gets the new values
-            [$synced] = \App\Services\BenefitSync::syncCompanies($tier->companies()->pluck('id')->all(), 'تعديل مزايا باقة '.$tier->name.': '.$data['reason']);
+            [$synced] = \App\Services\BenefitSync::syncCompanies($tier->companies()->pluck('id')->all(), 'تعديل مزايا تصنيف '.$tier->name.': '.$data['reason']);
+            // §118: the employees concerned are told what changed in their benefits
+            $labels = array_merge(config('hc.benefitLabels'), (array) Settings::get('benefitLabels'));
+            $changed = collect($data['benefits'])->filter(fn ($v, $k) => (string) ($before['benefits'][$k] ?? '') !== (string) $v)
+                ->map(fn ($v, $k) => ($labels[$k] ?? $k).': '.($before['benefits'][$k] ?? '—').' ← '.$v)->values();
+            if ($changed->isNotEmpty()) {
+                $users = \App\Models\User::whereIn('employee_id', \App\Models\Employee::whereIn('company_id', $tier->companies()->pluck('id'))->where('status', '!=', 'terminated')->pluck('id'))->where('active', true)->pluck('id')->all();
+                Audit::notify($users, 'تحديث مزايا تصنيف '.$tier->name, $changed->take(8)->implode(' · ').' — '.$data['reason'], 'info', ['screen' => 'dashboard']);
+            }
         }
 
         return $tier->loadCount('companies')->setAttribute('benefits_synced', $synced);
@@ -201,7 +209,7 @@ class AdminController extends Controller
         }
         Audit::log('tiers', $snapshot['id'], 'delete', $snapshot, ['moved_to' => $d['move_to'] ?? null, 'companies' => $count], $d['reason']);
         if ($moved) {
-            \App\Services\BenefitSync::syncCompanies($moved, 'حذف باقة '.$snapshot['name'].' ونقل الشركة إلى باقة '.Tier::whereKey($d['move_to'])->value('name'));
+            \App\Services\BenefitSync::syncCompanies($moved, 'حذف تصنيف '.$snapshot['name'].' ونقل الشركة إلى تصنيف '.Tier::whereKey($d['move_to'])->value('name'));
         }
 
         return ['ok' => true, 'moved' => $count];
@@ -271,7 +279,7 @@ class AdminController extends Controller
 
     public function storeTier(Request $request)
     {
-        abort_unless($request->user()->hasRole('super'), 403, 'إنشاء الباقات صلاحية الرئيس التنفيذي للمجموعة');
+        abort_unless($request->user()->hasRole('super'), 403, 'إنشاء التصنيفات صلاحية الرئيس التنفيذي للمجموعة');
         $d = $request->validate(['name' => 'required|string|max:80', 'name_en' => 'nullable|string|max:80', 'color' => 'nullable|string|max:20',
             'copy_from' => 'nullable|exists:tiers,id', 'reason' => 'required|string|max:300']);
         $src = Tier::find($d['copy_from'] ?? null) ?? Tier::orderBy('rank')->first();

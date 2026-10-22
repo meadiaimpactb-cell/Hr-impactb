@@ -61,6 +61,10 @@ class EmployeeController extends Controller
         $employee->load('company.tier', 'jobTitle', 'manager:id,name', 'schedule', 'locations', 'career.user:id,name', 'user:id,employee_id,company_id,login,roles,active,last_login_at,photo_path');
         $salary = $acc->canSeeSalary($employee);
         $period = now()->format('Y-m');
+        // §106: sanctions are confidential — the career log shows them only to the employee, his manager and those who may view violations
+        if ($employee->id !== $acc->user->employee_id && ! $acc->isManagerOf($employee) && ! $acc->can('VIO', 'view', ['employee' => $employee])) {
+            $employee->setRelation('career', $employee->career->reject(fn ($c) => in_array($c->type, ['مخالفة'], true))->values());
+        }
 
         return [
             'employee' => $employee->makeHidden($salary ? [] : ['bank_iban']),
@@ -91,14 +95,18 @@ class EmployeeController extends Controller
             $request->merge(['company_id' => $own]); // regular HR users register employees in their own company only
         }
         $data = $this->validated($request);
+        // §20: probation is 180 days; a shorter one needs HR + the group CEO (request «تقصير مدة التجربة»)
+        if (isset($data['probation_days']) && (int) $data['probation_days'] < 180 && ! $request->user()->hasRole('super')) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['probation_days' => 'مدة التجربة 180 يومًا؛ تقصيرها بطلب «تقصير مدة التجربة» يعتمده الرئيس التنفيذي للمجموعة (§20)']);
+        }
         $data['emp_no'] = $data['emp_no'] ?? EmployeeExtrasController::next((int) $data['company_id']);
         $data['schedule_id'] ??= Company::whereKey($data['company_id'])->value('default_schedule_id'); // the company's working hours by default
         $extra = $request->validate(['basic' => 'nullable|numeric|min:0', 'allowances' => 'nullable|array|max:30', 'allowances.*.name' => 'required|string|max:80', 'allowances.*.amount' => 'required|numeric|min:0']);
         abort_unless($acc->can('EMP', 'add', ['company_id' => $data['company_id']]), 403);
         if (! $request->boolean('quick')) { // §17: the employee is registered with complete data at hiring
-            $missing = array_filter(['manager_id' => (int) ($data['job_level'] ?? 0) === 1 ? 'x' : ($data['manager_id'] ?? null), 'job_title_id' => $data['job_title_id'] ?? null,
+            $missing = array_filter(['job_level' => $data['job_level'] ?? null, 'manager_id' => (int) ($data['job_level'] ?? 0) === 1 ? 'x' : ($data['manager_id'] ?? null), 'job_title_id' => $data['job_title_id'] ?? null,
                 'schedule_id' => $data['schedule_id'] ?? null, 'national_id' => $data['national_id'] ?? null, 'bank_iban' => $data['bank_iban'] ?? null], fn ($v) => ! $v);
-            $names = ['manager_id' => 'المشرف المباشر', 'job_title_id' => 'المسمى الوظيفي', 'schedule_id' => 'جدول الدوام', 'national_id' => 'رقم الهوية أو الإقامة أو الجواز', 'bank_iban' => 'الآيبان'];
+            $names = ['job_level' => 'المستوى الوظيفي', 'manager_id' => 'المشرف المباشر', 'job_title_id' => 'المسمى الوظيفي', 'schedule_id' => 'جدول الدوام', 'national_id' => 'رقم الهوية أو الإقامة أو الجواز', 'bank_iban' => 'الآيبان'];
             if ($missing) {
                 throw \Illuminate\Validation\ValidationException::withMessages(array_map(fn ($k) => $names[$k].' إلزامي عند التعيين (§17)', array_combine(array_keys($missing), array_keys($missing))));
             }
@@ -162,6 +170,10 @@ class EmployeeController extends Controller
         if (! $request->user()->isHr()) { // direct managers may only touch operational fields, never contract/payroll identity
             $data = array_intersect_key($data, array_flip(['dept', 'phone', 'email', 'name_en', 'schedule_id', 'location_ids', 'flex_enabled', 'daily_note_required']));
         }
+        if (array_key_exists('probation_days', $data) && (int) $data['probation_days'] < (int) ($employee->probation_days ?? 180) && ! $request->user()->hasRole('super')) {
+            // §20: shortening probation goes through the «تقصير مدة التجربة» request approved by the group CEO
+            throw \Illuminate\Validation\ValidationException::withMessages(['probation_days' => 'تقصير مدة التجربة بطلب «تقصير مدة التجربة» يعتمده الرئيس التنفيذي للمجموعة (§20)']);
+        }
         if (array_key_exists('bank_iban', $data) && strtoupper(preg_replace('/\s+/', '', (string) $data['bank_iban'])) !== strtoupper((string) $employee->bank_iban)) {
             // §38: after hiring the account changes only through a request with the bank certificate (HR verifies, finance approves)
             abort_unless($request->user()->hasRole('super'), 422, 'يُعدَّل الحساب البنكي بطلب «تعديل الحساب البنكي» مع شهادة البنك (§38)');
@@ -203,7 +215,7 @@ class EmployeeController extends Controller
             'emp_no' => [$e ? 'required' : 'nullable', 'string', 'max:30', Rule::unique('employees')->ignore($e?->id)],
             'name' => 'required|string|max:150', 'name_en' => 'nullable|string|max:150',
             'company_id' => 'required|exists:companies,id', 'job_title_id' => 'nullable|exists:job_titles,id', 'job_level' => 'nullable|integer|between:1,5',
-            'religion' => 'nullable|in:muslim,other', 'probation_days' => 'nullable|integer|min:0|max:180',
+            'religion' => 'nullable|in:muslim,other', 'probation_days' => 'nullable|integer|min:0|max:180', 'nursing_until' => 'nullable|date',
             // §13: when the employee serves several companies, the allocation of his service totals 100%
             'service_allocation' => ['nullable', 'array', 'max:12', function ($a, $v, $fail) {
                 $v = array_filter((array) $v, fn ($x) => (float) $x > 0);

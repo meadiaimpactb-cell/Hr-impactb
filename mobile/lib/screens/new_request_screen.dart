@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../api.dart';
@@ -27,6 +28,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
   final reason = TextEditingController();
   final text2 = TextEditingController();
   List balances = [];
+  String? attachment; // local path of the supporting document (photo of a medical report, invoices…)
   bool busy = false;
   Map<String, dynamic> errors = {};
   Map<String, dynamic>? def;
@@ -46,13 +48,21 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
     if (handler == 'correction') f['kind'] = ((meta?['correction_kinds'] as List?) ?? [null]).elementAtOrNull(1);
     if (handler == 'letter') f['kind'] = (((meta?['lookups']?['letter_kinds']) as List?) ?? [{}]).first['code'];
     if (handler == 'advance') f['installments'] = 6;
+    if (handler == 'trip') { f['scope'] = 'domestic'; f['travel_class'] = 'economy'; f['outside_city'] = true; }
+  }
+
+  static const _tripCosts = {'cost_flight': 'الطيران', 'cost_lodging': 'السكن', 'cost_allowance': 'البدل اليومي', 'cost_transport': 'التنقل', 'cost_fees': 'الرسوم'};
+  num get _tripTotal => _tripCosts.keys.fold<num>(0, (a, k) => a + ((f[k] as num?) ?? 0));
+  int get _tripDays {
+    final a = DateTime.tryParse(f['from'] ?? ''), b = DateTime.tryParse(f['to'] ?? '');
+    return a == null || b == null || b.isBefore(a) ? 0 : b.difference(a).inDays + 1;
   }
 
   String _d(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   Future<void> pickDate(String key, {bool past = false}) async {
     final now = DateTime.now();
-    final d = await showDatePicker(context: context, initialDate: now, firstDate: now.subtract(const Duration(days: 60)), lastDate: past ? now : now.add(const Duration(days: 365)));
+    final d = await showDatePicker(context: context, initialDate: DateTime.tryParse(f[key] ?? '') ?? now, firstDate: now.subtract(const Duration(days: 60)), lastDate: past ? now : now.add(const Duration(days: 365)));
     if (d != null) setState(() => f[key] = _d(d));
   }
 
@@ -63,10 +73,21 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
     if (handler == 'correction') body['reason'] = reason.text;
     if (handler == 'advance') { body['purpose'] = reason.text; body['amount'] = num.tryParse(text2.text); }
     if (handler == 'letter') body['to'] = reason.text;
-    if (handler == 'trip') { body['purpose'] = reason.text; body['estimate'] = num.tryParse(text2.text) ?? 0; }
+    if (handler == 'trip') {
+      body['purpose'] = reason.text;
+      body['estimate'] = _tripTotal > 0 ? _tripTotal : (num.tryParse(text2.text) ?? 0);
+      if (body['scope'] == 'intl') body.remove('outside_city');
+    }
     if (handler == 'resignation') body['reason'] = reason.text;
     try {
-      await Api.post('/requests', body);
+      if (attachment != null) {
+        await Api.postMultipart('/requests', {
+          for (final e in body.entries)
+            if (e.value != null) e.key: e.value is bool ? (e.value ? '1' : '0') : e.value.toString(),
+        }, files: {attachment!: 'attachment'});
+      } else {
+        await Api.post('/requests', body);
+      }
       if (mounted) { toast(context, tr('أُرسل الطلب')); Navigator.pop(context, true); }
     } catch (e) {
       if (mounted) { setState(() => errors = e is ApiException ? e.errors : {}); toast(context, errText(e), error: true); }
@@ -159,12 +180,34 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
           TextField(controller: reason, decoration: InputDecoration(labelText: tr('الجهة الموجّه إليها'))),
         ],
         if (handler == 'trip') ...[
-          _text('destination', tr('الوجهة')),
-          TextField(controller: reason, maxLines: 2, decoration: InputDecoration(labelText: tr('الغرض'))),
+          SearchPicker<String>(label: tr('نوع الرحلة'), value: f['scope'], items: [('domestic', tr('داخل المملكة')), ('intl', tr('خارج المملكة'))], onChanged: (v) => setState(() => f['scope'] = v)),
+          if (f['scope'] == 'domestic')
+            SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(tr('خارج مدينة العمل ولمسافة تزيد على 100 كيلومتر')), subtitle: (errors['outside_city'] as List?) != null ? Text((errors['outside_city'] as List).first, style: const TextStyle(color: Colors.red)) : null,
+                value: f['outside_city'] == true, onChanged: (v) => setState(() => f['outside_city'] = v)),
           const SizedBox(height: 12),
+          _text('destination', '${tr('الوجهة')} *'),
+          TextField(controller: reason, maxLines: 2, decoration: InputDecoration(labelText: '${tr('الغرض')} *', errorText: (errors['purpose'] as List?)?.first)),
+          const SizedBox(height: 12),
+          _text('outputs', '${tr('المخرجات المتوقعة')} *', lines: 2),
           _dateField('from', 'من'), _dateField('to', 'إلى'),
-          TextField(controller: text2, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr('التكلفة التقديرية'))),
+          if (_tripDays > 0) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text('${tr('مدة الرحلة')}: $_tripDays ${tr('يوم')}', style: const TextStyle(color: Colors.black54))),
+          if (_tripDays == 1) _text('hours', tr('مدة المهمة بالساعات (البدل اليومي لـ10 ساعات فأكثر)'), kb: TextInputType.number),
+          SearchPicker<String>(label: tr('درجة السفر'), value: f['travel_class'], items: [('economy', tr('السياحية')), ('business', tr('رجال الأعمال (استثناء)')), ('first', tr('الأولى (استثناء)'))], onChanged: (v) => setState(() => f['travel_class'] = v)),
           const SizedBox(height: 12),
+          if (f['travel_class'] != 'economy' || errors['exception_reason'] != null) _text('exception_reason', '${tr('مبرر الاستثناء')} *', lines: 2),
+          Text(tr('التكلفة التقديرية'), style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          for (final c in _tripCosts.entries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: TextFormField(keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr(c.value), isDense: true), onChanged: (v) => setState(() => f[c.key] = num.tryParse(v))),
+            ),
+          if (_tripTotal > 0)
+            Padding(padding: const EdgeInsets.only(bottom: 12), child: Text('${tr('الإجمالي')}: $_tripTotal', style: const TextStyle(fontWeight: FontWeight.w700)))
+          else ...[
+            TextField(controller: text2, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: '${tr('الإجمالي')} *', errorText: (errors['estimate'] as List?)?.first)),
+            const SizedBox(height: 12),
+          ],
           _text('advance', tr('عهدة مالية مطلوبة'), kb: TextInputType.number),
         ],
         if (handler == 'resignation') ...[
@@ -172,6 +215,18 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
           TextField(controller: reason, maxLines: 3, decoration: InputDecoration(labelText: tr('السبب'))),
         ],
         if (handler == null) ...[for (final fd in ((def?['form'] as List?) ?? [])) _custom(fd as Map)],
+        const SizedBox(height: 8),
+        // supporting document for every request type (medical report, invoices, trip documents…)
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+          onPressed: () async {
+            final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1800, imageQuality: 80);
+            if (x != null) setState(() => attachment = x.path);
+          },
+          icon: Icon(attachment == null ? Icons.attach_file : Icons.check_circle, color: attachment == null ? null : Colors.green),
+          label: Text(attachment == null ? tr('إرفاق مستند (صورة)') : tr('تم إرفاق المستند — اضغط للتغيير')),
+        ),
+        if ((errors['attachment'] as List?) != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text((errors['attachment'] as List).first, style: const TextStyle(color: Colors.red, fontSize: 12))),
         const SizedBox(height: 20),
         SizedBox(height: 48, child: FilledButton(onPressed: busy ? null : submit, child: busy ? const CircularProgressIndicator() : Text(tr('إرسال')))),
       ]),

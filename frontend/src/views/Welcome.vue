@@ -1,7 +1,7 @@
 <template>
   <div class="login">
     <div class="box">
-      <img src="/logo-full.png" alt="Impact Valley Capital" />
+      <img src="/logo-hc.png" alt="HC — إدارة رأس المال البشري" />
       <template v-if="state === 'checking'"><div class="skel" v-for="i in 3" :key="i" /></template>
 
       <template v-else-if="state === 'invalid'">

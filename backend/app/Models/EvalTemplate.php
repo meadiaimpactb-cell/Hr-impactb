@@ -10,6 +10,6 @@ class EvalTemplate extends Model
 
     protected function casts(): array
     {
-        return ['weights' => 'array', 'sub' => 'array', 'grades' => 'array', 'active' => 'boolean', 'effective_from' => 'date:Y-m-d'];
+        return ['weights' => 'array', 'sub' => 'array', 'grades' => 'array', 'active' => 'boolean', 'effective_from' => 'date:Y-m-d', 'previous' => 'array'];
     }
 }
