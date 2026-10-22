@@ -77,6 +77,7 @@ class MoreScreen extends StatelessWidget {
       ListGroup(title: tr('الإعدادات'), children: [
         ListRow(icon: Icons.language_outlined, color: HcColors.periwinkle, title: tr('اللغة'), subtitle: s.locale == 'ar' ? 'العربية' : 'English', onTap: () => s.setLocale(s.locale == 'ar' ? 'en' : 'ar')),
         ListRow(icon: Icons.dark_mode_outlined, color: HcColors.navy, title: tr('الوضع الداكن'), trailing: Switch(value: s.dark, onChanged: s.setDark), onTap: () => s.setDark(!s.dark)),
+        ListRow(icon: Icons.verified_user_outlined, color: HcColors.navy, title: tr('لائحتي وإقراري'), subtitle: tr('قراءة اللائحة وإقرارك بها'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyPolicyScreen()))),
         ListRow(icon: Icons.lock_reset_outlined, color: HcColors.deepBlue, title: tr('تغيير كلمة المرور'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen()))),
         ListRow(icon: Icons.fingerprint, color: HcColors.ok, title: tr('قفل التطبيق بالبصمة'), subtitle: tr('يُطلب تأكيد هويتك عند فتح التطبيق'), trailing: Switch(value: s.appLock, onChanged: s.setAppLock), onTap: () => s.setAppLock(!s.appLock)),
         // APK self-update is Android-only; iPhone updates come from TestFlight / the App Store

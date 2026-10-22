@@ -54,6 +54,7 @@ const routes = [
       { path: 'my-termination', name: 'my-termination', component: () => import('./views/MyTermination.vue') },
       { path: 'policy-acks', name: 'policy-acks', component: () => import('./views/PolicyAcks.vue'), meta: { roles: ['super', 'hr_mgr', 'hr_staff'] } },
       { path: 'privacy', name: 'privacy', component: () => import('./views/Privacy.vue') },
+      { path: 'my-policy', name: 'my-policy', component: () => import('./views/MyPolicy.vue') },
       { path: 'guide', name: 'guide', component: () => import('./views/Guide.vue') },
     ],
   },
@@ -87,6 +88,7 @@ router.beforeEach(async (to) => {
   if (auth.user?.must_change_password && to.name !== 'me' && !to.meta.guest) return { name: 'me' }
   if (to.meta.roles && !auth.has(...to.meta.roles)) return { name: 'dash' }
   if (to.meta.approver && !auth.isApprover) return { name: 'dash' }
+  if (to.name !== 'dash' && auth.hiddenPage(to.path)) return { name: 'dash' } // a page hidden from this user
 })
 
 export default router

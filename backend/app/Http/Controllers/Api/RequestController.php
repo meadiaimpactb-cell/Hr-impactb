@@ -323,7 +323,7 @@ class RequestController extends Controller
         $amount = (float) ($data['amount'] ?? 0);
         // owner's note (22/10): asset and cash custody go through the same approvals as an advance (the request type's flow)
         $flow = ApprovalService::flowFor('custody', $data);
-        $cash = ($data['kind'] ?? '') === 'عهد نقدية' || $amount > 0;
+        $cash = ApprovalService::custodyIsCash($data);
         if (! $cash) {
             return $flow;
         }

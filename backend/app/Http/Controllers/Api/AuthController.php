@@ -123,6 +123,9 @@ class AuthController extends Controller
             'company_ids' => $acc->companyIds(),
             // areas the user may view beyond his own records (the pages show their team tabs only for these)
             'can_view' => array_values(array_filter(array_keys(Access::OPS), fn ($op) => $acc->canAny($op, 'view'))),
+            // what he may do in each area (any company) and the pages hidden from him — the screens follow these
+            'can_do' => collect(Access::OPS)->keys()->mapWithKeys(fn ($op) => [$op => array_values(array_filter(Access::ACTIONS, fn ($a) => $acc->canAny($op, $a)))])->filter(fn ($a) => $a)->all(),
+            'hidden_pages' => array_values((array) ($u->perms['hidden_pages'] ?? [])),
             'has_reports' => $e ? $e->reports()->exists() : false,
             'employee' => $e ? [
                 'id' => $e->id, 'emp_no' => $e->emp_no, 'name' => $e->name, 'name_en' => $e->name_en,

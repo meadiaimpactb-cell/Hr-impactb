@@ -84,6 +84,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import api, { fileUrl } from '../api'
 import { fmtDT } from '../utils'
+import { NAV } from '../lib/nav'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import NewRequest from './NewRequest.vue'
@@ -145,63 +146,8 @@ const onDocClick = (e) => { if (moreOpen.value && moreWrap.value && !moreWrap.va
 const onResize = () => { if (!isDrawer() && ui.sideOpen) { ui.sideOpen = false; lockScroll(false) } }
 router.afterEach(() => { if (ui.sideOpen) ui.sideOpen = false; moreOpen.value = false })
 
-const ALL = ['super', 'hr_mgr', 'hr_staff', 'ceo', 'mgr', 'fin', 'custodian', 'emp']
-const NAV = [
-  { g: 'الرئيسية', items: [
-    { to: '/', ic: 'home', label: 'لوحة المعلومات', roles: ALL },
-    { to: '/approvals', ic: 'approvals', label: 'صندوق الموافقات', approver: true },
-    { to: '/requests', ic: 'requests', label: 'طلباتي', roles: ALL },
-    { to: '/me', ic: 'user', label: 'ملفي', roles: ALL },
-    { to: '/downloads', ic: 'download', label: 'مركز التنزيل', roles: ALL },
-    { to: '/guide', ic: 'info', label: 'دليل الاستخدام', roles: ALL },
-    { to: '/privacy', ic: 'eye', label: 'إشعار الخصوصية', roles: ALL },
-  ] },
-  { g: 'التواصل', items: [
-    { to: '/notifications', ic: 'bell', label: 'مركز الإشعارات', roles: ALL },
-    { to: '/announcements', ic: 'megaphone', label: 'الإعلانات', roles: ALL },
-    { to: '/mail', ic: 'mail', label: 'البريد الداخلي', roles: ALL },
-  ] },
-  { g: 'الموظفون', items: [
-    { to: '/employees', ic: 'users', label: 'الموظفون', approver: true },
-    { to: '/documents', ic: 'folder', label: 'الوثائق والتنبيهات', roles: ALL },
-    { to: '/letters', ic: 'signature', label: 'الخطابات الرسمية', roles: ALL },
-    { to: '/insurance', ic: 'insurance', label: 'التأمين الطبي', roles: ALL },
-    { to: '/recruitment', ic: 'user-check', label: 'التوظيف', roles: ['super', 'hr_mgr', 'hr_staff', 'ceo', 'fin', 'mgr'] },
-  ] },
-  { g: 'التشغيل اليومي', items: [
-    { to: '/attendance', ic: 'clock', label: 'الحضور والانصراف', roles: ALL },
-    { to: '/leaves', ic: 'leave', label: 'الإجازات', roles: ALL },
-  ] },
-  { g: 'الأداء والانضباط', items: [
-    { to: '/reports', ic: 'report', label: 'التقارير الدورية', roles: ALL },
-    { to: '/evaluation', ic: 'chart', label: 'التقييم والأوزان', roles: ALL },
-    { to: '/development', ic: 'training', label: 'التطوير والتدريب', roles: ALL },
-    { to: '/violations', ic: 'gavel', label: 'المخالفات والانضباط', roles: ALL },
-    { to: '/incentives', ic: 'award', label: 'الحوافز والإشادات', roles: ALL },
-    { to: '/improvement', ic: 'trend', label: 'خطط تحسين الأداء', roles: ALL },
-    { to: '/terminations', ic: 'exit', label: 'إنهاء الخدمة والتصفية', approver: true },
-    { to: '/fines-register', ic: 'money', label: 'سجل الغرامات', roles: ['super', 'hr_mgr', 'hr_staff', 'fin', 'ceo'] },
-    { to: '/projects', ic: 'kanban', label: 'المشاريع', roles: ALL },
-    { to: '/reports-center', ic: 'sheet', label: 'مركز التقارير', approver: true },
-  ] },
-  { g: 'المالية والعهد', items: [
-    { to: '/payroll', ic: 'money', label: 'الرواتب والقسائم', roles: ALL },
-    { to: '/custody', ic: 'briefcase', label: 'العهد', roles: ALL },
-  ] },
-  { g: 'الإدارة', items: [
-    { to: '/users', ic: 'shield', label: 'المستخدمون والصلاحيات', roles: ['super', 'hr_mgr'] },
-    { to: '/import', ic: 'upload', label: 'الاستيراد', roles: ['super', 'hr_mgr'] },
-    { to: '/app-versions', ic: 'download', label: 'إصدارات التطبيق', roles: ['super', 'hr_mgr'] },
-    { to: '/companies', ic: 'building', label: 'الشركات والتصنيفات', roles: ['super', 'hr_mgr'] },
-    { to: '/lookups', ic: 'database', label: 'البيانات الأساسية', roles: ['super', 'hr_mgr'] },
-    { to: '/flows', ic: 'workflow', label: 'أنواع الطلبات ومسارات الاعتماد', roles: ['super', 'hr_mgr'] },
-    { to: '/integrations', ic: 'plug', label: 'التكامل مع أودو', roles: ['super', 'hr_mgr'] },
-    { to: '/settings', ic: 'settings', label: 'الإعدادات والسياسات', roles: ['super', 'hr_mgr'] },
-    { to: '/audit', ic: 'audit', label: 'سجل التدقيق', roles: ['super', 'hr_mgr'] },
-    { to: '/policy-acks', ic: 'shield', label: 'إقرارات اللائحة', roles: ['super', 'hr_mgr', 'hr_staff'] },
-  ] },
-]
-const nav = computed(() => NAV.map((g) => ({ ...g, items: g.items.filter((i) => (i.approver ? auth.isApprover : auth.has(...i.roles))) })).filter((g) => g.items.length))
+// pages hidden from this user by the permissions editor are left out (owner's note: control down to the page)
+const nav = computed(() => NAV.map((g) => ({ ...g, items: g.items.filter((i) => (i.approver ? auth.isApprover : auth.has(...i.roles)) && !auth.hiddenPage(i.to)) })).filter((g) => g.items.length))
 
 // the counters on the bell, the approvals and the mail icons
 async function pollCounts() {

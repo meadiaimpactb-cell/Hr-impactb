@@ -32,8 +32,10 @@ class PolicyAckController extends Controller
         $ack = PolicyAcknowledgement::where('user_id', $u->id)->where('version', $v)->first();
 
         return ['version' => $v, 'required' => (bool) $e && ! $ack, 'signed_at' => $ack?->signed_at?->toDateTimeString(), 'text' => PolicyAcknowledgement::text($v),
+            // owner's note (22/10): the employee can always read the regulations and see what he acknowledged
+            'document' => self::hasDocument($v), 'mine' => $ack ? ['typed_name' => $ack->typed_name, 'signature' => $ack->signature, 'signed_at' => $ack->signed_at?->toDateTimeString(), 'ip' => $ack->ip, 'device' => $ack->device] : null,
             'employee' => $e ? ['name' => $e->name, 'emp_no' => $e->emp_no, 'company' => $e->company?->name, 'job' => $e->jobTitle?->name] : null,
-            'history' => PolicyAcknowledgement::where('user_id', $u->id)->orderByDesc('id')->get(['version', 'signed_at', 'typed_name'])];
+            'history' => PolicyAcknowledgement::where('user_id', $u->id)->orderByDesc('id')->get(['version', 'signed_at', 'typed_name'])->map(fn ($h) => $h->toArray() + ['has_document' => self::hasDocument($h->version)])];
     }
 
     public function sign(Request $request)
@@ -57,6 +59,44 @@ class PolicyAckController extends Controller
     }
 
     /** HR: who has / hasn't acknowledged the current version (employee scope). */
+    private static function docPath(string $version): string
+    {
+        return 'policy/regulations-'.preg_replace('/[^0-9A-Za-z.\-]/', '', $version).'.pdf';
+    }
+
+    public static function hasDocument(string $version): bool
+    {
+        return \Illuminate\Support\Facades\Storage::disk('local')->exists(self::docPath($version));
+    }
+
+    /** HR / the group CEO upload the regulations (PDF) of a version, which every employee can then read. */
+    public function uploadDocument(Request $request)
+    {
+        abort_unless($request->user()->hasRole('super', 'hr_mgr'), 403);
+        $d = $request->validate(['file' => 'required|file|mimes:pdf|max:40960', 'version' => 'nullable|string|max:20|regex:/^[0-9A-Za-z.\-]+$/']);
+        $v = $d['version'] ?? self::version();
+        $request->file('file')->storeAs(dirname(self::docPath($v)), basename(self::docPath($v)), 'local');
+        Audit::log('policy', 0, 'document', null, ['version' => $v, 'name' => $request->file('file')->getClientOriginalName()]);
+
+        return ['version' => $v, 'document' => true];
+    }
+
+    /** A short-lived signed link to read the regulations (opens in the browser or from the app without a token). */
+    public function documentLink(Request $request)
+    {
+        $v = $request->input('version') ?: self::version($request->user()->employee?->company_id);
+        abort_unless(self::hasDocument($v), 404, 'لم يُرفع ملف اللائحة لهذا الإصدار بعد');
+
+        return ['url' => \Illuminate\Support\Facades\URL::temporarySignedRoute('policy.document', now()->addMinutes(30), ['version' => $v]), 'version' => $v];
+    }
+
+    public function document(string $version)
+    {
+        abort_unless(self::hasDocument($version), 404);
+
+        return \Illuminate\Support\Facades\Storage::disk('local')->response(self::docPath($version), 'لائحة رأس المال البشري - الإصدار '.$version.'.pdf', ['Content-Type' => 'application/pdf'], 'inline');
+    }
+
     public function report(Request $request)
     {
         $acc = Access::for();
@@ -69,10 +109,10 @@ class PolicyAckController extends Controller
             $cur = $mine->firstWhere('version', $v);
 
             return ['employee' => $e->only('id', 'name', 'emp_no'), 'company' => $e->company?->name, 'version' => $v, 'signed' => (bool) $cur, 'signed_at' => $cur?->signed_at?->toDateTimeString(),
-                'ip' => $cur?->ip, 'has_account' => (bool) $e->user, 'previous' => $mine->where('version', '!=', $v)->pluck('version')->values()];
+                'ip' => $cur?->ip, 'has_account' => (bool) $e->user, 'previous' => $mine->where('version', '!=', $v)->pluck('version')->values(), 'document' => self::hasDocument($v)];
         });
 
-        return ['version' => self::version(), 'rows' => $rows->values(), 'signed' => $rows->where('signed', true)->count(), 'total' => $rows->count(), 'can_bump' => $request->user()->hasRole('super', 'hr_mgr')];
+        return ['version' => self::version(), 'rows' => $rows->values(), 'signed' => $rows->where('signed', true)->count(), 'total' => $rows->count(), 'can_bump' => $request->user()->hasRole('super', 'hr_mgr'), 'document' => self::hasDocument(self::version())];
     }
 
     /** HR manager / group CEO publishes a new version → everyone must acknowledge again. */

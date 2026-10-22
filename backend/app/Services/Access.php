@@ -162,8 +162,14 @@ class Access
             return $q;
         }
         $companies = [];
+        $named = [];
         if ($u->hasRole('hr_staff')) {
             $companies = $this->hrStaffCompanies($op, $action);
+            // a delegation limited to named employees covers only them (inside its companies)
+            if ($companies && ! empty($u->perms['employees'])) {
+                $named = Employee::whereIn('id', array_map('intval', $u->perms['employees']))->whereIn('company_id', $companies)->pluck('id')->all();
+                $companies = [];
+            }
         }
         if ($u->hasRole('ceo') && $u->company_id) {
             $companies[] = $u->company_id;
@@ -172,8 +178,11 @@ class Access
             $companies = array_merge($companies, Company::where('ceo_employee_id', $u->employee_id)->pluck('id')->all());
         }
 
-        return $q->where(function ($w) use ($companies, $u) {
+        return $q->where(function ($w) use ($companies, $u, $named) {
             $w->whereIn('company_id', $companies ?: [0]);
+            if ($named) {
+                $w->orWhereIn('id', $named);
+            }
             if ($u->employee_id) {
                 $w->orWhere('manager_id', $u->employee_id)->orWhere('id', $u->employee_id);
             }
@@ -202,7 +211,8 @@ class Access
             $p = $u->perms ?? [];
             $ok = in_array($action, self::staffOps($p, $companyId ?: null)[$op] ?? [], true)
                 && (empty($p['valid_to']) || $p['valid_to'] >= now()->toDateString())
-                && (! $companyId || in_array($companyId, array_map('intval', $p['companies'] ?? []), true));
+                && (! $companyId || in_array($companyId, array_map('intval', $p['companies'] ?? []), true))
+                && (empty($p['employees']) || ! $emp || in_array((int) $emp->id, array_map('intval', $p['employees']), true));
             if ($ok) {
                 return true;
             }

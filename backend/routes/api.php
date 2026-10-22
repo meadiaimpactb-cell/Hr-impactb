@@ -43,6 +43,8 @@ Route::prefix('v1')->group(function () {
     Route::post('auth/forgot', [AuthController::class, 'forgot'])->middleware('throttle:10,1');
     Route::post('integrations/odoo/webhook', [IntegrationController::class, 'webhook'])->middleware('throttle:60,1');
     Route::get('careers', [RecruitmentController::class, 'publicOpenings']);
+    // the regulations PDF behind a short-lived signed link (handed out by policy-ack/document-link to signed-in users)
+    Route::get('policy-document/{version}', [App\Http\Controllers\Api\PolicyAckController::class, 'document'])->name('policy.document')->middleware('signed');
     Route::post('careers/{opening}/apply', [RecruitmentController::class, 'publicApply'])->middleware('throttle:10,1');
 
     Route::middleware('auth:sanctum')->group(function () {
@@ -464,6 +466,8 @@ Route::prefix('v1')->group(function () {
         Route::post('policy-ack', [App\Http\Controllers\Api\PolicyAckController::class, 'sign']);
         Route::get('policy-ack/report', [App\Http\Controllers\Api\PolicyAckController::class, 'report']);
         Route::post('policy-ack/version', [App\Http\Controllers\Api\PolicyAckController::class, 'setVersion']);
+        Route::post('policy-ack/document', [App\Http\Controllers\Api\PolicyAckController::class, 'uploadDocument']);
+        Route::get('policy-ack/document-link', [App\Http\Controllers\Api\PolicyAckController::class, 'documentLink']);
         // end policy audit: discipline/termination/ack
     });
 });

@@ -131,6 +131,14 @@ class ApprovalService
         Audit::notify(Access::usersWithRole('fin'), 'مكافأة إحالة تُصرف مع الراتب', $ref->name.' — '.number_format($amount).' ر.س', 'info', ['screen' => 'payroll']);
     }
 
+    /** A custody request is cash when its type says so («عهد نقدية»), an asset when it says «أصول»; otherwise by its amount. */
+    public static function custodyIsCash(array $d): bool
+    {
+        $k = str_replace(['أ', 'إ', 'آ', 'ة'], ['ا', 'ا', 'ا', 'ه'], (string) ($d['kind'] ?? ''));
+
+        return str_contains($k, 'نقد') ? true : (str_contains($k, 'اصول') ? false : (float) ($d['amount'] ?? 0) > 0);
+    }
+
     /** §49–50: a company moves to its new classification and its employees' benefits follow. */
     public static function applyTier(Company $co, \App\Models\Tier $tier, string $why): void
     {
@@ -503,11 +511,14 @@ class ApprovalService
                 Settings::set($d['key'], is_numeric($d['value']) ? $d['value'] + 0 : (in_array(strtolower((string) $d['value']), ['true', 'false'], true) ? $d['value'] === 'true' : $d['value']), ! empty($d['company_id']) ? (int) $d['company_id'] : null, 'طلب تعديل سياسة #'.$r->id.' — '.($d['reason'] ?? ''));
                 break;
             case 'custody': // in-kind: custodians prepare and hand it; cash: the approved amount is booked on the employee and paid to his IBAN
-                if ((float) ($d['amount'] ?? 0) > 0 && ($ct = \App\Models\CustodyType::where('is_cash', true)->where('active', true)->first())) {
-                    $item = new \App\Models\CustodyItem(['custody_type_id' => $ct->id, 'company_id' => $e->company_id, 'ident' => 'عهدة نقدية #'.$r->id.' — '.mb_substr((string) ($d['purpose'] ?? $d['kind'] ?? ''), 0, 60), 'fields' => [],
-                        'value' => (float) $d['amount'], 'employee_id' => $e->id, 'status' => 'in_use', 'history' => []]);
-                    $item->log('تسليم', 'عهدة نقدية معتمدة — تُحوَّل إلى حساب الموظف البنكي (§38/§44)', $e->id);
+                // the chosen type decides (owner's note): an asset custody with an estimated value is still an asset
+                $isCash = self::custodyIsCash($d);
+                if ($isCash && (float) ($d['amount'] ?? 0) > 0 && ($ct = \App\Models\CustodyType::where('is_cash', true)->where('active', true)->first())) {
+                    $item = new \App\Models\CustodyItem(['custody_type_id' => $ct->id, 'company_id' => $e->company_id, 'ident' => 'عهدة نقدية #'.$r->id.' — '.mb_substr((string) ($d['why'] ?? $d['purpose'] ?? ''), 0, 60), 'fields' => [],
+                        'value' => (float) $d['amount'], 'employee_id' => $e->id, 'status' => 'pending_ack', 'history' => []]);
+                    $item->log('طلب تسليم', 'عهدة نقدية معتمدة — تُحوَّل إلى حساب الموظف البنكي بعد إقراره بالاستلام (§38/§43/§44)', $e->id);
                     $item->save();
+                    Audit::notify(User::where('employee_id', $e->id)->value('id'), 'عهدة نقدية بانتظار إقرارك', $item->ident.' — '.number_format((float) $d['amount'], 2).' ر.س', 'warn', ['screen' => 'custody']);
                     Audit::notify(Access::usersWithRole('fin'), 'عهدة نقدية معتمدة — حوّلها لحساب الموظف', $e->name.' — '.number_format((float) $d['amount'], 2).' ر.س', 'approval', ['screen' => 'custody']);
                     break;
                 }

@@ -8,7 +8,7 @@
   </div>
   <div class="tabs">
     <button :class="{ on: tab === 'users' }" @click="tab = 'users'">الحسابات والأدوار</button>
-    <button :class="{ on: tab === 'perms' }" @click="tab = 'perms'">الصلاحيات المفوّضة</button>
+    <button :class="{ on: tab === 'perms' }" @click="tab = 'perms'">الصلاحيات المفوّضة والصفحات</button>
     <button :class="{ on: tab === 'deleg' }" @click="tab = 'deleg'; loadDeleg()">التفويضات</button>
   </div>
 
@@ -44,12 +44,14 @@
   </div>
 
   <div v-else-if="tab === 'perms'" class="card">
-    <div v-if="!staff.length" class="empty">لا حسابات بدور «موظف موارد بشرية» — أنشئ حسابًا بهذا الدور أولًا</div>
-    <template v-else>
-      <div class="row mb"><label class="small b">الحساب:</label>
-        <select v-model="permUserId" class="in" style="width:auto"><option v-for="u in staff" :key="u.id" :value="u.id">{{ u.name }} ({{ u.login }})</option></select>
+    <template v-if="true">
+      <div class="notice info small">اختر <b>أي مستخدم</b> وامنحه صلاحيات إضافية فوق صلاحيات دوره: على أي شركات، وفي أي عمليات وأي أزرار (عرض، إضافة، تعديل، اعتماد، تصدير…)، ولأشخاص بعينهم إن أردت، مع الصفحات التي تُخفى عنه ومدة الصلاحية. كل منح أو سحب يُسجَّل في سجل التدقيق.</div>
+      <div class="row mb" style="gap:8px;align-items:center;flex-wrap:wrap"><label class="small b">المستخدم:</label>
+        <div style="min-width:320px"><SearchSelect v-model="permUserId" :options="permUserOptions" placeholder="ابحث باسم المستخدم أو الموظف…" /></div>
+        <span v-if="permUser" class="tiny muted">دوره: {{ (permUser.roles || []).map((r) => meta.roles?.[r] || r).join('، ') }}</span>
       </div>
-      <div v-if="perm" class="grid g3">
+      <div v-if="!permUser" class="empty">اختر مستخدمًا لعرض صلاحياته وتعديلها</div>
+      <div v-if="perm && permUser" class="grid g3">
         <div class="card" style="margin:0"><h3>1 · الشركات التي يشرف عليها</h3>
           <label v-for="c in meta.companies" :key="c.id" class="chk"><input v-model="perm.companies" type="checkbox" :value="c.id" /> {{ c.name }}
             <span v-if="perm.per_company[c.id] && perm.companies.includes(c.id)" class="pill purple" style="font-size:10.5px">صلاحيات خاصة</span></label>
@@ -74,6 +76,15 @@
               <td><input v-model="mat.limits[op]" :disabled="!mat.editable" class="in" style="min-height:30px;width:80px" placeholder="—" /></td>
             </tr></tbody>
           </table></div>
+          <div class="card mt" style="margin-bottom:0"><h3>3 · الأشخاص <span class="sub">اختياري — بدون تحديد تشمل الصلاحيات كل موظفي الشركات المختارة</span></h3>
+            <div style="max-width:420px"><SearchSelect :model-value="null" :options="empOptions.filter((o) => !perm.employees.includes(o.value))" placeholder="أضف موظفًا تقتصر عليه الصلاحيات…" @update:model-value="(v) => v && perm.employees.push(v)" /></div>
+            <div v-if="perm.employees.length" class="row mt" style="gap:6px;flex-wrap:wrap"><span v-for="id in perm.employees" :key="id" class="pill info">{{ empName(id) }} <a style="cursor:pointer" @click="perm.employees = perm.employees.filter((x) => x !== id)">×</a></span></div>
+          </div>
+          <div class="card mt" style="margin-bottom:0"><h3>4 · الصفحات المخفية عنه <span class="sub">تختفي من قائمته ولا تُفتح له حتى لو كان دوره يسمح بها</span></h3>
+            <div v-for="g in pageGroups" :key="g.g" class="mb"><b class="small">{{ g.g }}</b>
+              <div class="row" style="gap:4px 14px;flex-wrap:wrap"><label v-for="pg in g.items" :key="pg.to" class="chk small"><input v-model="perm.hidden_pages" type="checkbox" :value="pg.to" :disabled="pg.to === '/'" /> {{ pg.label }}</label></div>
+            </div>
+          </div>
           <div class="fr mt">
             <div class="fg"><label>تنتهي الصلاحيات في (فارغ = دائمة)</label><DateInput v-model="perm.valid_to" /></div>
             <div class="fg"><label>سبب المنح أو التعديل</label><input v-model="perm.reason" class="in" /></div>
@@ -174,6 +185,7 @@ import CredentialsModal from '../components/CredentialsModal.vue'
 import DataTable from '../components/DataTable.vue'
 import Modal from '../components/Modal.vue'
 import SearchSelect from '../components/SearchSelect.vue'
+import { NAV } from '../lib/nav'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import { fmtDT, today } from '../utils'
@@ -223,6 +235,12 @@ watch([fRole, fStatus, fCompany, allUsers], () => {
     && (!fStatus.value || (fStatus.value === 'active' ? u.active : fStatus.value === 'inactive' ? !u.active : fStatus.value === 'pending' ? u.active && !u.invite_accepted_at && u.must_change_password : fStatus.value === 'noinvite' ? u.active && !u.invited_at && !u.last_login_at : !u.last_login_at)))
 }, { deep: true })
 const staff = computed(() => allUsers.value.filter((u) => u.roles.includes('hr_staff')))
+// any user except the group CEO (who has everything) and yourself can be given delegated permissions
+const permUserOptions = computed(() => allUsers.value.filter((u) => u.active && !u.roles.includes('super') && u.id !== auth.user?.id)
+  .map((u) => ({ value: u.id, label: u.name, sub: [u.login, (u.roles || []).map((r) => meta.value.roles?.[r] || r).join('، ')].filter(Boolean).join(' · ') })))
+const permUser = computed(() => allUsers.value.find((u) => u.id === permUserId.value) || null)
+const pageGroups = NAV.map((g) => ({ g: g.g, items: g.items.filter((i) => i.to !== '/') })).filter((g) => g.items.length)
+const empName = (id) => emps.value.find((e) => e.id === id)?.name || `#${id}`
 const empOptions = computed(() => emps.value.map((e) => ({ value: e.id, label: e.name, sub: e.emp_no })))
 const userOptions = computed(() => allUsers.value.filter((u) => u.active).map((u) => ({ value: u.id, label: u.name, sub: u.login })))
 const companyName = (id) => auth.meta.companies.find((c) => c.id === +id)?.name || id
@@ -256,7 +274,9 @@ watch(permUserId, (id) => {
   const per = {}
   Object.entries(obj(p.per_company)).forEach(([cid, m]) => { per[+cid] = { ops: obj(m.ops), limits: obj(m.limits) } })
   permCompany.value = ''
-  perm.value = { companies: (p.companies || []).map(Number), ops: obj(p.ops), limits: obj(p.limits), per_company: per, valid_to: p.valid_to || '', reason: '' }
+  perm.value = { companies: (p.companies || []).map(Number), ops: obj(p.ops), limits: obj(p.limits), per_company: per, valid_to: p.valid_to || '', reason: '',
+    employees: (p.employees || []).map(Number), hidden_pages: [...(p.hidden_pages || [])] }
+  if (id && !emps.value.length) api.get('/employees/options').then((r) => { emps.value = r }).catch(() => {})
 })
 function customize() { perm.value.per_company[permCompany.value] = { ops: JSON.parse(JSON.stringify(perm.value.ops)), limits: { ...perm.value.limits } } }
 function uncustomize() { delete perm.value.per_company[permCompany.value] }
@@ -317,8 +337,9 @@ function toggleOp(op, a, on) {
 async function savePerms() {
   const p = perm.value
   const per = Object.fromEntries(Object.entries(p.per_company).filter(([cid]) => p.companies.includes(+cid)))
+  if (!p.reason?.trim()) return ui.toast('اكتب سبب المنح أو التعديل', 'warn')
   try { await api.put(`/users/${permUserId.value}/perms`, { ...p, per_company: per, valid_to: p.valid_to || null }) } catch (e) { return alertBox(e.message, { icon: 'error' }) }
-  ui.toast('حُفظت الصلاحيات وسُجّلت في التدقيق', 'ok')
+  ui.toast('حُفظت الصلاحيات وسُجّلت في التدقيق — تسري عند دخوله التالي أو تحديث صفحته', 'ok', 6000)
   load()
 }
 async function saveDeleg() {
@@ -332,7 +353,7 @@ function menu(u) {
   return [
     { label: 'عرض البيانات', icon: 'eye', action: () => (view.value = u) },
     { label: 'تعديل', icon: 'edit', action: () => editUser(u) },
-    { label: 'الصلاحيات المفوّضة', icon: 'key', hidden: !u.roles.includes('hr_staff'), action: () => { permUserId.value = u.id; tab.value = 'perms' } },
+    { label: 'الصلاحيات والصفحات', icon: 'key', hidden: u.roles.includes('super') || u.id === auth.user?.id, action: () => { permUserId.value = u.id; tab.value = 'perms' } },
     { label: 'ملف الموظف', icon: 'user-check', hidden: !u.employee, action: () => router.push(`/employees/${u.employee.id}`) },
     { divider: true },
     { label: u.invite_accepted_at ? 'إرسال رابط إعادة تعيين' : 'إرسال دعوة بالبريد', icon: 'mail-plus', disabled: !u.active, action: () => invite(u) },

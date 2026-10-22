@@ -258,16 +258,22 @@ class UserController extends Controller
     }
 
     /**
-     * Delegated permissions for HR staff: companies × ops × actions × limits × validity. per_company holds a company's
-     * own matrix when it differs from the shared one. A scoped HR manager can only grant inside his own companies.
+     * Delegated permissions for ANY user (owner's note, 22/10): companies × ops × actions × limits × validity, optionally
+     * limited to named employees, plus pages hidden from him. per_company holds a company's own matrix when it differs
+     * from the shared one. A scoped HR manager can only grant inside his own companies. Granting operations to a user
+     * without an HR role gives him the delegated-HR role (hr_staff) so the platform applies them; taking them all back
+     * removes it again.
      */
     public function updatePerms(Request $request, User $user)
     {
         $this->authorizeAdmin($request);
-        abort_unless($user->hasRole('hr_staff'), 422, 'الصلاحيات المفوّضة لحسابات موظفي الموارد البشرية فقط');
+        abort_if($user->hasRole('super'), 422, 'الرئيس التنفيذي للمجموعة يملك كل الصلاحيات');
+        abort_if($user->id === $request->user()->id, 422, 'لا يعدّل أحد صلاحياته بنفسه');
         $d = $request->validate([
             'companies' => 'array', 'companies.*' => 'integer|exists:companies,id', 'per_company' => 'nullable|array',
             'ops' => 'array', 'limits' => 'array', 'valid_to' => 'nullable|date', 'reason' => 'required|string|max:300',
+            'employees' => 'nullable|array|max:500', 'employees.*' => 'integer|exists:employees,id',
+            'hidden_pages' => 'nullable|array|max:60', 'hidden_pages.*' => ['string', 'max:60', 'regex:/^\/[a-z\-]*$/'],
         ], ['reason.required' => 'اكتب سبب التفويض (§7)']);
         $mine = Access::for($request->user())->companyIds();
         $companies = array_values(array_unique(array_map('intval', $d['companies'] ?? [])));
@@ -289,9 +295,23 @@ class UserController extends Controller
             }
         }
         // Approvals this user can no longer make fall back to the original approvers automatically.
-        $user->update(['perms' => ['companies' => array_values(array_unique([...$companies, ...$kept])), 'ops' => $this->cleanOps($d['ops'] ?? []),
+        $ops = $this->cleanOps($d['ops'] ?? []);
+        $hasOps = collect([$ops, ...array_column($per, 'ops')])->contains(fn ($m) => collect($m)->flatten()->isNotEmpty());
+        $roles = $user->roles ?? [];
+        $auto = (bool) ($before['auto_role'] ?? false);
+        if ($hasOps && ! in_array('hr_staff', $roles, true)) {
+            $roles = array_values(array_diff([...$roles, 'hr_staff'], ['emp'])) ?: ['hr_staff'];
+            $auto = true;
+        } elseif (! $hasOps && $auto && in_array('hr_staff', $roles, true)) {
+            $roles = array_values(array_diff($roles, ['hr_staff'])) ?: ['emp'];
+            $auto = false;
+        }
+        $user->update(['roles' => $roles, 'perms' => ['companies' => array_values(array_unique([...$companies, ...$kept])), 'ops' => $ops,
             'limits' => array_filter($d['limits'] ?? [], fn ($v) => $v !== null && $v !== ''), 'per_company' => $per ?: null,
+            'employees' => array_values(array_unique(array_map('intval', $d['employees'] ?? []))) ?: null,
+            'hidden_pages' => array_values(array_unique($d['hidden_pages'] ?? [])) ?: null, 'auto_role' => $auto,
             'valid_to' => $d['valid_to'] ?? null, 'granted_by' => $request->user()->id, 'granted_at' => now()->toDateString()]]);
+        Access::flushCache();
         Audit::log('users', $user->id, 'permissions', $before, $user->perms, $d['reason'] ?? null);
 
         return $user;

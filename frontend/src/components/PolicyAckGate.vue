@@ -5,6 +5,7 @@
       <div class="mh"><h3 class="row" style="gap:8px;align-items:center"><Icon name="shield" :size="18" /> نموذج إقرار الاطلاع والالتزام — الإصدار {{ st.version }}</h3></div>
       <div class="mb">
         <div class="notice info" style="line-height:1.9;font-size:15px;margin-bottom:12px">{{ st.text }}</div>
+        <button v-if="st.document" type="button" class="btn sec sm mb" @click="readDoc"><Icon name="external" :size="15" /> قراءة اللائحة كاملة قبل الإقرار</button>
         <div class="tw"><table class="kv"><tbody>
           <tr><th>الاسم</th><td>{{ st.employee?.name }}</td></tr><tr><th>الرقم الوظيفي</th><td class="num">{{ st.employee?.emp_no }}</td></tr>
           <tr><th>الشركة</th><td>{{ st.employee?.company || '—' }}</td></tr><tr><th>المسمى الوظيفي</th><td>{{ st.employee?.job || '—' }}</td></tr>
@@ -36,6 +37,7 @@ const pos = (e) => { const r = cv.value.getBoundingClientRect(); return [(e.clie
 function start(e) { if (!ctx) return; drawing.value = true; ctx.beginPath(); ctx.moveTo(...pos(e)) }
 function move(e) { if (!drawing.value) return; ctx.lineTo(...pos(e)); ctx.stroke(); dirty = true }
 function clear() { ctx?.clearRect(0, 0, cv.value.width, cv.value.height); dirty = false }
+async function readDoc() { try { window.open((await api.get('/policy-ack/document-link')).url, '_blank', 'noopener') } catch (e) { ui.toast(e.message, 'bad') } }
 async function load() { try { st.value = await api.get('/policy-ack'); name.value = st.value?.employee?.name || '' } catch { st.value = null } }
 watch(() => st.value?.required, async (r) => { if (!r) return; await nextTick(); if (cv.value) { ctx = cv.value.getContext('2d'); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2545' } })
 async function sign() {
