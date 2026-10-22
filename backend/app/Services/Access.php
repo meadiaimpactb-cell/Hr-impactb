@@ -25,6 +25,21 @@ class Access
 
     public const NON_DELEGABLE = ['SEC', 'ADM'];
 
+    /**
+     * What the permissions editor can never grant (the policy keeps it with specific roles): secrets and permissions,
+     * the audit log (oversight — HR manager and group CEO, §116), company data and classifications (group CEO), the
+     * Odoo integration (system setting); and payroll approval / publication (finance and the group CEO — segregation
+     * of duties). A delegate may still view, prepare and export payroll.
+     */
+    public const NOT_GRANTABLE = ['SEC', 'ADM', 'AUD', 'CMP', 'INT'];
+
+    public const NOT_GRANTABLE_ACTIONS = ['PAY' => ['approve', 'publish']];
+
+    public static function grantable(string $op, string $action): bool
+    {
+        return isset(self::OPS[$op]) && ! in_array($op, self::NOT_GRANTABLE, true) && ! in_array($action, self::NOT_GRANTABLE_ACTIONS[$op] ?? [], true);
+    }
+
     public function __construct(public ?User $user) {}
 
     public static function for(?User $user = null): self
@@ -207,7 +222,7 @@ class Access
         $emp = $ctx['employee'] ?? null;
         $companyId = isset($ctx['company_id']) ? (int) $ctx['company_id'] : $emp?->company_id;
 
-        if ($u->hasRole('hr_staff') && ! in_array($op, self::NON_DELEGABLE, true)) {
+        if ($u->hasRole('hr_staff') && self::grantable($op, $action)) {
             $p = $u->perms ?? [];
             $ok = in_array($action, self::staffOps($p, $companyId ?: null)[$op] ?? [], true)
                 && (empty($p['valid_to']) || $p['valid_to'] >= now()->toDateString())

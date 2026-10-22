@@ -58,7 +58,7 @@
             <span v-if="perm.per_company[c.id] && perm.companies.includes(c.id)" class="pill purple" style="font-size:10.5px">صلاحيات خاصة</span></label>
           <p class="tiny muted mt">كل شركة تأخذ الصلاحيات الأساسية، ويمكنك تخصيص صلاحيات مختلفة لأي شركة من القائمة المجاورة.</p>
         </div>
-        <div class="card" style="margin:0;grid-column:span 2"><h3>2 · العمليات والإجراءات <span class="sub">SEC و ADM غير قابلة للتفويض</span></h3>
+        <div class="card" style="margin:0;grid-column:span 2"><h3>2 · العمليات والإجراءات <span class="sub">بحسب السياسة لا تُمنح: الأسرار والصلاحيات وسجل التدقيق وبيانات الشركات والتكامل، ولا اعتماد الرواتب ونشرها (للمالية والرئيس التنفيذي للمجموعة)</span></h3>
           <div class="row mb" style="gap:8px;align-items:center;flex-wrap:wrap">
             <label class="small b">الصلاحيات في:</label>
             <select v-model="permCompany" class="in" style="width:auto">
@@ -84,7 +84,7 @@
             <tr v-for="(label, op) in delegableOps" :key="op">
               <td><b>{{ op }}</b> <span class="tiny muted">{{ label }}</span></td>
               <td class="center"><input type="checkbox" :disabled="!mat.editable" :checked="rowState(op) === 'all'" :indeterminate.prop="rowState(op) === 'some'" :title="'كل الإجراءات في ' + label" @change="setRow(op, $event.target.checked)" /></td>
-              <td v-for="(al, a) in ACTIONS" :key="a" class="center"><input type="checkbox" :disabled="!mat.editable" :checked="(mat.ops[op] || []).includes(a)" @change="toggleOp(op, a, $event.target.checked)" /></td>
+              <td v-for="(al, a) in ACTIONS" :key="a" class="center" :title="reserved(op, a) ? 'محجوز بحسب السياسة: للمالية والرئيس التنفيذي للمجموعة' : ''"><input type="checkbox" :disabled="!mat.editable || reserved(op, a)" :checked="(mat.ops[op] || []).includes(a)" @change="toggleOp(op, a, $event.target.checked)" /></td>
               <td><input v-model="mat.limits[op]" :disabled="!mat.editable" class="in" style="min-height:30px;width:80px" placeholder="—" /></td>
             </tr></tbody>
           </table></div>
@@ -346,11 +346,12 @@ const opKeys = () => Object.keys(delegableOps.value)
 const actKeys = () => Object.keys(ACTIONS)
 const has = (op, a) => (mat.value.ops[op] || []).includes(a)
 const stateOf = (cells) => (cells.every(Boolean) ? 'all' : cells.some(Boolean) ? 'some' : 'none')
-const rowState = (op) => stateOf(actKeys().map((a) => has(op, a)))
-const colState = (a) => stateOf(opKeys().map((op) => has(op, a)))
-const allState = () => stateOf(opKeys().flatMap((op) => actKeys().map((a) => has(op, a))))
-function setRow(op, on) { mat.value.ops[op] = on ? actKeys() : [] }
-function setCol(a, on) { opKeys().forEach((op) => toggleOp(op, a, on)) }
+const rowState = (op) => stateOf(actKeys().filter((a) => !reserved(op, a)).map((a) => has(op, a)))
+const colState = (a) => stateOf(opKeys().filter((op) => !reserved(op, a)).map((op) => has(op, a)))
+const allState = () => stateOf(opKeys().flatMap((op) => actKeys().filter((a) => !reserved(op, a)).map((a) => has(op, a))))
+const reserved = (op, a) => (roleInfo.value.not_grantable_actions?.[op] || []).includes(a)
+function setRow(op, on) { mat.value.ops[op] = on ? actKeys().filter((a) => !reserved(op, a)) : [] }
+function setCol(a, on) { opKeys().forEach((op) => !reserved(op, a) && toggleOp(op, a, on)) }
 function setAll(on) { opKeys().forEach((op) => setRow(op, on)) }
 const allPages = pageGroups.flatMap((g) => g.items.map((p) => p.to))
 // one click: every company, every operation with every action, every page shown — then untick the few to keep out

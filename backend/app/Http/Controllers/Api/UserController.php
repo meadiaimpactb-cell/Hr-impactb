@@ -321,8 +321,8 @@ class UserController extends Controller
     {
         $ops = [];
         foreach ($in as $op => $actions) {
-            if (isset(Access::OPS[$op]) && ! in_array($op, Access::NON_DELEGABLE, true)) {
-                $ops[$op] = array_values(array_intersect((array) $actions, Access::ACTIONS));
+            if (isset(Access::OPS[$op]) && ! in_array($op, Access::NOT_GRANTABLE, true)) { // the policy's reserved areas are never granted
+                $ops[$op] = array_values(array_filter(array_intersect((array) $actions, Access::ACTIONS), fn ($a) => Access::grantable($op, $a)));
             }
         }
 
@@ -331,7 +331,7 @@ class UserController extends Controller
 
     public function roles(Request $request)
     {
-        return ['roles' => User::ROLES, 'assignable' => $this->assignable($request->user()), 'ops' => Access::OPS, 'actions' => Access::ACTIONS, 'non_delegable' => Access::NON_DELEGABLE];
+        return ['roles' => User::ROLES, 'assignable' => $this->assignable($request->user()), 'ops' => Access::OPS, 'actions' => Access::ACTIONS, 'non_delegable' => Access::NOT_GRANTABLE, 'not_grantable_actions' => Access::NOT_GRANTABLE_ACTIONS];
     }
 
     // ---------------- delegations ----------------
