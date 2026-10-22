@@ -52,6 +52,9 @@ class RequestController extends Controller
         $approvers = ApprovalService::approvers($r);
         abort_unless($r->employee_id === $u->employee_id || in_array($u->id, $approvers, true) || Access::for()->canSeeEmployee($r->employee), 403);
         $extra = [];
+        if ($r->type === 'advance' && $r->status === 'approved' && ($adv = \App\Models\Advance::where('request_id', $r->id)->first())) {
+            $extra['advance'] = \App\Http\Controllers\Api\PayrollController::advanceView($adv, $u);
+        }
         if ($r->type === 'leave') {
             $extra['balance'] = LeaveService::balance($r->employee, $r->data['type']);
             $extra['conflicts'] = Employee::where('manager_id', $r->employee->manager_id)->where('id', '!=', $r->employee_id)
@@ -318,9 +321,14 @@ class RequestController extends Controller
     private function custodyFlow(array $data, Employee $e): array
     {
         $amount = (float) ($data['amount'] ?? 0);
+        // owner's note (22/10): asset and cash custody go through the same approvals as an advance (the request type's flow)
         $flow = ApprovalService::flowFor('custody', $data);
-        if ($amount <= 0) {
+        $cash = ($data['kind'] ?? '') === 'عهد نقدية' || $amount > 0;
+        if (! $cash) {
             return $flow;
+        }
+        if ($amount <= 0) {
+            throw ValidationException::withMessages(['amount' => 'أدخل مبلغ العهدة النقدية']);
         }
         $open = \App\Models\CustodyItem::where('employee_id', $e->id)->whereIn('status', ['in_use', 'pending_ack', 'return_requested'])
             ->whereHas('type', fn ($q) => $q->where('is_cash', true))->exists()
@@ -331,9 +339,12 @@ class RequestController extends Controller
         if (\App\Services\PolicyRules::overdueCustody($e)) {
             throw ValidationException::withMessages(['amount' => 'تأخرت في تسوية عهدة نقدية — لا تُصرف عهدة أو سلفة جديدة حتى التسوية (§44)']);
         }
-        $flow = [['role' => 'mgr', 'label' => 'المشرف المباشر'], ['role' => 'fin', 'label' => 'المدير المالي (اعتماد العهدة النقدية)']];
+        $roles = array_column($flow, 'role');
+        if (! in_array('fin', $roles, true)) { // a flow edited without finance still has finance approve cash (§44)
+            $flow[] = ['role' => 'fin', 'label' => 'المدير المالي (العهدة النقدية)'];
+        }
         $cap = (float) Settings::get('custodyCashCap', $e->company_id, 3000);
-        if ($amount > $cap) {
+        if ($amount > $cap && ! in_array('super', $roles, true)) {
             $flow[] = ['role' => 'super', 'label' => 'الرئيس التنفيذي للمجموعة (تجاوز سقف العهدة النقدية '.number_format($cap).')'];
         }
 

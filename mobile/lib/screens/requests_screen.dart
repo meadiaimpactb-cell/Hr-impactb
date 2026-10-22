@@ -138,9 +138,13 @@ class _RequestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = statusColor(r['status']);
+    final advance = r['type'] == 'advance' && r['status'] == 'approved';
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: HcCard(
+      child: GestureDetector(
+        // an approved advance opens its repayment and transfer details (owner's note)
+        onTap: advance ? () => _advanceSheet(context, r['id']) : null,
+        child: HcCard(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -166,8 +170,62 @@ class _RequestCard extends StatelessWidget {
               if (onCancel == null) Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
             ]),
           ],
+          if (advance) Padding(padding: const EdgeInsets.only(top: 8), child: Text(tr('اضغط لعرض السداد والتحويل'), style: context.t.labelSmall?.copyWith(color: HcColors.deepBlue))),
         ]),
+      ),
       ),
     );
   }
+}
+
+/// Repayment of an approved advance: method, instalments paid and left, amounts, next instalment and the transfer.
+Future<void> _advanceSheet(BuildContext context, dynamic id) async {
+  Map? a;
+  try {
+    a = ((await Api.get('/requests/$id'))['extra'] ?? {})['advance'] as Map?;
+  } catch (e) {
+    if (context.mounted) toast(context, errText(e), error: true);
+    return;
+  }
+  if (a == null || !context.mounted) return;
+  final m = a;
+  String money(dynamic v) => (num.tryParse('$v') ?? 0).toStringAsFixed(2);
+  Widget kv(String k, String v) => Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(children: [Expanded(child: Text(tr(k), style: const TextStyle(color: Colors.black54))), Text(v, style: const TextStyle(fontWeight: FontWeight.w700))]));
+  final t = m['transfer'] as Map?;
+  await showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr('السداد والتحويل'), style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            kv('المبلغ', '${money(m['amount'])} ر.س'),
+            kv('طريقة السداد', '${m['repay_method_label']}'),
+            kv('الأقساط المسددة', '${m['paid_count']} / ${m['installments']}'),
+            kv('المسدَّد', '${money(m['recovered'])} ر.س'),
+            kv('المتبقي', '${money(m['remaining'])} ر.س'),
+            if (m['next'] != null) kv('القسط القادم', '${money((m['next'] as Map)['amount'])} ر.س — ${(m['next'] as Map)['period']}'),
+            const Divider(),
+            Text(t != null ? '${tr('حُوِّلت السلفة')} ${t['on'] ?? ''}${t['ref'] != null ? ' · ${tr('مرجع')} ${t['ref']}' : ''}' : tr('بانتظار التحويل من الإدارة المالية'),
+                style: TextStyle(color: t != null ? HcColors.ok : HcColors.warn, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            for (final sch in (m['schedule'] as List? ?? []))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  Expanded(child: Text('${sch['period']}')),
+                  Text('${money(sch['amount'])} ر.س'),
+                  const SizedBox(width: 10),
+                  StatusBadge(sch['status'] == 'deducted' ? tr('سُدِّد') : tr('مستحق'), color: sch['status'] == 'deducted' ? HcColors.ok : Colors.grey),
+                ]),
+              ),
+          ]),
+        ),
+      ),
+    ),
+  );
 }

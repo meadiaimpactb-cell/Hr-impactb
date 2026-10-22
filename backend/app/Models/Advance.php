@@ -10,7 +10,7 @@ class Advance extends Model
 
     protected function casts(): array
     {
-        return ['amount' => 'float', 'monthly_amount' => 'float', 'remaining' => 'float', 'schedule' => 'array'];
+        return ['amount' => 'float', 'monthly_amount' => 'float', 'remaining' => 'float', 'schedule' => 'array', 'transferred_on' => 'date:Y-m-d'];
     }
 
     public function employee() { return $this->belongsTo(Employee::class); }

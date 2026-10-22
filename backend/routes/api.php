@@ -325,6 +325,7 @@ Route::prefix('v1')->group(function () {
         Route::get('payroll/advances/mine', [PayrollController::class, 'myAdvances']);
         Route::get('payroll/advances', [PayrollController::class, 'advances']);
         Route::get('payroll/advances/{advance}', [PayrollController::class, 'advanceShow']);
+        Route::post('payroll/advances/{advance}/transfer', [PayrollController::class, 'advanceTransfer']);
 
         // Monthly & weekly reports
         Route::get('reports/templates', [ReportController::class, 'templates']);

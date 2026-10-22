@@ -523,6 +523,42 @@ class PayrollController extends Controller
         $u = $request->user();
         abort_unless($u->employee_id === $advance->employee_id || Access::for($u)->canSeeEmployee($advance->employee), 403);
 
-        return $advance;
+        return $advance->toArray() + self::advanceView($advance, $u);
+    }
+
+    /**
+     * Owner's note (22/10): what an approved advance shows — how it is repaid, instalments paid and left, the amounts,
+     * the next instalment, the schedule, and the transfer document finance attached.
+     */
+    public static function advanceView(Advance $a, \App\Models\User $u): array
+    {
+        $done = collect($a->schedule ?? [])->where('status', 'deducted');
+        $next = collect($a->schedule ?? [])->first(fn ($s) => ($s['status'] ?? '') !== 'deducted');
+        $recovered = $a->recovered();
+
+        return ['id' => $a->id, 'amount' => $a->amount, 'installments' => (int) $a->installments, 'monthly_amount' => $a->monthly_amount,
+            'repay_method' => $a->repay_method ?? 'salary', 'repay_method_label' => ['salary' => 'خصم شهري من الراتب', 'cash' => 'سداد نقدي', 'transfer' => 'تحويل بنكي'][$a->repay_method ?? 'salary'] ?? $a->repay_method,
+            'paid_count' => $done->count(), 'left_count' => max(0, (int) $a->installments - $done->count()), 'recovered' => $recovered, 'remaining' => round((float) $a->amount - $recovered, 2),
+            'next' => $next, 'schedule' => $a->schedule ?? [], 'status' => $a->status, 'status_label' => ['repaying' => 'قيد السداد', 'settled' => 'مسددة', 'closed' => 'مغلقة'][$a->status] ?? $a->status,
+            'transfer' => $a->transfer_path ? ['path' => $a->transfer_path, 'ref' => $a->transfer_ref, 'on' => $a->transferred_on?->toDateString() ?? (string) $a->transferred_on, 'by' => $a->transferred_by ? \App\Models\User::whereKey($a->transferred_by)->value('name') : null] : null,
+            'can_transfer' => $u->hasRole('fin', 'super') && Access::for($u)->can('PAY', 'view', ['employee' => $a->employee ?? $a->employee()->first()])];
+    }
+
+    /** Finance attaches the transfer document of an approved advance (and its reference / date); the employee is told. */
+    public function advanceTransfer(Request $request, Advance $advance)
+    {
+        $u = $request->user();
+        abort_unless($u->hasRole('fin', 'super') && Access::for($u)->can('PAY', 'view', ['employee' => $advance->employee]), 403, 'إرفاق مستند التحويل للمدير المالي');
+        $d = $request->validate(['file' => 'required|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,heic', 'ref' => 'nullable|string|max:100', 'on' => 'nullable|date|before_or_equal:today'],
+            ['file.required' => 'أرفق مستند التحويل']);
+        $path = $request->file('file')->store('advances/'.now()->format('Y'), 'local');
+        $before = $advance->only('transfer_path', 'transfer_ref', 'transferred_on');
+        $advance->update(['transfer_path' => $path, 'transfer_ref' => $d['ref'] ?? null, 'transferred_on' => $d['on'] ?? now()->toDateString(), 'transferred_by' => $u->id]);
+        Audit::log('advances', $advance->id, 'transfer', $before, $advance->only('transfer_path', 'transfer_ref', 'transferred_on'));
+        Audit::notify(\App\Models\User::where('employee_id', $advance->employee_id)->value('id'), 'حُوّلت سلفتك — '.number_format((float) $advance->amount, 2).' ر.س',
+            'أرفق المدير المالي مستند التحويل'.(! empty($d['ref']) ? ' (مرجع '.$d['ref'].')' : '').'. السداد: '.$advance->installments.' قسط × '.number_format((float) $advance->monthly_amount, 2).' ر.س خصمًا من الراتب ابتداءً من '.$advance->start_period,
+            'ok', ['screen' => 'requests'], $advance->request_id);
+
+        return self::advanceView($advance->fresh(), $u);
     }
 }

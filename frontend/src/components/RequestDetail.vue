@@ -11,6 +11,7 @@
       <div class="row mb"><StatusPill :status="r.status" /><span class="small muted">{{ fmtDT(r.created_at) }}</span><span v-if="r.waiting_for?.length" class="pill warn">بانتظار: {{ r.waiting_for.join('، ') }}</span></div>
       <div v-if="r.is_mine && r.status === 'pending' && ['hr_mgr', 'hr'].includes(r.flow[r.stage]?.role) && auth.has('hr_mgr')" class="notice warn small">هذا طلبك أنت، ولا يمكن لأحد اعتماد طلبه بنفسه، لذلك أُحيل تلقائيًا إلى {{ r.waiting_for?.join('، ') || 'الرئيس التنفيذي للمجموعة' }}. طلبات الموظفين الآخرين تصل إليك أنت.</div>
       <div class="notice info">{{ r.summary }} <a v-if="r.has_attachment" href="#" class="btn ghost xs" @click.prevent="fileUrl(r.attachment_path)"><Icon name="download" :size="13" /> المرفق</a></div>
+      <AdvanceRepayment v-if="r.extra?.advance" :v="r.extra.advance" @updated="(v) => (r.extra.advance = v)" />
       <div v-if="r.type === 'trip' && r.status === 'approved'" class="card" style="margin:8px 0">
         <b class="small">تقرير الرحلة</b>
         <p v-if="r.data.report" class="small" style="white-space:pre-wrap">{{ r.data.report }}<span class="tiny muted"> ({{ fmtDT(r.data.report_at) }})</span></p>
@@ -90,6 +91,7 @@ import api, { fileUrl } from '../api'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 import { fmtDT } from '../utils'
+import AdvanceRepayment from './AdvanceRepayment.vue'
 import Kpi from './Kpi.vue'
 import Modal from './Modal.vue'
 import StatusPill from './StatusPill.vue'

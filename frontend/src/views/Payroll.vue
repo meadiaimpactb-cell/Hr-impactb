@@ -22,12 +22,13 @@
       <h3>سلَفي</h3>
       <div v-if="!myAdv.length" class="empty">لا سلف قائمة</div>
       <div v-dt v-else class="tw"><table>
-        <thead><tr><th>المبلغ</th><th>الغرض</th><th>الأقساط</th><th>المتبقي</th><th>التقدم</th><th>الحالة</th><th /></tr></thead>
+        <thead><tr><th>المبلغ</th><th>الغرض</th><th>الأقساط المسددة</th><th>المتبقي</th><th>التقدم</th><th>الحالة</th><th>التحويل</th><th /></tr></thead>
         <tbody><tr v-for="a in myAdv" :key="a.id">
           <td class="num">{{ money(a.amount) }}</td><td>{{ a.purpose || '—' }}</td><td>{{ a.paid }}/{{ a.installments }}</td>
           <td class="num">{{ money(a.remaining) }}</td>
           <td style="min-width:100px"><div class="bar g"><i :style="{ width: (a.paid / a.installments) * 100 + '%' }" /></div></td>
           <td><span class="pill" :class="a.status === 'settled' ? 'ok' : 'info'">{{ a.status === 'settled' ? 'مسددة' : 'قيد السداد' }}</span></td>
+          <td><span class="pill" :class="a.transfer_path ? 'ok' : 'warn'">{{ a.transfer_path ? 'حُوِّلت' : 'بانتظار التحويل' }}</span></td>
           <td><button class="btn ghost xs" @click="openAdv = a.id">الجدول</button></td>
         </tr></tbody>
       </table></div>
@@ -82,21 +83,22 @@
       <h3>السلف <span class="sub">{{ advances.filter((a) => a.status === 'repaying').length }} قيد السداد</span></h3>
       <div v-if="!advances.length" class="empty">لا سلف</div>
       <div v-dt v-else class="tw"><table>
-        <thead><tr><th>الموظف</th><th>المبلغ</th><th>الأقساط</th><th>المتبقي</th><th>التقدم</th><th>الحالة</th><th /></tr></thead>
+        <thead><tr><th>الموظف</th><th>المبلغ</th><th>الأقساط المسددة</th><th>المتبقي</th><th>التقدم</th><th>الحالة</th><th>التحويل</th><th /></tr></thead>
         <tbody><tr v-for="a in advances" :key="a.id">
           <td>{{ a.employee.name }}<span class="tiny muted">{{ a.employee.emp_no }}</span></td>
           <td class="num">{{ money(a.amount) }}</td><td>{{ a.paid }}/{{ a.installments }}</td>
           <td class="num">{{ money(a.remaining) }}</td>
           <td style="min-width:100px"><div class="bar g"><i :style="{ width: (a.paid / a.installments) * 100 + '%' }" /></div></td>
           <td><span class="pill" :class="a.status === 'settled' ? 'ok' : 'info'">{{ a.status === 'settled' ? 'مسددة' : 'قيد السداد' }}</span></td>
-          <td><button class="btn ghost xs" @click="openAdv = a.id">الجدول</button></td>
+          <td><span class="pill" :class="a.transfer_path ? 'ok' : 'warn'">{{ a.transfer_path ? 'حُوِّلت' : 'بانتظار التحويل' }}</span></td>
+          <td><button class="btn ghost xs" @click="openAdv = a.id">{{ !a.transfer_path && auth.has('fin', 'super') ? 'إرفاق التحويل' : 'التفاصيل' }}</button></td>
         </tr></tbody>
       </table></div>
     </div>
   </template>
 
   <PayslipModal v-if="openSlip" :id="openSlip" @close="openSlip = null" @changed="load" />
-  <AdvanceModal v-if="openAdv" :id="openAdv" @close="openAdv = null" />
+  <AdvanceModal v-if="openAdv" :id="openAdv" @close="openAdv = null" @changed="load" />
   <PayrollRunModal v-if="openRun" :run-id="openRun.id" :company="openRun.company" :period="openRun.period" @close="openRun = null" @changed="load" />
 </template>
 

@@ -214,7 +214,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> {
           _dateField('requested_last', 'التاريخ المطلوب لآخر يوم عمل'),
           TextField(controller: reason, maxLines: 3, decoration: InputDecoration(labelText: tr('السبب'))),
         ],
-        if (handler == null) ...[for (final fd in ((def?['form'] as List?) ?? [])) _custom(fd as Map)],
+        // every type without its own screen (custody, expense claim, custom types…) shows the fields defined for it
+        if (!const {'leave', 'correction', 'advance', 'letter', 'trip', 'resignation'}.contains(handler)) ...[for (final fd in ((def?['form'] as List?) ?? [])) _custom(fd as Map)],
         const SizedBox(height: 8),
         // supporting document for every request type (medical report, invoices, trip documents…)
         OutlinedButton.icon(

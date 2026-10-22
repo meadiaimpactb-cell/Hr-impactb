@@ -649,6 +649,7 @@ class ApprovalService
                     'monthly_amount' => $per, 'paid' => 0, 'remaining' => $d['amount'], 'status' => 'repaying',
                     'start_period' => $schedule[0]['period'], 'schedule' => $schedule, 'request_id' => $r->id]);
                 $e->addCareer('سلفة معتمدة', number_format($d['amount'], 2)." ر.س على {$n} أقساط");
+                Audit::notify(Access::usersWithRole('fin'), 'سلفة معتمدة — حوّلها وأرفق مستند التحويل', $e->name.' — '.number_format((float) $d['amount'], 2).' ر.س على '.$n.' أقساط', 'approval', ['screen' => 'requests'], $r->id);
                 break;
         }
     }
