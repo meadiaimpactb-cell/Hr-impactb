@@ -53,6 +53,7 @@
       <div v-if="!permUser" class="empty">اختر مستخدمًا لعرض صلاحياته وتعديلها</div>
       <div v-if="perm && permUser" class="grid g3">
         <div class="card" style="margin:0"><h3>1 · الشركات التي يشرف عليها</h3>
+          <label class="chk b" style="border-bottom:1px solid var(--line2);padding-bottom:6px;margin-bottom:6px"><input type="checkbox" :checked="perm.companies.length === meta.companies.length" :indeterminate.prop="perm.companies.length > 0 && perm.companies.length < meta.companies.length" @change="perm.companies = $event.target.checked ? meta.companies.map((c) => c.id) : []" /> كل الشركات</label>
           <label v-for="c in meta.companies" :key="c.id" class="chk"><input v-model="perm.companies" type="checkbox" :value="c.id" /> {{ c.name }}
             <span v-if="perm.per_company[c.id] && perm.companies.includes(c.id)" class="pill purple" style="font-size:10.5px">صلاحيات خاصة</span></label>
           <p class="tiny muted mt">كل شركة تأخذ الصلاحيات الأساسية، ويمكنك تخصيص صلاحيات مختلفة لأي شركة من القائمة المجاورة.</p>
@@ -67,11 +68,22 @@
             <button v-if="permCompany && !perm.per_company[permCompany]" class="btn sec xs" @click="customize"><Icon name="edit" :size="14" /> تخصيص صلاحيات هذه الشركة</button>
             <button v-if="permCompany && perm.per_company[permCompany]" class="btn ghost xs" @click="uncustomize"><Icon name="repeat" :size="14" /> إلغاء التخصيص والعودة للأساس</button>
           </div>
+          <div class="row mb" style="gap:6px;flex-wrap:wrap">
+            <button class="btn pri xs" :disabled="!mat.editable" @click="setAll(true)"><Icon name="check-circle" :size="13" /> منح كل الصلاحيات</button>
+            <button class="btn sec xs" :disabled="!mat.editable" @click="setAll(false); setCol('view', true)">عرض فقط في الكل</button>
+            <button class="btn ghost xs bad" :disabled="!mat.editable" @click="setAll(false)">مسح الكل</button>
+            <span class="tiny muted">امنح الكل بضغطة، ثم أزل ما لا تريده بإلغاء علامته.</span>
+          </div>
           <div v-if="permCompany && !perm.per_company[permCompany]" class="notice info small">هذه الشركة تتبع الصلاحيات الأساسية. اضغط «تخصيص» لتفعيل أو إيقاف صلاحيات معينة له داخل هذه الشركة فقط.</div>
           <div v-dt class="tw"><table>
-            <thead><tr><th>العملية</th><th v-for="(al, a) in ACTIONS" :key="a" class="center">{{ al }}</th><th>حد الاعتماد</th></tr></thead>
-            <tbody><tr v-for="(label, op) in delegableOps" :key="op">
+            <thead><tr><th>العملية</th><th class="center">الكل</th><th v-for="(al, a) in ACTIONS" :key="a" class="center">{{ al }}</th><th>حد الاعتماد</th></tr></thead>
+            <tbody>
+            <tr style="background:var(--soft)"><td><b>كل العمليات</b><span class="tiny muted"> صفّ واحد يمنح أو يسحب العمود كله</span></td>
+              <td class="center"><input type="checkbox" :disabled="!mat.editable" :checked="allState() === 'all'" :indeterminate.prop="allState() === 'some'" title="كل الصلاحيات في كل العمليات" @change="setAll($event.target.checked)" /></td>
+              <td v-for="(al, a) in ACTIONS" :key="a" class="center"><input type="checkbox" :disabled="!mat.editable" :checked="colState(a) === 'all'" :indeterminate.prop="colState(a) === 'some'" :title="'«' + al + '» في كل العمليات'" @change="setCol(a, $event.target.checked)" /></td><td /></tr>
+            <tr v-for="(label, op) in delegableOps" :key="op">
               <td><b>{{ op }}</b> <span class="tiny muted">{{ label }}</span></td>
+              <td class="center"><input type="checkbox" :disabled="!mat.editable" :checked="rowState(op) === 'all'" :indeterminate.prop="rowState(op) === 'some'" :title="'كل الإجراءات في ' + label" @change="setRow(op, $event.target.checked)" /></td>
               <td v-for="(al, a) in ACTIONS" :key="a" class="center"><input type="checkbox" :disabled="!mat.editable" :checked="(mat.ops[op] || []).includes(a)" @change="toggleOp(op, a, $event.target.checked)" /></td>
               <td><input v-model="mat.limits[op]" :disabled="!mat.editable" class="in" style="min-height:30px;width:80px" placeholder="—" /></td>
             </tr></tbody>
@@ -80,8 +92,9 @@
             <div style="max-width:420px"><SearchSelect :model-value="null" :options="empOptions.filter((o) => !perm.employees.includes(o.value))" placeholder="أضف موظفًا تقتصر عليه الصلاحيات…" @update:model-value="(v) => v && perm.employees.push(v)" /></div>
             <div v-if="perm.employees.length" class="row mt" style="gap:6px;flex-wrap:wrap"><span v-for="id in perm.employees" :key="id" class="pill info">{{ empName(id) }} <a style="cursor:pointer" @click="perm.employees = perm.employees.filter((x) => x !== id)">×</a></span></div>
           </div>
-          <div class="card mt" style="margin-bottom:0"><h3>4 · الصفحات المخفية عنه <span class="sub">تختفي من قائمته ولا تُفتح له حتى لو كان دوره يسمح بها</span></h3>
-            <div v-for="g in pageGroups" :key="g.g" class="mb"><b class="small">{{ g.g }}</b>
+          <div class="card mt" style="margin-bottom:0"><h3>4 · الصفحات المخفية عنه <span class="sub">تختفي من قائمته ولا تُفتح له حتى لو كان دوره يسمح بها</span>
+            <span class="acts"><button class="btn ghost xs" @click="perm.hidden_pages = []">إظهار كل الصفحات</button></span></h3>
+            <div v-for="g in pageGroups" :key="g.g" class="mb"><label class="chk small b"><input type="checkbox" :checked="g.items.every((i) => perm.hidden_pages.includes(i.to))" :indeterminate.prop="g.items.some((i) => perm.hidden_pages.includes(i.to)) && !g.items.every((i) => perm.hidden_pages.includes(i.to))" @change="hideGroup(g, $event.target.checked)" /> {{ g.g }} — إخفاء القسم كله</label>
               <div class="row" style="gap:4px 14px;flex-wrap:wrap"><label v-for="pg in g.items" :key="pg.to" class="chk small"><input v-model="perm.hidden_pages" type="checkbox" :value="pg.to" :disabled="pg.to === '/'" /> {{ pg.label }}</label></div>
             </div>
           </div>
@@ -328,6 +341,18 @@ async function resetPass(u) {
   creds.value = { login: r.login || u.login, password: r.temp_password, inviteUrl: r.invite_url || '', email: r.email || '', emailed: !!r.emailed }
   load()
 }
+// bulk ticks (owner's note): everything at once, a whole operation, a whole action column — then untick the few to keep out
+const opKeys = () => Object.keys(delegableOps.value)
+const actKeys = () => Object.keys(ACTIONS)
+const has = (op, a) => (mat.value.ops[op] || []).includes(a)
+const stateOf = (cells) => (cells.every(Boolean) ? 'all' : cells.some(Boolean) ? 'some' : 'none')
+const rowState = (op) => stateOf(actKeys().map((a) => has(op, a)))
+const colState = (a) => stateOf(opKeys().map((op) => has(op, a)))
+const allState = () => stateOf(opKeys().flatMap((op) => actKeys().map((a) => has(op, a))))
+function setRow(op, on) { mat.value.ops[op] = on ? actKeys() : [] }
+function setCol(a, on) { opKeys().forEach((op) => toggleOp(op, a, on)) }
+function setAll(on) { opKeys().forEach((op) => setRow(op, on)) }
+function hideGroup(g, on) { const set = new Set(perm.value.hidden_pages); g.items.forEach((i) => (on ? set.add(i.to) : set.delete(i.to))); perm.value.hidden_pages = [...set] }
 function toggleOp(op, a, on) {
   const m = mat.value
   const cur = new Set(m.ops[op] || [])
